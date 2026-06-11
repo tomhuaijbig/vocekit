@@ -1,0 +1,15 @@
+* text=auto
+
+*.cpp text eol=lf
+*.h text eol=lf
+*.pro text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.wav binary

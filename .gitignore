@@ -1,0 +1,43 @@
+# Qt build output
+debug/
+release/
+dist/
+build-*/
+*.zip
+*.7z
+*.rar
+*.o
+*.obj
+*.exe
+*.dll
+.qmake.stash
+Makefile
+Makefile.Debug
+Makefile.Release
+*.pro.user
+*.pro.user.*
+
+# Local secrets
+1.txt
+config/secrets.json
+config/settings.json
+.env
+.env.*
+
+# Runtime records
+records/
+
+# Local agent/runtime notes
+.learnings/
+
+# Local screenshots may contain desktop/browser privacy
+docs/screenshots/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.autosave
+*.tmp
+*.log
+Thumbs.db
+desktop.ini

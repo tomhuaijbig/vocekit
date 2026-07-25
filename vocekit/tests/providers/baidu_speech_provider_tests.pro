@@ -1,0 +1,37 @@
+QT += core network testlib
+CONFIG += console testcase c++11
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = baidu_speech_provider_tests
+
+INCLUDEPATH += ../..
+
+SOURCES += \
+    baidu_speech_provider_tests.cpp \
+    ../../src/config/app_settings_defaults.cpp \
+    ../../src/config/secret_config.cpp \
+    ../../src/config/secret_store.cpp \
+    ../../src/file_utils.cpp \
+    ../../src/providers/baidu_speech_provider.cpp \
+    ../../src/providers/network_request_executor.cpp \
+    ../../src/providers/provider_network_transport.cpp \
+    ../../src/result_flow_config.cpp \
+    ../../src/runtime_log.cpp \
+    ../../src/tasks/cancellation_token.cpp
+
+HEADERS += \
+    ../../src/config/app_settings_defaults.h \
+    ../../src/config/secret_config.h \
+    ../../src/config/secret_store.h \
+    ../../src/domain/app_legacy_types.h \
+    ../../src/domain/execution_types.h \
+    ../../src/domain/operation_error.h \
+    ../../src/file_utils.h \
+    ../../src/providers/baidu_speech_provider.h \
+    ../../src/providers/network_request_executor.h \
+    ../../src/providers/provider_network_transport.h \
+    ../../src/providers/provider_types.h \
+    ../../src/providers/speech_provider.h \
+    ../../src/result_flow_config.h \
+    ../../src/runtime_log.h \
+    ../../src/tasks/cancellation_token.h

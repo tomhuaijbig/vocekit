@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{EA604553-D28B-4DF7-8CB6-B1298DB88C7D}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectName>vocekit-rapidocr</ProjectName>
+    <RootNamespace>vocekit_rapidocr</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+            Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')"
+            Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(ProjectDir)..\bin\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Configuration)\</IntDir>
+    <TargetName>vocekit-rapidocr</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\Project_RapidOcrOnnx-1.2.2\include;$(ProjectDir)..\..\Project_RapidOcrOnnx-1.2.2\onnxruntime-static\windows-x64\include;$(ProjectDir)..\..\Project_RapidOcrOnnx-1.2.2\opencv-static\windows-x64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\..\Project_RapidOcrOnnx-1.2.2\onnxruntime-static\windows-x64\lib;$(ProjectDir)..\..\Project_RapidOcrOnnx-1.2.2\opencv-static\windows-x64\x64\vc16\staticlib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>onnxruntime_session.lib;onnxruntime_optimizer.lib;onnxruntime_providers.lib;onnxruntime_framework.lib;onnxruntime_graph.lib;onnxruntime_util.lib;onnxruntime_mlas.lib;onnxruntime_common.lib;onnxruntime_flatbuffers.lib;onnx.lib;onnx_proto.lib;libprotobuf-lite.lib;re2.lib;flatbuffers.lib;absl_base.lib;absl_throw_delegate.lib;absl_raw_hash_set.lib;absl_hash.lib;absl_city.lib;absl_low_level_hash.lib;absl_raw_logging_internal.lib;cpuinfo.lib;clog.lib;absl_cord.lib;absl_cordz_info.lib;absl_cord_internal.lib;absl_cordz_functions.lib;absl_cordz_handle.lib;absl_hashtablez_sampler.lib;absl_exponential_biased.lib;absl_synchronization.lib;absl_graphcycles_internal.lib;absl_stacktrace.lib;absl_symbolize.lib;absl_malloc_internal.lib;absl_debugging_internal.lib;absl_demangle_internal.lib;absl_time.lib;absl_civil_time.lib;absl_time_zone.lib;absl_bad_optional_access.lib;absl_strings.lib;absl_strings_internal.lib;absl_bad_variant_access.lib;absl_spinlock_wait.lib;absl_int128.lib;absl_log_severity.lib;opencv_imgcodecs460.lib;opencv_imgproc460.lib;opencv_core460.lib;libjpeg-turbo.lib;libwebp.lib;libpng.lib;libtiff.lib;libopenjp2.lib;IlmImf.lib;zlib.lib;windowsapp.lib;user32.lib;gdi32.lib;comctl32.lib;ole32.lib;setupapi.lib;ws2_32.lib;advapi32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <IgnoreSpecificDefaultLibraries>atlthunk.lib;libcmtd.lib;libcpmtd.lib;msvcrtd.lib;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\..\Project_RapidOcrOnnx-1.2.2\src\AngleNet.cpp" />
+    <ClCompile Include="..\..\Project_RapidOcrOnnx-1.2.2\src\clipper.cpp" />
+    <ClCompile Include="..\..\Project_RapidOcrOnnx-1.2.2\src\CrnnNet.cpp" />
+    <ClCompile Include="..\..\Project_RapidOcrOnnx-1.2.2\src\DbNet.cpp" />
+    <ClCompile Include="..\..\Project_RapidOcrOnnx-1.2.2\src\OcrLite.cpp" />
+    <ClCompile Include="..\..\Project_RapidOcrOnnx-1.2.2\src\OcrUtils.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

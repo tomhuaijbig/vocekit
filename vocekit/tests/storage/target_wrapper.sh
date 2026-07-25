@@ -1,0 +1,6 @@
+#!/bin/sh
+PATH=/D/QQQQQT0001/5.9/mingw53_32/bin:$PATH
+export PATH
+QT_PLUGIN_PATH=/D/QQQQQT0001/5.9/mingw53_32/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}
+export QT_PLUGIN_PATH
+exec "$@"

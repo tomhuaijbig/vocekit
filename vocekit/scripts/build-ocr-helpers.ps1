@@ -1,0 +1,71 @@
+param(
+    [ValidateSet("Release")]
+    [string]$Configuration = "Release"
+)
+
+$ErrorActionPreference = "Stop"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+
+if (-not (Test-Path -LiteralPath $msbuild)) {
+    throw "Visual Studio 2022 MSBuild was not found."
+}
+
+$windowsProject = Join-Path $projectRoot "helpers\windows_ocr\windows_ocr.vcxproj"
+& $msbuild $windowsProject /m /p:Configuration=$Configuration /p:Platform=x64
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows OCR helper build failed with exit code $LASTEXITCODE."
+}
+
+$windowsHelper = Join-Path $projectRoot "helpers\bin\vocekit-windows-ocr.exe"
+if (-not (Test-Path -LiteralPath $windowsHelper)) {
+    throw "Windows OCR helper was not generated: $windowsHelper"
+}
+
+$rapidProjectRoot = Join-Path $projectRoot "Project_RapidOcrOnnx-1.2.2"
+$rapidProject = Join-Path $projectRoot "helpers\rapidocr\rapidocr_helper.vcxproj"
+$rapidModelsSource = Join-Path $rapidProjectRoot "models"
+$rapidLicenseSource = Join-Path $rapidProjectRoot "LICENSE"
+$rapidHelper = Join-Path $projectRoot "helpers\bin\vocekit-rapidocr.exe"
+$rapidModelsTarget = Join-Path $projectRoot "helpers\bin\models"
+$rapidLicenseTarget = Join-Path $projectRoot "helpers\bin\LICENSE-RapidOcrOnnx.txt"
+
+if (-not (Test-Path -LiteralPath $rapidProjectRoot)) {
+    throw "RapidOcrOnnx project was not found: $rapidProjectRoot"
+}
+
+& $msbuild $rapidProject /m /p:Configuration=$Configuration /p:Platform=x64
+if ($LASTEXITCODE -ne 0) {
+    throw "RapidOCR helper build failed with exit code $LASTEXITCODE."
+}
+if (-not (Test-Path -LiteralPath $rapidHelper)) {
+    throw "RapidOCR helper was not generated: $rapidHelper"
+}
+
+$requiredModels = @{
+    "ch_PP-OCRv3_det_infer.onnx" = "3439588C030FAEA393A54515F51E983D8E155B19A2E8ABA7891934C1CF0DE526"
+    "ch_PP-OCRv3_rec_infer.onnx" = "897A3EDEDB38FEE0DAE2C1CCEE38241F37DF202C9509E3ABCA02E9217C5EE615"
+    "ch_ppocr_mobile_v2.0_cls_infer.onnx" = "E47ACEDF663230F8863FF1AB0E64DD2D82B838FCEB5957146DAB185A89D6215C"
+    "ppocr_keys_v1.txt" = "28B2362AD4AB2DC38769AA72FEB535E3A9DDB3FD2A7585A05920E6393B1DC7F7"
+}
+New-Item -ItemType Directory -Path $rapidModelsTarget -Force | Out-Null
+foreach ($modelName in $requiredModels.Keys) {
+    $source = Join-Path $rapidModelsSource $modelName
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "RapidOCR model was not found: $source"
+    }
+    $actualHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+    if ($actualHash -ne $requiredModels[$modelName]) {
+        throw "RapidOCR model checksum mismatch: $modelName"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $rapidModelsTarget $modelName) -Force
+}
+
+if (-not (Test-Path -LiteralPath $rapidLicenseSource)) {
+    throw "RapidOcrOnnx license was not found: $rapidLicenseSource"
+}
+Copy-Item -LiteralPath $rapidLicenseSource -Destination $rapidLicenseTarget -Force
+
+Write-Host "Windows OCR helper: $windowsHelper"
+Write-Host "RapidOCR helper: $rapidHelper"
+Write-Host "RapidOCR models: $rapidModelsTarget"

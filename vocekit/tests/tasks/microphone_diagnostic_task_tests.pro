@@ -1,0 +1,18 @@
+QT += core network testlib
+CONFIG += console testcase c++11
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = microphone_diagnostic_task_tests
+
+INCLUDEPATH += ../..
+
+SOURCES += \
+    microphone_diagnostic_task_tests.cpp \
+    ../../src/tasks/cancellation_token.cpp \
+    ../../src/tasks/diagnostic_helpers.cpp \
+    ../../src/tasks/microphone_diagnostic_task.cpp
+
+HEADERS += \
+    ../../src/tasks/cancellation_token.h \
+    ../../src/tasks/diagnostic_helpers.h \
+    ../../src/tasks/microphone_diagnostic_task.h

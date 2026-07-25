@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "records": [
+        {
+            "id": "record-20260623-001",
+            "modeId": "dictate",
+            "mode": "听写",
+            "time": "2026-06-23 10:20:30",
+            "input": "语音识别原文",
+            "output": "整理后的文字",
+            "error": "",
+            "model": "deepseek-v4-flash",
+            "audio": "历史记录/听写/2026-06-23/录音记录/sample.wav",
+            "favorite": true,
+            "favoriteFolders": [
+                "工作"
+            ],
+            "draft": false,
+            "detailFile": "历史记录/听写/2026-06-23/详细记录/record-20260623-001.json"
+        }
+    ]
+}

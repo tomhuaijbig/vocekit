@@ -1,0 +1,181 @@
+{
+    "trayResident": true,
+    "autoStartEnabled": false,
+    "strongSelectionEnabled": true,
+    "floatingBarEnabled": true,
+    "useSystemProxy": false,
+    "speechProvider": "xfyun",
+    "ocrEngine": "automatic",
+    "historyInitialLoadCount": 12,
+    "historyLoadMoreCount": 25,
+    "hotkeys": {
+        "dictate": "Alt+X",
+        "translate": "Alt+C",
+        "ask": "Alt+V",
+        "hub": "Ctrl+Alt+S",
+        "vocabulary_add": "Ctrl+Alt+L"
+    },
+    "functionOrder": [
+        "dictate",
+        "translate",
+        "ask",
+        "custom_1"
+    ],
+    "models": {
+        "dictate": "deepseek-v4-flash",
+        "translate": "deepseek-v4-flash",
+        "ask": "deepseek-v4-pro"
+    },
+    "promptIds": {
+        "dictate": "dictate",
+        "translate": "translate",
+        "ask": "ask"
+    },
+    "inputModes": {
+        "dictate": {
+            "useSelection": false,
+            "useVoice": true,
+            "useScreenshot": false,
+            "screenshotTriggerMode": "separate",
+            "screenshotShortcut": "Ctrl+Alt+Shift+X"
+        },
+        "translate": {
+            "useSelection": true,
+            "useVoice": false,
+            "useScreenshot": true,
+            "screenshotTriggerMode": "separate",
+            "screenshotShortcut": "Ctrl+Alt+Shift+C"
+        },
+        "ask": {
+            "useSelection": true,
+            "useVoice": true,
+            "useScreenshot": false,
+            "screenshotTriggerMode": "separate",
+            "screenshotShortcut": "Ctrl+Alt+Shift+V"
+        }
+    },
+    "recordingModes": {
+        "dictate": {
+            "recordingTriggerMode": "toggle",
+            "longRecordingEnabled": true,
+            "segmentSeconds": 55,
+            "maxRecordingMinutes": 30
+        },
+        "translate": {
+            "recordingTriggerMode": "toggle",
+            "longRecordingEnabled": false,
+            "segmentSeconds": 55,
+            "maxRecordingMinutes": 30
+        },
+        "ask": {
+            "recordingTriggerMode": "hold",
+            "longRecordingEnabled": false,
+            "segmentSeconds": 55,
+            "maxRecordingMinutes": 30
+        }
+    },
+    "displayTimes": {
+        "dictate": {
+            "floatingBarSeconds": 6,
+            "resultPopupSeconds": 0,
+            "countdownSeconds": 3,
+            "recordingBeepEnabled": true,
+            "recordingBeepPath": ""
+        },
+        "translate": {
+            "floatingBarSeconds": 2,
+            "resultPopupSeconds": 0,
+            "countdownSeconds": 0,
+            "recordingBeepEnabled": false,
+            "recordingBeepPath": ""
+        },
+        "ask": {
+            "floatingBarSeconds": 2,
+            "resultPopupSeconds": 0,
+            "countdownSeconds": 3,
+            "recordingBeepEnabled": true,
+            "recordingBeepPath": ""
+        }
+    },
+    "outputModes": {
+        "dictate": "autoWrite",
+        "translate": "resultPopup",
+        "ask": "resultPopup"
+    },
+    "resultTemplates": {
+        "dictate": "simple",
+        "translate": "compare",
+        "ask": "detail"
+    },
+    "resultActions": {
+        "dictate": [
+            "copy",
+            "write",
+            "replace"
+        ],
+        "translate": [
+            "regenerate",
+            "retryModel",
+            "copy",
+            "write"
+        ],
+        "ask": [
+            "followUp",
+            "expand",
+            "copy"
+        ]
+    },
+    "networkPolicies": {
+        "dictate": {
+            "speech": "direct",
+            "ocr": "inherit",
+            "model": "inherit"
+        },
+        "translate": {
+            "speech": "inherit",
+            "ocr": "direct",
+            "model": "systemProxy"
+        },
+        "ask": {
+            "speech": "inherit",
+            "ocr": "inherit",
+            "model": "systemProxy"
+        }
+    },
+    "customFunctions": [
+        {
+            "id": "custom_1",
+            "name": "自定义功能 1",
+            "shortcut": "Ctrl+Alt+1",
+            "model": "deepseek-v4-flash",
+            "promptId": "custom_1",
+            "prompt": "请根据输入内容完成任务。",
+            "useSelection": true,
+            "useVoice": true,
+            "useScreenshot": true,
+            "screenshotTriggerMode": "separate",
+            "screenshotShortcut": "Ctrl+Alt+Shift+1",
+            "recordingTriggerMode": "toggle",
+            "longRecordingEnabled": false,
+            "segmentSeconds": 55,
+            "maxRecordingMinutes": 30,
+            "outputMode": "resultPopup",
+            "resultTemplate": "simple",
+            "floatingBarSeconds": 2,
+            "resultPopupSeconds": 0,
+            "countdownSeconds": 3,
+            "recordingBeepEnabled": true,
+            "recordingBeepPath": "",
+            "resultActions": [
+                "regenerate",
+                "copy",
+                "write"
+            ],
+            "networkPolicy": {
+                "speech": "inherit",
+                "ocr": "inherit",
+                "model": "inherit"
+            }
+        }
+    ]
+}

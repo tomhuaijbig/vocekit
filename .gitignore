@@ -10,28 +10,42 @@ build-*/
 *.obj
 *.exe
 *.dll
+*.pdb
+*.iobj
+*.ipdb
+*.recipe
+*.tlog
 .qmake.stash
 Makefile
 Makefile.Debug
 Makefile.Release
+Makefile.*
+object_script.*
 *.pro.user
 *.pro.user.*
 
 # Local secrets
 1.txt
-config/secrets.json
-config/settings.json
+**/config/secrets.json
+**/config/settings.json
+**/config/prompts.json
+**/config/lexicon/entries.json
+**/config/runtime/
 .env
 .env.*
 
 # Runtime records
 records/
+logs/
 
 # Local agent/runtime notes
 .learnings/
+outputs/
+.superpowers/
+**/.superpowers/
 
 # Local screenshots may contain desktop/browser privacy
-docs/screenshots/
+**/docs/screenshots/
 
 # Editor and OS files
 .vscode/
@@ -41,3 +55,10 @@ docs/screenshots/
 *.log
 Thumbs.db
 desktop.ini
+
+# OCR helper build intermediates
+**/helpers/**/obj/
+**/helpers/bin/
+
+# Downloaded third-party OCR SDK (about 810 MB)
+vocekit/Project_RapidOcrOnnx-1.2.2/

@@ -43,6 +43,7 @@ logs/
 outputs/
 .superpowers/
 **/.superpowers/
+.worktrees/
 
 # Local screenshots may contain desktop/browser privacy
 **/docs/screenshots/

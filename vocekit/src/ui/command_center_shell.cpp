@@ -98,6 +98,7 @@ QWidget *CommandCenterShell::sidebar()
     layout->addWidget(homeButton);
 
     auto *functionScroll = new QScrollArea;
+    functionScroll->setObjectName(QStringLiteral("commandFunctionScroll"));
     functionScroll->setWidgetResizable(true);
     functionScroll->setFrameShape(QFrame::NoFrame);
     functionScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -111,17 +112,6 @@ QWidget *CommandCenterShell::sidebar()
     m_functionLayout->setAlignment(Qt::AlignTop);
     functionScroll->setWidget(functionHolder);
     layout->addWidget(functionScroll, 1);
-
-    auto *add = new QPushButton(uiText("新增功能"));
-    add->setFixedHeight(44);
-    add->setCursor(Qt::PointingHandCursor);
-    add->setStyleSheet(commandCenterFunctionButtonStyle(false, true));
-    connect(add, &QPushButton::clicked, this, [this]() {
-        if (m_access.addFunction) {
-            m_access.addFunction();
-        }
-    });
-    layout->addWidget(add);
     return panel;
 }
 
@@ -198,6 +188,21 @@ QPushButton *CommandCenterShell::functionButton(const CommandCenterFunctionItem 
     return button;
 }
 
+QPushButton *CommandCenterShell::addFunctionButton()
+{
+    auto *button = new QPushButton(uiText("新增功能"));
+    button->setObjectName(QStringLiteral("commandAddFunctionButton"));
+    button->setFixedHeight(44);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setStyleSheet(commandCenterFunctionButtonStyle(false, true));
+    connect(button, &QPushButton::clicked, this, [this]() {
+        if (m_access.addFunction) {
+            m_access.addFunction();
+        }
+    });
+    return button;
+}
+
 QPushButton *CommandCenterShell::toolButton(const QString &id, const QString &title)
 {
     auto *button = new QPushButton(title);
@@ -248,6 +253,7 @@ void CommandCenterShell::refreshFunctions()
     for (const CommandCenterFunctionItem &item : functions) {
         m_functionLayout->addWidget(functionButton(item));
     }
+    m_functionLayout->addWidget(addFunctionButton());
     m_functionLayout->addStretch();
     refreshButtonStyles();
 }

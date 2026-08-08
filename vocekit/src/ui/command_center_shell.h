@@ -47,6 +47,7 @@ private:
     QWidget *sidebar();
     QWidget *toolbar();
     QPushButton *functionButton(const CommandCenterFunctionItem &item);
+    QPushButton *addFunctionButton();
     QPushButton *toolButton(const QString &id, const QString &title);
     void clearFunctionLayout();
     void refreshButtonStyles();

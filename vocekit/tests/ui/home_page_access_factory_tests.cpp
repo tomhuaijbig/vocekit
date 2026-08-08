@@ -81,19 +81,14 @@ void HomePageAccessFactoryTests::buildsTypedHomePageAccess()
 
 void HomePageAccessFactoryTests::forwardsPageActions()
 {
-    bool edited = false;
+    bool opened = false;
     bool settingsChanged = false;
     bool warned = false;
     bool listRequested = false;
 
     HomePageAccessDependencies dependencies;
-    dependencies.editFunction = [&edited](
-        const QString &,
-        const QString &,
-        bool,
-        const CustomFunctionDef &
-    ) {
-        edited = true;
+    dependencies.openFunction = [&opened](const QString &) {
+        opened = true;
     };
     dependencies.settingsChanged = [&settingsChanged]() {
         settingsChanged = true;
@@ -111,12 +106,12 @@ void HomePageAccessFactoryTests::forwardsPageActions()
     };
 
     const HomePageAccess access = createHomePageAccess(dependencies);
-    access.editFunction(QString(), QString(), false, CustomFunctionDef());
+    access.openFunction(QStringLiteral("dictate"));
     access.settingsChanged();
     access.showWarning(QString(), QString());
     access.recentListFactory(QString(), QVector<HistoryEntry>(), 0);
 
-    QVERIFY(edited);
+    QVERIFY(opened);
     QVERIFY(settingsChanged);
     QVERIFY(warned);
     QVERIFY(listRequested);

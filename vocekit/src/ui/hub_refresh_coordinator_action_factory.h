@@ -10,6 +10,7 @@
 struct HubRefreshDataAccess
 {
     std::function<void()> reloadSettings;
+    std::function<void(const QStringList &)> reloadFunctionFlows;
     std::function<AppSettingsData()> settingsSnapshot;
     std::function<bool()> historyCacheValid;
     std::function<void(bool)> refreshHistory;
@@ -26,6 +27,9 @@ struct HubRefreshUiActions
     std::function<void()> refreshFunctions;
     std::function<void()> refreshNavigation;
     std::function<void()> refreshActiveFunction;
+    std::function<void()> refreshActiveCanvas;
+    std::function<void(const QStringList &)> refreshRuntime;
+    std::function<void(const QStringList &)> refreshHotkeys;
     std::function<void()> refreshOcr;
     std::function<void()> refreshRecentHistory;
     std::function<void()> refreshVocabulary;

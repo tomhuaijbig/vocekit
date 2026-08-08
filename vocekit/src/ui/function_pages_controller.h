@@ -2,6 +2,7 @@
 #define VOCEKIT_FUNCTION_PAGES_CONTROLLER_H
 
 #include "function_pages_access_factory.h"
+#include "../domain/function_flow_runtime_types.h"
 
 #include <QPointer>
 #include <QString>
@@ -37,7 +38,14 @@ public:
     QString currentFunctionId() const;
 
     void refreshCommandPage();
+    void refreshCanvasState();
     void refreshManagementPage();
+    bool applyFunctionFlowRuntimeEvent(
+        const FunctionFlowNodeExecutionEvent &event
+    );
+    bool applyFunctionFlowRunEvent(
+        const FunctionFlowRunExecutionEvent &event
+    );
 
 private:
     const FunctionPagesAccessAssembly &pageAccess();

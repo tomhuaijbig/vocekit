@@ -38,6 +38,7 @@ class HubPageCompositionTests : public QObject
 private slots:
     void exposesIndependentCompositionInterface();
     void registersAllCommandCenterPages();
+    void defersNonHomePagesUntilFirstSelection();
     void forwardsActivationState();
     void skipsMissingPageFactories();
     void hubWindowDoesNotRegisterPagesDirectly();
@@ -74,6 +75,43 @@ void HubPageCompositionTests::registersAllCommandCenterPages()
         QVERIFY2(router->selectPage(pageId), qPrintable(pageId));
         QCOMPARE(router->currentPageId(), pageId);
     }
+}
+
+void HubPageCompositionTests::defersNonHomePagesUntilFirstSelection()
+{
+    int homeCreations = 0;
+    int historyCreations = 0;
+    int settingsCreations = 0;
+    HubPageCompositionAccess access = completeAccess();
+    access.homePage = [&homeCreations]() {
+        ++homeCreations;
+        return new QWidget;
+    };
+    access.historyPage = [&historyCreations]() {
+        ++historyCreations;
+        return new QWidget;
+    };
+    access.settingsPage = [&settingsCreations]() {
+        ++settingsCreations;
+        return new QWidget;
+    };
+
+    QScopedPointer<HubPageRouter> router(
+        HubPageComposition::create(access)
+    );
+    QCOMPARE(homeCreations, 1);
+    QCOMPARE(historyCreations, 0);
+    QCOMPARE(settingsCreations, 0);
+
+    QVERIFY(router->selectPage(QStringLiteral("history")));
+    QCOMPARE(historyCreations, 1);
+    QCOMPARE(settingsCreations, 0);
+
+    QVERIFY(router->selectPage(QStringLiteral("history")));
+    QCOMPARE(historyCreations, 1);
+
+    QVERIFY(router->selectPage(QStringLiteral("settings")));
+    QCOMPARE(settingsCreations, 1);
 }
 
 void HubPageCompositionTests::forwardsActivationState()

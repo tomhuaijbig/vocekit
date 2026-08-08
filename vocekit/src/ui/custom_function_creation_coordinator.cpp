@@ -8,13 +8,6 @@
 
 namespace {
 
-void runIfPresent(const std::function<void()> &action)
-{
-    if (action) {
-        action();
-    }
-}
-
 CustomFunctionDef defaultCustomFunction(HubSettingsState *settings)
 {
     CustomFunctionDef function;
@@ -44,22 +37,32 @@ CustomFunctionDef defaultCustomFunction(HubSettingsState *settings)
 
 } // namespace
 
-bool createAndEditCustomFunction(const CustomFunctionCreationActions &actions)
+QString createCustomFunction(
+    const CustomFunctionCreationActions &actions,
+    OperationError *error)
 {
-    if (!actions.settings) {
-        return false;
+    if (error) {
+        *error = OperationError();
+    }
+    if (!actions.settings || !actions.flows.addCustomFunction) {
+        if (error) {
+            error->code =
+                QStringLiteral("flow_add_function_unavailable");
+        }
+        return QString();
     }
 
     const CustomFunctionDef function = defaultCustomFunction(actions.settings);
-    actions.settings->addCustomFunction(function);
-    runIfPresent(actions.saveSettings);
-
-    const bool accepted = !actions.editFunction || actions.editFunction(function);
-    if (accepted) {
-        return true;
+    FunctionSettings settings =
+        functionSettingsFromCustomFunction(function);
+    settings.flow = FunctionFlowState();
+    OperationError localError;
+    if (!actions.flows.addCustomFunction(settings, &localError)) {
+        if (error) {
+            *error = localError;
+        }
+        return QString();
     }
-
-    actions.settings->removeCustomFunction(function.id);
-    runIfPresent(actions.saveSettings);
-    return false;
+    actions.settings->load();
+    return function.id;
 }

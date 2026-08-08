@@ -3,18 +3,37 @@
 #include "application_events.h"
 #include "../capture/screenshot_launcher.h"
 #include "../capture/screenshot_types.h"
+#include "../config/app_settings_defaults.h"
 #include "../config/app_settings_store.h"
+#include "../controllers/function_command_controller.h"
+#include "../controllers/function_flow_execution_controller.h"
+#include "../controllers/function_flow_plan_cache.h"
+#include "../controllers/function_flow_publication_service.h"
+#include "../controllers/function_flow_result_controller.h"
+#include "../controllers/function_flow_runtime_adapters.h"
 #include "../controllers/tray_controller.h"
 #include "../controllers/voice_controller.h"
 #include "../domain/app_legacy_types.h"
+#include "../domain/function_catalog.h"
+#include "../domain/function_flow_errors.h"
+#include "../domain/history_record_builder.h"
 #include "../domain/prompt_runtime_library.h"
 #include "../input/global_hotkeys.h"
+#include "../input/hotkey_definitions.h"
+#include "../input/hotkey_refresh_coordinator.h"
 #include "../input/hotkey_settings_snapshot.h"
 #include "../input/hold_to_talk.h"
+#include "../input/selected_text_reader.h"
+#include "../output/clipboard_writer.h"
 #include "../platform/windows_autostart.h"
+#include "../providers/model_catalog.h"
+#include "../runtime/function_flow_runtime_log.h"
 #include "../runtime_crash_handler.h"
 #include "../runtime_log.h"
+#include "../storage/history_paths.h"
+#include "../storage/history_record_service.h"
 #include "../storage/prompt_library_store.h"
+#include "../tasks/speech_recognition_task.h"
 #include "../ui/attention_message.h"
 #include "../ui/app_dialogs.h"
 #include "../ui/chinese_text_context_menu.h"
@@ -32,6 +51,223 @@ static QString tr8(const char *text)
 {
     return QString::fromUtf8(text);
 }
+
+namespace
+{
+
+QString mainShortcutForFunction(
+    const AppSettingsData &settings,
+    const FunctionSettings &function)
+{
+    if (!function.builtIn) {
+        return function.shortcut.trimmed();
+    }
+    for (const HotkeyDef &definition : hotkeyDefs()) {
+        if (definition.id == function.id) {
+            const QString shortcut = settings.applicationHotkeys
+                .value(definition.id, definition.defaultValue)
+                .trimmed();
+            return shortcut.isEmpty()
+                ? definition.defaultValue
+                : shortcut;
+        }
+    }
+    return function.shortcut.trimmed();
+}
+
+void addOccupiedShortcut(
+    FunctionFlowValidationContext *context,
+    const QString &shortcut,
+    const QString &owner)
+{
+    if (!context || shortcut.trimmed().isEmpty()) {
+        return;
+    }
+    const QString key = shortcut.trimmed();
+    const QString existing =
+        context->occupiedShortcutOwners.value(key);
+    if (existing.isEmpty()
+        || (existing == context->functionId
+            && owner != context->functionId)) {
+        context->occupiedShortcutOwners.insert(key, owner);
+    }
+}
+
+FunctionFlowValidationContext functionFlowValidationContext(
+    const AppSettingsData &settings,
+    const QVector<PromptLibraryItem> &libraryItems,
+    const QString &functionId)
+{
+    FunctionFlowValidationContext context;
+    context.functionId = functionId;
+    for (const ModelOption &option : modelOptions()) {
+        if (!option.id.trimmed().isEmpty()) {
+            context.references.modelIds.append(option.id);
+        }
+    }
+
+    PromptRuntimeSnapshot promptSnapshot;
+    promptSnapshot.settings = settings;
+    promptSnapshot.libraryItems = libraryItems;
+    for (const PromptTargetInfo &target :
+         promptRuntimeTargets(promptSnapshot)) {
+        if (!target.id.trimmed().isEmpty()
+            && !context.references.promptIds.contains(target.id)) {
+            context.references.promptIds.append(target.id);
+        }
+    }
+
+    context.references.speechProviderIds =
+        supportedSpeechProviderIds();
+    context.references.ocrEngineIds = supportedOcrEngineIds();
+    context.references.defaultSpeechProviderId =
+        normalizeSpeechProvider(settings.speechProvider);
+    context.references.defaultOcrEngineId =
+        normalizeOcrEngine(settings.ocrEngine);
+
+    const int currentIndex = settings.functionIndex(functionId);
+    if (currentIndex >= 0) {
+        context.mainShortcut = mainShortcutForFunction(
+            settings,
+            settings.functions.at(currentIndex)
+        );
+    }
+
+    for (const HotkeyDef &definition : hotkeyDefs()) {
+        const QString configured = settings.applicationHotkeys
+            .value(definition.id, definition.defaultValue)
+            .trimmed();
+        addOccupiedShortcut(
+            &context,
+            configured.isEmpty()
+                ? definition.defaultValue
+                : configured,
+            definition.id
+        );
+    }
+    for (const FunctionSettings &function : settings.functions) {
+        if (!function.builtIn) {
+            addOccupiedShortcut(
+                &context,
+                function.shortcut,
+                function.id
+            );
+        }
+        if (screenshotTriggerUsesSeparate(
+                function.input.screenshotTriggerMode)) {
+            QString screenshotShortcut =
+                function.input.screenshotShortcut.trimmed();
+            if (screenshotShortcut.isEmpty()) {
+                screenshotShortcut =
+                    screenshotShortcutFromFunctionShortcut(
+                        mainShortcutForFunction(settings, function)
+                    );
+            }
+            addOccupiedShortcut(
+                &context,
+                screenshotShortcut,
+                QStringLiteral("screenshot:") + function.id
+            );
+        }
+    }
+    return context;
+}
+
+OcrEngine functionFlowOcrEngine(const QString &id)
+{
+    const QString normalized = id.trimmed();
+    if (normalized == QStringLiteral("rapid")) {
+        return OcrEngine::RapidOcr;
+    }
+    if (normalized == QStringLiteral("windows")) {
+        return OcrEngine::WindowsOcr;
+    }
+    if (normalized == QStringLiteral("customCloud")) {
+        return OcrEngine::CustomCloud;
+    }
+    if (normalized == QStringLiteral("vision")) {
+        return OcrEngine::VisionModel;
+    }
+    return OcrEngine::Automatic;
+}
+
+HistoryRecordSaveRequest historyRequestForFunctionFlow(
+    const FunctionFlowHistoryRequest &request)
+{
+    HistoryRecordSaveRequest save;
+    save.recordDirectory = request.recordDirectory;
+    save.modeId = request.functionId;
+    save.modeTitle = request.functionTitle.trimmed().isEmpty()
+        ? request.functionId
+        : request.functionTitle;
+    save.sourceAudioPath = request.sourceAudioPath;
+
+    HistoryRecordMetadataRequest metadata;
+    metadata.input = request.canonicalInput;
+    metadata.output = request.pendingEditedText.isNull()
+        ? request.finalOutput
+        : request.pendingEditedText;
+    if (!request.terminalError.isEmpty()) {
+        metadata.error =
+            functionFlowUserMessage(request.terminalError);
+    }
+    metadata.actionHadRecording =
+        !request.sourceAudioPath.trimmed().isEmpty()
+        || !request.recordingSegments.isEmpty();
+    metadata.recordingTriggerMode =
+        request.recordingTriggerMode;
+    metadata.longRecording = request.longRecording;
+    metadata.recordingSegments = request.recordingSegments;
+    metadata.speechElapsedMs = request.speechElapsedMs;
+
+    if (!request.ocrEngineId.trimmed().isEmpty()) {
+        metadata.runContext.screenshotInput = true;
+        metadata.runContext.screenshotOcrEngine =
+            functionFlowOcrEngine(request.ocrEngineId);
+        metadata.runContext.screenshotOcrElapsedMs =
+            request.ocrElapsedMs;
+        metadata.runContext.screenshotOcrUsedFallback =
+            request.ocrUsedFallback;
+        metadata.runContext.screenshotRect =
+            request.screenshotRect;
+    }
+
+    metadata.flowRunId = request.runId.value;
+    metadata.flowPublishedRevision =
+        request.publishedRevision;
+    metadata.flowPublishedHash = request.publishedHash;
+    metadata.flowTrigger = request.trigger;
+    metadata.flowFailedNodeId = request.failedNodeId;
+    metadata.flowFailedNodeType = request.failedNodeType;
+    metadata.flowCancelled = request.cancelled;
+    qint64 elapsedMs = 0;
+    bool hasElapsed = false;
+    for (const FunctionFlowNodeTrace &trace : request.traces) {
+        HistoryFlowNodeTrace historyTrace;
+        historyTrace.nodeId = trace.nodeId;
+        historyTrace.nodeType = trace.nodeType;
+        historyTrace.state = trace.state;
+        historyTrace.elapsedMs = trace.elapsedMs;
+        historyTrace.errorCode = trace.errorCode;
+        historyTrace.modelId = trace.modelId;
+        historyTrace.promptVersion = trace.promptVersion;
+        metadata.flowNodeTraces.append(historyTrace);
+        if (trace.elapsedMs >= 0) {
+            elapsedMs += trace.elapsedMs;
+            hasElapsed = true;
+        }
+        if (!trace.modelId.trimmed().isEmpty()) {
+            metadata.model = trace.modelId;
+            metadata.promptVersion = trace.promptVersion;
+            metadata.modelElapsedMs = trace.elapsedMs;
+        }
+    }
+    metadata.elapsedMs = hasElapsed ? elapsedMs : -1;
+    save.metadata = metadata;
+    return save;
+}
+
+} // namespace
 
 // 应用运行组装：初始化 Qt、配置、托盘、快捷键和主界面。
 int runVocekitApplication(int argc, char *argv[])
@@ -69,7 +305,136 @@ int runVocekitApplication(int argc, char *argv[])
     settingsStore.loadOrCreateDefaults(&settingsLoadError);
     PromptLibraryStore promptLibraryStore;
     promptLibraryStore.load();
+    FunctionFlowPlanCache functionFlowPlanCache;
+    functionFlowPlanCache.rebuildAll(settingsStore.snapshot());
 
+    ApplicationEvents events;
+    FunctionFlowPublicationAccess publicationAccess;
+    publicationAccess.settingsSnapshotProvider = [&settingsStore]() {
+        return settingsStore.snapshot();
+    };
+    publicationAccess.replaceAndSave = [&settingsStore](
+        const AppSettingsData &data,
+        OperationError *error
+    ) {
+        return settingsStore.replaceAndSave(data, error);
+    };
+    publicationAccess.validationContextProvider =
+        [&promptLibraryStore](
+            const AppSettingsData &data,
+            const QString &functionId
+        ) {
+            return functionFlowValidationContext(
+                data,
+                promptLibraryStore.items(),
+                functionId
+            );
+        };
+    publicationAccess.publishSettingsChanged = [&events](
+        const QString &key,
+        const QString &functionId
+    ) {
+        SettingsChangeSet change;
+        change.keys << key;
+        change.functionIds << functionId;
+        events.publishSettingsChanged(change);
+    };
+    FunctionFlowPublicationService publicationService(
+        publicationAccess
+    );
+
+    FunctionFlowSettingsAccess functionFlows;
+    functionFlows.readState = [&publicationService](
+        const QString &functionId,
+        FunctionFlowState *state,
+        OperationError *error
+    ) {
+        return publicationService.readState(
+            functionId,
+            state,
+            error
+        );
+    };
+    functionFlows.analyzeDraft = [&publicationService](
+        const QString &functionId,
+        const FunctionFlowGraph &draft
+    ) {
+        return publicationService.analyzeDraft(
+            functionId,
+            draft
+        );
+    };
+    functionFlows.addCustomFunction = [&publicationService](
+        const FunctionSettings &function,
+        OperationError *error
+    ) {
+        return publicationService.addCustomFunction(
+            function,
+            error
+        );
+    };
+    functionFlows.updateDraft = [&publicationService](
+        const QString &functionId,
+        int expectedRevision,
+        const FunctionFlowGraph &draft,
+        int *savedRevision,
+        OperationError *error
+    ) {
+        return publicationService.updateDraft(
+            functionId,
+            expectedRevision,
+            draft,
+            savedRevision,
+            error
+        );
+    };
+    functionFlows.updateEditorState = [&publicationService](
+        const QString &functionId,
+        const FunctionFlowEditorState &editor,
+        OperationError *error
+    ) {
+        return publicationService.updateEditorState(
+            functionId,
+            editor,
+            error
+        );
+    };
+    functionFlows.publish = [&publicationService](
+        const QString &functionId,
+        int expectedRevision,
+        bool replaceCorruptPublished
+    ) {
+        return publicationService.publish(
+            functionId,
+            expectedRevision,
+            replaceCorruptPublished
+        );
+    };
+    functionFlows.setExecutionMode = [&publicationService](
+        const QString &functionId,
+        FunctionExecutionMode mode,
+        OperationError *error
+    ) {
+        return publicationService.setExecutionMode(
+            functionId,
+            mode,
+            error
+        );
+    };
+    functionFlows.removeCustomFunction = [&publicationService](
+        const QString &functionId,
+        OperationError *error
+    ) {
+        return publicationService.removeCustomFunction(
+            functionId,
+            error
+        );
+    };
+
+    std::function<void(const QStringList &)>
+        refreshFunctionFlowRuntime;
+    std::function<void(const QStringList &)>
+        refreshFunctionFlowHotkeys;
     HubWindowAccess hubAccess;
     hubAccess.settingsSnapshotProvider = [&settingsStore]() {
         return settingsStore.snapshot();
@@ -77,18 +442,37 @@ int runVocekitApplication(int argc, char *argv[])
     hubAccess.promptLibraryProvider = [&promptLibraryStore]() {
         return promptLibraryStore.items();
     };
-    hubAccess.applyAndSave = [&settingsStore](const AppSettingsData &data) {
-        OperationError error;
-        return settingsStore.replaceAndSave(data, &error);
+    hubAccess.applyNonFlowAndSave = [&settingsStore](
+        const AppSettingsData &data,
+        OperationError *error
+    ) {
+        return settingsStore.replaceNonFlowSettingsAndSave(
+            data,
+            error
+        );
     };
     hubAccess.savePromptLibrary = [&promptLibraryStore](
         const QVector<PromptLibraryItem> &items) {
         OperationError error;
         return promptLibraryStore.save(items, &error);
     };
+    hubAccess.functionFlows = functionFlows;
+    hubAccess.refreshFunctionFlowRuntime =
+        [&refreshFunctionFlowRuntime](
+            const QStringList &functionIds) {
+            if (refreshFunctionFlowRuntime) {
+                refreshFunctionFlowRuntime(functionIds);
+            }
+        };
+    hubAccess.refreshFunctionFlowHotkeys =
+        [&refreshFunctionFlowHotkeys](
+            const QStringList &functionIds) {
+            if (refreshFunctionFlowHotkeys) {
+                refreshFunctionFlowHotkeys(functionIds);
+            }
+        };
     HubSettingsState settings(hubAccess);
 
-    ApplicationEvents events;
     FloatingBarPositionCallbacks floatingBarPositionCallbacks;
     floatingBarPositionCallbacks.hasSavedPosition = [&settings]() {
         return settings.hasFloatingBarPosition();
@@ -125,6 +509,8 @@ int runVocekitApplication(int argc, char *argv[])
         }
     ));
     hub->setApplicationEvents(&events);
+    FunctionFlowExecutionController *flowExecutionController =
+        nullptr;
     VoiceControllerAccess voiceAccess;
     voiceAccess.settingsSnapshotProvider = [&settingsStore]() {
         return settingsStore.snapshot();
@@ -138,44 +524,544 @@ int runVocekitApplication(int argc, char *argv[])
     voiceAccess.applyAndSave = [&settingsStore, &settings](
         const AppSettingsData &updatedSettings) {
         OperationError error;
-        if (!settingsStore.replaceAndSave(updatedSettings, &error)) {
+        if (!settingsStore.replaceNonFlowSettingsAndSave(
+                updatedSettings,
+                &error)) {
             return false;
         }
         settings.load();
         return true;
     };
+    voiceAccess.startPublishedFlow =
+        [&functionFlowPlanCache,
+         &flowExecutionController,
+         &hub,
+         &bar](
+            const FunctionFlowTriggerRequest &request) {
+            const QSharedPointer<
+                const FunctionFlowExecutionPlan
+            > plan = functionFlowPlanCache.plan(
+                request.functionId
+            );
+            if (plan.isNull()) {
+                OperationError error =
+                    functionFlowPlanCache.error(
+                        request.functionId
+                    );
+                if (error.code.trimmed().isEmpty()) {
+                    error.code = QStringLiteral(
+                        "flow_published_unavailable"
+                    );
+                }
+                showAttentionWarning(
+                    hub.data(),
+                    tr8("功能流程配置错误"),
+                    functionFlowUserMessage(error)
+                );
+                return FunctionFlowStartOutcome::
+                    ConfigurationError;
+            }
+            if (!flowExecutionController) {
+                return FunctionFlowStartOutcome::
+                    ConfigurationError;
+            }
+            const FunctionFlowStartOutcome outcome =
+                flowExecutionController->start(
+                request,
+                plan
+            );
+            if (outcome
+                == FunctionFlowStartOutcome::Busy) {
+                bar.setStatus(
+                    tr8("正在处理"),
+                    tr8("请等待当前任务完成，或再次触发当前流程取消。")
+                );
+                bar.hideLater();
+            } else if (
+                outcome
+                    == FunctionFlowStartOutcome::
+                        TargetUnavailable) {
+                OperationError error =
+                    flowExecutionController
+                        ->lastStartError();
+                if (error.code.trimmed().isEmpty()) {
+                    error.code = QStringLiteral(
+                        "flow_target_window_unavailable"
+                    );
+                }
+                showAttentionWarning(
+                    hub.data(),
+                    tr8("目标窗口不可用"),
+                    functionFlowUserMessage(error)
+                );
+            } else if (
+                outcome
+                    == FunctionFlowStartOutcome::
+                        ConfigurationError) {
+                OperationError error =
+                    flowExecutionController
+                        ->lastStartError();
+                if (error.code.trimmed().isEmpty()) {
+                    error.code = QStringLiteral(
+                        "flow_dependency_resolution_failed"
+                    );
+                }
+                showAttentionWarning(
+                    hub.data(),
+                    tr8("功能流程配置错误"),
+                    functionFlowUserMessage(error)
+                );
+            }
+            return outcome;
+        };
+    voiceAccess.flowProcessing =
+        [&flowExecutionController]() {
+            return flowExecutionController
+                && flowExecutionController->isRunning();
+        };
     VoiceController voice(voiceAccess, &bar, hub.data());
+    HotkeyRefreshCoordinator hotkeyRefreshCoordinator(
+        [&](const GlobalHotkeySettingsSnapshot &snapshot) {
+            const QStringList hotkeyFailures =
+                hotkeys.registerFromSnapshot(snapshot);
+            voice.setActiveHoldFunctions(
+                hotkeys.activeHoldFunctions()
+            );
+            for (const QString &failure : hotkeyFailures) {
+                logRuntimeEvent(
+                    tr8("快捷键"),
+                    tr8("注册失败"),
+                    failure
+                );
+            }
+            if (!hotkeyFailures.isEmpty() && hub->isVisible()) {
+                QTimer::singleShot(
+                    0,
+                    hub.data(),
+                    [&hub, hotkeyFailures]() {
+                        showAttentionWarning(
+                            hub.data(),
+                            tr8("全局快捷键注册失败"),
+                            tr8("以下快捷键没有注册成功：\n")
+                                + hotkeyFailures.join(
+                                    QStringLiteral("\n")
+                                )
+                                + tr8(
+                                    "\n\n请修改冲突快捷键，或关闭占用它的其它软件。"
+                                )
+                        );
+                    }
+                );
+            }
+        }
+    );
     QPointer<VoiceController> controllerGuard(&voice);
     controller = &voice;
+
+    FunctionFlowResultControllerAccess flowResultAccess;
+    flowResultAccess.isUsableExternalTargetWindow =
+        [](FunctionFlowTargetWindowHandle target) {
+            return ClipboardWriter::isUsableExternalWindow(
+                static_cast<ClipboardWindowHandle>(target)
+            );
+        };
+    flowResultAccess.hasCurrentSelection =
+        [](FunctionFlowTargetWindowHandle target) {
+            return SelectedTextReader::hasSelectionInWindow(
+                static_cast<SelectedTextNativeWindowHandle>(
+                    target
+                )
+            );
+        };
+    flowResultAccess.writeText =
+        [](
+            const QString &text,
+            FunctionFlowTargetWindowHandle target,
+            bool replaceSelection,
+            bool hasSelection) {
+            return ClipboardWriter::pasteTextToWindowChecked(
+                text,
+                static_cast<ClipboardWindowHandle>(target),
+                replaceSelection,
+                hasSelection
+            );
+        };
+    flowResultAccess.addVocabulary =
+        [&voice](
+            const QString &source,
+            const QString &scopeId,
+            const QString &edited) {
+            voice.addVocabularyForFlow(
+                source,
+                scopeId,
+                edited
+            );
+        };
+    flowResultAccess.saveResultPopupGeometry =
+        [&settingsStore, &settings](const QRect &geometry) {
+            AppSettingsData updated = settingsStore.snapshot();
+            updated.windows.hasResultPopupGeometry = true;
+            updated.windows.resultPopupGeometry = geometry;
+            OperationError error;
+            if (settingsStore.replaceNonFlowSettingsAndSave(
+                    updated,
+                    &error)) {
+                settings.load();
+            }
+        };
+    flowResultAccess.saveScreenshotPanelPreference =
+        [&settingsStore, &settings](
+            const QRect &geometry,
+            int opacity) {
+            AppSettingsData updated = settingsStore.snapshot();
+            updated.windows.hasScreenshotResultGeometry = true;
+            updated.windows.screenshotResultGeometry = geometry;
+            updated.windows.screenshotResultOpacity =
+                qBound(35, opacity, 100);
+            OperationError error;
+            if (settingsStore.replaceNonFlowSettingsAndSave(
+                    updated,
+                    &error)) {
+                settings.load();
+            }
+        };
+    flowResultAccess.showInformation =
+        [&hub](
+            const QString &title,
+            const QString &message) {
+            showAttentionInformation(
+                hub.data(),
+                title,
+                message
+            );
+        };
+
+    FunctionFlowResultControllerCallbacks flowResultCallbacks;
+    flowResultCallbacks.requestCancel =
+        [&flowExecutionController](const ExecutionId &runId) {
+            if (flowExecutionController) {
+                flowExecutionController->cancel(runId);
+            }
+        };
+    flowResultCallbacks.editableSurfaceOpened =
+        [&flowExecutionController](const ExecutionId &runId) {
+            if (flowExecutionController) {
+                flowExecutionController
+                    ->editableSurfaceOpened(runId);
+            }
+        };
+    flowResultCallbacks.editedTextCommitted =
+        [&flowExecutionController](
+            const ExecutionId &runId,
+            const QString &text) {
+            if (flowExecutionController) {
+                flowExecutionController->editedTextCommitted(
+                    runId,
+                    text
+                );
+            }
+        };
+    flowResultCallbacks.editableSurfaceClosed =
+        [&flowExecutionController](const ExecutionId &runId) {
+            if (flowExecutionController) {
+                flowExecutionController
+                    ->editableSurfaceClosed(runId);
+            }
+        };
+    FunctionFlowResultController flowResultController(
+        flowResultAccess,
+        flowResultCallbacks
+    );
+
+    QMap<QString, QString> savedFunctionFlowHistory;
+    FunctionFlowRuntimeAdapterAccess flowAdapterAccess;
+    flowAdapterAccess.runtimeSnapshot =
+        [&settingsStore, &promptLibraryStore]() {
+            PromptRuntimeSnapshot snapshot;
+            snapshot.settings = settingsStore.snapshot();
+            snapshot.libraryItems = promptLibraryStore.items();
+            return snapshot;
+        };
+    flowAdapterAccess.availableModelIds = []() {
+        QStringList ids;
+        for (const ModelOption &option : modelOptions()) {
+            if (isModelProviderAvailableForTask(option.id)) {
+                ids.append(option.id);
+            }
+        }
+        return ids;
+    };
+    flowAdapterAccess.speechConfigurationError =
+        [](const QString &providerId) {
+            return speechRecognitionProviderConfigurationError(
+                providerId
+            );
+        };
+    flowAdapterAccess.resolveRecordDirectory =
+        [](const QString &recordDirectory) {
+            return historyRootPath(recordDirectory);
+        };
+    flowAdapterAccess.isUsableExternalTargetWindow =
+        flowResultAccess.isUsableExternalTargetWindow;
+    flowAdapterAccess.readSelectedText =
+        [&voice](const SelectedTextWorkflowRequest &request) {
+            return voice.readSelectedTextForFlow(request);
+        };
+    flowAdapterAccess.collectVoice =
+        [&voice](
+            const FunctionFlowRunContext &run,
+            const FunctionFlowCompiledNode &node,
+            const FunctionFlowNodeCompletion &completion) {
+            voice.beginVoiceForFlow(run, node, completion);
+        };
+    flowAdapterAccess.collectScreenshot =
+        [&voice](
+            const FunctionFlowRunContext &run,
+            const FunctionFlowCompiledNode &node,
+            const FunctionFlowNodeCompletion &completion) {
+            voice.beginScreenshotForFlow(
+                run,
+                node,
+                completion
+            );
+        };
+    flowAdapterAccess.runResultAction =
+        [&flowResultController](
+            const FunctionFlowRunContext &run,
+            const FunctionFlowCompiledNode &node,
+            const FunctionFlowResultActionRequest &request,
+            const FunctionFlowNodeCompletion &completion) {
+            flowResultController.runAction(
+                run,
+                node,
+                request,
+                completion
+            );
+        };
+    flowAdapterAccess.beginStreamingPreview =
+        [&flowResultController](
+            const FunctionFlowRunContext &run,
+            const QString &modelNodeId,
+            const QString &popupNodeId) {
+            flowResultController.beginStreamingPreview(
+                run,
+                modelNodeId,
+                popupNodeId
+            );
+        };
+    flowAdapterAccess.appendStreamingDelta =
+        [&flowResultController](
+            const ExecutionId &runId,
+            const QString &modelNodeId,
+            const QString &popupNodeId,
+            const QString &delta) {
+            flowResultController.appendStreamingDelta(
+                runId,
+                modelNodeId,
+                popupNodeId,
+                delta
+            );
+        };
+    flowAdapterAccess.abandonStreamingPreview =
+        [&flowResultController](
+            const ExecutionId &runId,
+            const QString &modelNodeId,
+            const QString &popupNodeId) {
+            flowResultController.abandonStreamingPreview(
+                runId,
+                modelNodeId,
+                popupNodeId
+            );
+        };
+    flowAdapterAccess.saveHistory =
+        [&savedFunctionFlowHistory, &events](
+            const FunctionFlowHistoryRequest &request) {
+            FunctionFlowHistorySaveResult result;
+            const QString runId = request.runId.value.trimmed();
+            if (runId.isEmpty()
+                || request.recordDirectory.trimmed().isEmpty()) {
+                result.error.code =
+                    QStringLiteral("flow_history_save_failed");
+                return result;
+            }
+            if (savedFunctionFlowHistory.contains(runId)) {
+                result.ok = true;
+                result.alreadyExists = true;
+                result.detailPath =
+                    savedFunctionFlowHistory.value(runId);
+                return result;
+            }
+
+            const HistoryAppendResult saved =
+                HistoryRecordService::save(
+                    historyRequestForFunctionFlow(request)
+                );
+            if (!saved.ok
+                || saved.modeDetailPath.trimmed().isEmpty()) {
+                result.error.code =
+                    QStringLiteral("flow_history_save_failed");
+                return result;
+            }
+            result.ok = true;
+            result.detailPath = saved.modeDetailPath;
+            savedFunctionFlowHistory.insert(
+                runId,
+                result.detailPath
+            );
+            HistoryChangeSet change;
+            change.recordIds << result.detailPath;
+            events.publishHistoryChanged(change);
+            return result;
+        };
+    flowAdapterAccess.updateHistoryEditedText =
+        [&events](
+            const FunctionFlowHistoryEditRequest &request) {
+            FunctionFlowHistoryEditResult result;
+            OperationError error;
+            result.ok = HistoryRecordService(
+                request.recordDirectory
+            ).updateFlowEditedText(
+                request.runId,
+                request.detailPath,
+                request.editedText,
+                &error
+            );
+            result.error = error;
+            if (result.ok) {
+                HistoryChangeSet change;
+                change.recordIds << request.detailPath;
+                events.publishHistoryChanged(change);
+            }
+            return result;
+        };
+    FunctionFlowRuntimeAdapters functionFlowRuntimeAdapters(
+        flowAdapterAccess
+    );
+    FunctionFlowExecutionController functionFlowExecution(
+        functionFlowRuntimeAdapters.runtimeAccess()
+    );
+    flowExecutionController = &functionFlowExecution;
+
+    const QString functionFlowLogPath =
+        QDir(runtimeLogDirectory()).filePath(
+            QStringLiteral("function-flow.jsonl")
+        );
+    QObject::connect(
+        &functionFlowExecution,
+        &FunctionFlowExecutionController::nodeExecutionChanged,
+        hub.data(),
+        [&hub, functionFlowLogPath](
+            const FunctionFlowNodeExecutionEvent &event) {
+            hub->applyFunctionFlowRuntimeEvent(event);
+            FunctionFlowRuntimeLogEntry entry;
+            entry.functionId = event.functionId;
+            entry.publishedRevision = event.publishedRevision;
+            entry.publishedHash = event.publishedHash;
+            entry.runId = event.runId;
+            entry.trigger =
+                functionFlowTriggerId(event.trigger);
+            entry.nodeId = event.nodeId;
+            entry.nodeType =
+                functionFlowNodeTypeId(event.nodeType);
+            switch (event.state) {
+            case FunctionFlowNodeState::Pending:
+                entry.status = QStringLiteral("pending");
+                break;
+            case FunctionFlowNodeState::Ready:
+                entry.status = QStringLiteral("ready");
+                break;
+            case FunctionFlowNodeState::Running:
+                entry.status = QStringLiteral("running");
+                break;
+            case FunctionFlowNodeState::Cancelling:
+                entry.status = QStringLiteral("cancelling");
+                break;
+            case FunctionFlowNodeState::Succeeded:
+                entry.status = QStringLiteral("succeeded");
+                break;
+            case FunctionFlowNodeState::Skipped:
+                entry.status = QStringLiteral("skipped");
+                break;
+            case FunctionFlowNodeState::Failed:
+                entry.status = QStringLiteral("failed");
+                break;
+            case FunctionFlowNodeState::Blocked:
+                entry.status = QStringLiteral("blocked");
+                break;
+            case FunctionFlowNodeState::Cancelled:
+                entry.status = QStringLiteral("cancelled");
+                break;
+            }
+            entry.elapsedMs = event.elapsedMs;
+            entry.error.code = event.errorCode;
+            entry.modelId = event.modelId;
+            entry.promptVersion = event.promptVersion;
+            appendFunctionFlowRuntimeLog(
+                functionFlowLogPath,
+                entry
+            );
+        }
+    );
+    QObject::connect(
+        &functionFlowExecution,
+        &FunctionFlowExecutionController::runExecutionChanged,
+        hub.data(),
+        [&hub, functionFlowLogPath](
+            const FunctionFlowRunExecutionEvent &event) {
+            hub->applyFunctionFlowRunEvent(event);
+            FunctionFlowRuntimeLogEntry entry;
+            entry.functionId = event.functionId;
+            entry.publishedRevision = event.publishedRevision;
+            entry.publishedHash = event.publishedHash;
+            entry.runId = event.runId;
+            entry.trigger =
+                functionFlowTriggerId(event.trigger);
+            entry.status = event.running
+                ? QStringLiteral("started")
+                : (event.cancelled
+                    ? QStringLiteral("cancelled")
+                    : (event.terminalError.isEmpty()
+                        ? QStringLiteral("succeeded")
+                        : QStringLiteral("failed")));
+            entry.error = event.terminalError;
+            appendFunctionFlowRuntimeLog(
+                functionFlowLogPath,
+                entry
+            );
+            if (!event.running
+                && !event.cancelled
+                && !event.terminalError.isEmpty()) {
+                showAttentionWarning(
+                    hub.data(),
+                    tr8("功能流程运行失败"),
+                    functionFlowUserMessage(
+                        event.terminalError
+                    )
+                );
+            }
+        }
+    );
+
     ScreenshotLauncher screenshotLauncher;
     std::function<void()> refreshScreenshotLauncher = [&]() {
         QVector<QPair<QString, QString>> functions;
-        const QVector<QPair<QString, QString>> builtIns = {
-            qMakePair(QStringLiteral("dictate"), tr8("听写")),
-            qMakePair(QStringLiteral("translate"), tr8("翻译")),
-            qMakePair(QStringLiteral("ask"), tr8("问答"))
-        };
-        for (const auto &function : builtIns) {
-            if (settings.useScreenshotFor(function.first)
-                && screenshotTriggerUsesLauncher(
-                    settings.screenshotTriggerModeFor(
-                        function.first
-                    ))) {
-                functions.append(function);
+        const AppSettingsData snapshot =
+            settingsStore.snapshot();
+        for (const FunctionSettings &function :
+             snapshot.functions) {
+            if (!functionUsesScreenshotLauncher(
+                    function,
+                    functionFlowPlanCache.plan(function.id))) {
+                continue;
             }
-        }
-        for (const CustomFunctionDef &function :
-            settings.customFunctions()) {
-            if (function.useScreenshot
-                && screenshotTriggerUsesLauncher(
-                    function.screenshotTriggerMode)) {
-                functions.append(qMakePair(
+            functions.append(qMakePair(
+                function.id,
+                functionDisplayTitle(
+                    snapshot,
                     function.id,
-                    function.name.trimmed().isEmpty()
-                        ? tr8("自定义功能")
-                        : function.name.trimmed()
-                ));
-            }
+                    tr8("自定义功能")
+                )
+            ));
         }
         screenshotLauncher.setFunctions(functions);
         screenshotLauncher.setSavedPosition(
@@ -189,17 +1075,32 @@ int runVocekitApplication(int argc, char *argv[])
             settings.setScreenshotLauncherPosition(position);
             settings.save();
         };
+    screenshotLauncher.captureTargetWindowCallback = []() {
+        const FunctionCommandWindowHandle target =
+            captureForegroundFunctionCommandWindow();
+        return ClipboardWriter::isUsableExternalWindow(target)
+            ? static_cast<
+                ScreenshotLauncherTargetWindowHandle
+              >(target)
+            : nullptr;
+    };
     screenshotLauncher.functionTriggeredCallback =
-        [&](const QString &functionId) {
+        [&](
+            const QString &functionId,
+            ScreenshotLauncherTargetWindowHandle targetWindow) {
             screenshotLauncher.hide();
             QTimer::singleShot(
                 80,
                 &voice,
-                [controllerGuard, functionId]() {
+                [controllerGuard, functionId, targetWindow]() {
                     if (controllerGuard) {
-                        controllerGuard->handleScreenshotTrigger(
-                            functionId
-                        );
+                        controllerGuard
+                            ->handleScreenshotLauncherTrigger(
+                                functionId,
+                                static_cast<
+                                    FunctionFlowTargetWindowHandle
+                                >(targetWindow)
+                            );
                     }
                 }
             );
@@ -215,51 +1116,124 @@ int runVocekitApplication(int argc, char *argv[])
         hub->openFaqById(faqId);
     });
 
-    hotkeys.setCallback([controllerGuard](const QString &id) {
-        if (controllerGuard) {
-            controllerGuard->handleHotkey(id);
+    hotkeys.setCallback(
+        [controllerGuard,
+         &hotkeys,
+         &hotkeyRefreshCoordinator](const QString &id) {
+            dispatchRegisteredHotkeyPress(
+                id,
+                hotkeys.activeHoldFunctions(),
+                [&hotkeyRefreshCoordinator](
+                    const QString &functionId) {
+                    hotkeyRefreshCoordinator.holdPressed(
+                        functionId
+                    );
+                },
+                [controllerGuard](const QString &functionId) {
+                    if (controllerGuard) {
+                        controllerGuard->handleHotkeyPressed(
+                            functionId
+                        );
+                    }
+                },
+                [controllerGuard](const QString &functionId) {
+                    if (controllerGuard) {
+                        controllerGuard->handleHotkey(functionId);
+                    }
+                }
+            );
         }
-    });
+    );
     hotkeys.setHoldCallback(
-        [controllerGuard](
+        [controllerGuard,
+         &hotkeyRefreshCoordinator,
+         &hotkeys](
             const QString &id,
             HoldShortcutTransition transition
         ) {
-            if (controllerGuard
-                && transition == HoldShortcutTransition::Released) {
-                controllerGuard->handleHotkeyReleased(id);
+            if (transition == HoldShortcutTransition::Pressed) {
+                hotkeyRefreshCoordinator.holdPressed(id);
+            } else if (
+                transition == HoldShortcutTransition::Released
+            ) {
+                if (controllerGuard) {
+                    // 先按冻结 owner 结束旧运行，再允许刷新卸载旧 hook。
+                    controllerGuard->handleHotkeyReleased(id);
+                }
+                hotkeyRefreshCoordinator.holdReleased(
+                    id,
+                    hotkeys.hasPressedHold()
+                );
             }
         }
     );
     qApp->installNativeEventFilter(&hotkeys);
 
+    refreshFunctionFlowRuntime =
+        [&](const QStringList &functionIds) {
+        settings.load();
+        const AppSettingsData snapshot =
+            settingsStore.snapshot();
+        if (functionIds.isEmpty()) {
+            functionFlowPlanCache.rebuildAll(snapshot);
+        } else {
+            QStringList uniqueIds = functionIds;
+            uniqueIds.removeDuplicates();
+            for (const QString &functionId : uniqueIds) {
+                functionFlowPlanCache.rebuildFunction(
+                    snapshot,
+                    functionId
+                );
+            }
+        }
+        QStringList inspectedIds = functionIds;
+        if (inspectedIds.isEmpty()) {
+            for (const FunctionSettings &function :
+                 snapshot.functions) {
+                inspectedIds.append(function.id);
+            }
+        }
+        inspectedIds.removeDuplicates();
+        for (const QString &functionId : inspectedIds) {
+            const OperationError cacheError =
+                functionFlowPlanCache.error(functionId);
+            if (!cacheError.code.trimmed().isEmpty()) {
+                logRuntimeEvent(
+                    tr8("功能流程"),
+                    tr8("发布缓存不可用"),
+                    QStringLiteral("功能=") + functionId
+                        + QStringLiteral("，错误码=")
+                        + cacheError.code
+                );
+            }
+        }
+        voice.reload();
+        refreshScreenshotLauncher();
+    };
+    refreshFunctionFlowHotkeys =
+        [&](const QStringList &) {
+        settings.load();
+        hotkeyRefreshCoordinator.requestRefresh(
+            globalHotkeySnapshotFromData(
+                settings.toData(),
+                [&functionFlowPlanCache](
+                    const QString &functionId) {
+                    return functionFlowPlanCache.plan(
+                        functionId
+                    );
+                }
+            ),
+            hotkeys.hasPressedHold()
+        );
+    };
     settingsChanged = [&]() {
         settings.load();
         setWindowsAutoStartEnabled(settings.autoStartEnabled());
-        voice.reload();
-        const QStringList hotkeyFailures =
-            hotkeys.registerFromSnapshot(
-                globalHotkeySnapshotFromData(settings.toData())
-            );
-        voice.setActiveHoldFunctions(hotkeys.activeHoldFunctions());
-        for (const QString &failure : hotkeyFailures) {
-            logRuntimeEvent(tr8("快捷键"), tr8("注册失败"), failure);
-        }
-        if (!hotkeyFailures.isEmpty() && hub->isVisible()) {
-            QTimer::singleShot(0, hub.data(), [&hub, hotkeyFailures]() {
-                showAttentionWarning(
-                    hub.data(),
-                    tr8("全局快捷键注册失败"),
-                    tr8("以下快捷键没有注册成功：\n")
-                        + hotkeyFailures.join(QStringLiteral("\n"))
-                        + tr8("\n\n请修改冲突快捷键，或关闭占用它的其它软件。")
-                );
-            });
-        }
+        refreshFunctionFlowRuntime(QStringList());
+        refreshFunctionFlowHotkeys(QStringList());
         bar.setEnabledVisible(settings.floatingBarEnabled());
         SettingsChangeSet change;
         events.publishSettingsChanged(change);
-        refreshScreenshotLauncher();
         logRuntimeEvent(
             tr8("设置"),
             tr8("已应用"),
@@ -316,6 +1290,11 @@ int runVocekitApplication(int argc, char *argv[])
     trayCallbacks.openSettings = [&hub]() {
         hub->showSettingsPage();
     };
+    trayCallbacks.requestApplicationQuit = [&hub]() {
+        if (hub) {
+            hub->requestApplicationQuit();
+        }
+    };
     TrayController tray(hub.data(), trayCallbacks);
 
     const QRect screen = QApplication::desktop()->availableGeometry();
@@ -328,8 +1307,11 @@ int runVocekitApplication(int argc, char *argv[])
     const int exitCode = app.exec();
     logRuntimeEvent(tr8("程序"), tr8("退出"), QStringLiteral("exitCode=") + QString::number(exitCode));
     setAttentionFaqCallback(AttentionFaqCallback());
+    hotkeys.setHoldCallback(std::function<void(const QString &, HoldShortcutTransition)>());
     qApp->removeNativeEventFilter(&hotkeys);
     hotkeys.setCallback(std::function<void(const QString &)>());
+    functionFlowExecution.cancel();
+    flowExecutionController = nullptr;
     controller = nullptr;
     return exitCode;
 }

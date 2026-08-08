@@ -12,6 +12,7 @@ QString compactLogText(QString text, int maxLength = 700);
 QString networkLogTarget(const QUrl &url);
 QUrl urlWithDefaultHttps(QString text);
 QUrl openAiCompatibleChatUrl(QString text);
+QUrl anthropicMessagesUrl(QString text);
 QString jsonPathStringValue(const QJsonValue &value, const QStringList &path);
 QString firstJsonStringValue(
     const QJsonObject &root,

@@ -13,11 +13,14 @@ SOURCES += \
     ../../src/config/app_settings_defaults.cpp \
     ../../src/config/app_settings_json.cpp \
     ../../src/config/app_settings_store.cpp \
+    ../../src/config/function_flow_json.cpp \
     ../../src/config/baidu_sample_parser.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
     ../../src/file_utils.cpp \
     ../../src/input/hotkey_definitions.cpp \
+    ../../src/domain/function_flow_graph.cpp \
+    ../../src/domain/function_flow_ports.cpp \
     ../../src/domain/function_settings.cpp \
     ../../src/ocr/ocr_batch_queue.cpp \
     ../../src/ocr/ocr_batch_text.cpp \
@@ -38,11 +41,14 @@ HEADERS += \
     ../../src/config/app_settings_defaults.h \
     ../../src/config/app_settings_json.h \
     ../../src/config/app_settings_store.h \
+    ../../src/config/function_flow_json.h \
     ../../src/config/baidu_sample_parser.h \
     ../../src/config/secret_config.h \
     ../../src/config/secret_store.h \
     ../../src/file_utils.h \
     ../../src/input/hotkey_definitions.h \
+    ../../src/domain/function_flow_graph.h \
+    ../../src/domain/function_flow_ports.h \
     ../../src/domain/function_settings.h \
     ../../src/ocr/ocr_cloud_client.h \
     ../../src/ocr/ocr_batch_queue.h \

@@ -43,6 +43,14 @@ public:
     void setResolvedCallback(
         const std::function<void(const QString &)> &onResolved
     );
+    void setCheckedWriteCallback(
+        const std::function<ClipboardWriteResult(
+            const QString &,
+            const QString &,
+            ClipboardWindowHandle,
+            bool
+        )> &onWrite
+    );
     void setActionCallbacks(
         const std::function<void()> &onRegenerate,
         const std::function<void(const QString &)> &onRetryModel,
@@ -65,10 +73,12 @@ public:
     );
     void setCurrentModel(const QString &model);
     QString currentModel() const;
+    void setHasSelection(bool hasSelection);
     void setResultText(const QString &result, bool resetDraftState = true);
     void appendResultText(const QString &text);
     QString resultText() const;
     void setBusy(bool busy, const QString &hint = QString());
+    void setAutoCloseMsec(int autoCloseMsec);
     void showNearBottom();
 
 protected:
@@ -85,6 +95,7 @@ private:
     void saveDraftIfNeeded();
     void saveGeometryPreference();
     void resolveResult(const QString &action);
+    void scheduleAutoClose();
 
     ResultPopupWindowPreferences m_preferences;
     QString m_result;
@@ -112,6 +123,7 @@ private:
     QHBoxLayout *m_resultLayout = nullptr;
     QMap<QString, QPushButton *> m_actionButtons;
     bool m_resolved = false;
+    quint64 m_autoCloseGeneration = 0;
     std::function<void()> m_onRegenerate;
     std::function<void(const QString &)> m_onRetryModel;
     std::function<void(const QString &)> m_onFollowUp;
@@ -121,6 +133,12 @@ private:
     std::function<void(const QString &, const QString &)> m_onVocabulary;
     std::function<void(const QRect &)> m_onWindowPreferenceChanged;
     std::function<void(const QString &)> m_onResolved;
+    std::function<ClipboardWriteResult(
+        const QString &,
+        const QString &,
+        ClipboardWindowHandle,
+        bool
+    )> m_onCheckedWrite;
 };
 
 #endif // VOCEKIT_RESULT_CHOICE_POPUP_H

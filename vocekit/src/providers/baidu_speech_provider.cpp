@@ -7,6 +7,10 @@
 #include <QFile>
 #include <QHostInfo>
 #include <QJsonArray>
+#include <QCryptographicHash>
+#include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
@@ -14,6 +18,76 @@
 #include <QUrlQuery>
 
 namespace {
+
+struct SharedAccessToken
+{
+    QString token;
+    QDateTime expiry;
+};
+
+QMutex &sharedAccessTokenMutex()
+{
+    static QMutex mutex;
+    return mutex;
+}
+
+QHash<QByteArray, SharedAccessToken> &sharedAccessTokens()
+{
+    static QHash<QByteArray, SharedAccessToken> tokens;
+    return tokens;
+}
+
+QByteArray accessTokenCacheKey(const SecretConfig &secrets)
+{
+    return QCryptographicHash::hash(
+        secrets.baiduApiKey.trimmed().toUtf8()
+            + QByteArrayLiteral("\0")
+            + secrets.baiduSecretKey.trimmed().toUtf8(),
+        QCryptographicHash::Sha256
+    );
+}
+
+bool readSharedAccessToken(
+    const SecretConfig &secrets,
+    QString *token,
+    QDateTime *expiry)
+{
+    QMutexLocker locker(&sharedAccessTokenMutex());
+    const auto item = sharedAccessTokens().constFind(
+        accessTokenCacheKey(secrets)
+    );
+    if (item == sharedAccessTokens().constEnd()
+        || item->token.isEmpty()
+        || item->expiry
+            <= QDateTime::currentDateTime().addSecs(60)) {
+        return false;
+    }
+    if (token) {
+        *token = item->token;
+    }
+    if (expiry) {
+        *expiry = item->expiry;
+    }
+    return true;
+}
+
+void writeSharedAccessToken(
+    const SecretConfig &secrets,
+    const QString &token,
+    const QDateTime &expiry)
+{
+    QMutexLocker locker(&sharedAccessTokenMutex());
+    SharedAccessToken item;
+    item.token = token;
+    item.expiry = expiry;
+    sharedAccessTokens().insert(accessTokenCacheKey(secrets), item);
+}
+
+void removeSharedAccessToken(const SecretConfig &secrets)
+{
+    QMutexLocker locker(&sharedAccessTokenMutex());
+    sharedAccessTokens().remove(accessTokenCacheKey(secrets));
+}
 
 QString tr8(const char *text)
 {
@@ -147,7 +221,8 @@ BaiduSpeechProvider::BaiduSpeechProvider(bool useSystemProxy)
     : BaiduSpeechProvider(
           createProviderNetworkTransport(),
           []() { return loadSecrets(); },
-          useSystemProxy
+          useSystemProxy,
+          true
       )
 {
 }
@@ -155,12 +230,14 @@ BaiduSpeechProvider::BaiduSpeechProvider(bool useSystemProxy)
 BaiduSpeechProvider::BaiduSpeechProvider(
     const QSharedPointer<IProviderNetworkTransport> &transport,
     const SecretLoader &secretLoader,
-    bool useSystemProxy)
+    bool useSystemProxy,
+    bool shareAccessTokenCache)
     : m_transport(
           transport.isNull() ? createProviderNetworkTransport() : transport
       ),
       m_secretLoader(secretLoader),
-      m_useSystemProxy(useSystemProxy)
+      m_useSystemProxy(useSystemProxy),
+      m_shareAccessTokenCache(shareAccessTokenCache)
 {
     m_secrets = m_secretLoader
         ? m_secretLoader()
@@ -362,6 +439,9 @@ SpeechRecognitionResult BaiduSpeechProvider::recognize(
 
 void BaiduSpeechProvider::refreshConfiguration()
 {
+    if (m_shareAccessTokenCache && m_secrets.hasBaidu()) {
+        removeSharedAccessToken(m_secrets);
+    }
     m_secrets = m_secretLoader
         ? m_secretLoader()
         : SecretConfig();
@@ -388,6 +468,15 @@ BaiduSpeechProvider::AccessTokenResult BaiduSpeechProvider::accessToken(
     if (!m_accessToken.isEmpty()
         && m_tokenExpiry
             > QDateTime::currentDateTime().addSecs(60)) {
+        result.token = m_accessToken;
+        result.durationMs = 0;
+        return result;
+    }
+    if (m_shareAccessTokenCache
+        && readSharedAccessToken(
+            m_secrets,
+            &m_accessToken,
+            &m_tokenExpiry)) {
         result.token = m_accessToken;
         result.durationMs = 0;
         return result;
@@ -464,6 +553,13 @@ BaiduSpeechProvider::AccessTokenResult BaiduSpeechProvider::accessToken(
         root.value(QStringLiteral("expires_in")).toInt(2592000);
     m_accessToken = token;
     m_tokenExpiry = QDateTime::currentDateTime().addSecs(expiresIn);
+    if (m_shareAccessTokenCache) {
+        writeSharedAccessToken(
+            m_secrets,
+            m_accessToken,
+            m_tokenExpiry
+        );
+    }
     result.token = token;
     return result;
 }

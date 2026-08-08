@@ -12,6 +12,11 @@ struct HubRefreshCoordinatorBundleActions
 {
     HubSettingsRefreshCoordinatorActions settings;
     HubContentRefreshCoordinatorActions content;
+    std::function<void(const QStringList &)> reloadFunctionFlows;
+    std::function<void()> refreshActiveFunction;
+    std::function<void()> refreshActiveCanvas;
+    std::function<void(const QStringList &)> refreshRuntime;
+    std::function<void(const QStringList &)> refreshHotkeys;
 };
 
 // 统一拥有设置、内容和应用事件协调器，隐藏它们之间的转发关系。
@@ -23,6 +28,7 @@ public:
     );
 
     void setApplicationEvents(ApplicationEvents *events);
+    void apply(const SettingsChangeSet &change);
     void dispatchSettingsChanged(
         const QStringList &keys,
         const QStringList &functionIds
@@ -37,8 +43,7 @@ public:
     );
 
 private:
-    void applySettingsChanged();
-
+    HubRefreshCoordinatorBundleActions m_actions;
     QScopedPointer<HubSettingsRefreshCoordinator> m_settings;
     QScopedPointer<HubContentRefreshCoordinator> m_content;
     QScopedPointer<HubApplicationEventCoordinator> m_events;

@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSaveFile>
+#include <QSet>
 
 namespace {
 
@@ -209,6 +210,57 @@ bool AppSettingsStore::replaceAndSave(
     }
     m_data = previous;
     return false;
+}
+
+bool AppSettingsStore::replaceNonFlowSettingsAndSave(
+    const AppSettingsData &editedSettings,
+    OperationError *error)
+{
+    clearError(error);
+    QSet<QString> currentIds;
+    QSet<QString> editedIds;
+    for (const FunctionSettings &function : m_data.functions) {
+        currentIds.insert(function.id);
+    }
+    for (const FunctionSettings &function : editedSettings.functions) {
+        editedIds.insert(function.id);
+    }
+    if (currentIds != editedIds
+        || currentIds.size() != m_data.functions.size()
+        || editedIds.size() != editedSettings.functions.size()) {
+        setError(
+            error,
+            QStringLiteral("settings_function_set_stale"),
+            QStringLiteral("功能集合已变化，请重新加载设置。")
+        );
+        return false;
+    }
+
+    // editedSettings owns non-flow fields; the current store owns builtIn,
+    // executionMode, and flow.
+    AppSettingsData merged = editedSettings;
+    merged.retainedRootValues = m_data.retainedRootValues;
+    merged.retainedOrphanFunctionFlows =
+        m_data.retainedOrphanFunctionFlows;
+    for (FunctionSettings &editedFunction : merged.functions) {
+        const int currentIndex =
+            m_data.functionIndex(editedFunction.id);
+        if (currentIndex < 0) {
+            setError(
+                error,
+                QStringLiteral("settings_function_set_stale"),
+                QStringLiteral("功能集合已变化，请重新加载设置。")
+            );
+            return false;
+        }
+        const FunctionSettings &current =
+            m_data.functions.at(currentIndex);
+        editedFunction.builtIn = current.builtIn;
+        editedFunction.executionMode = current.executionMode;
+        editedFunction.flow = current.flow;
+        editedFunction = normalizeFunctionSettings(editedFunction);
+    }
+    return replaceAndSave(merged, error);
 }
 
 QString AppSettingsStore::path() const

@@ -34,7 +34,7 @@ private slots:
 
         QCOMPARE(
             functionDisplayTitle(settings, QStringLiteral("dictate")),
-            QString::fromUtf8("听写（Dictate）")
+            QString::fromUtf8("听写")
         );
         QCOMPARE(
             functionDisplayTitle(settings, QStringLiteral("custom-1")),

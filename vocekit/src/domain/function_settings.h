@@ -2,10 +2,35 @@
 #define VOCEKIT_FUNCTION_SETTINGS_H
 
 #include "../result_flow_config.h"
+#include "function_flow_graph.h"
 #include "operation_error.h"
 
 #include <QString>
 #include <QStringList>
+
+enum class FunctionExecutionMode
+{
+    Classic,
+    Canvas
+};
+
+QString functionExecutionModeId(FunctionExecutionMode mode);
+FunctionExecutionMode functionExecutionModeFromId(
+    const QString &id,
+    bool *known = nullptr
+);
+
+QString functionInputVoiceId();
+QString functionInputSelectionId();
+QString functionInputScreenshotId();
+QStringList defaultFunctionInputOrder();
+QStringList normalizeFunctionInputOrder(const QStringList &order);
+QString functionOutputAiId();
+QString functionOutputAutoWriteId();
+QString functionOutputPopupId();
+QString functionOutputScreenshotPanelId();
+QStringList defaultFunctionOutputOrder();
+QStringList normalizeFunctionOutputOrder(const QStringList &order);
 
 // 一个功能可以组合选中文字、语音和截图三种输入。
 struct FunctionInputSettings
@@ -13,6 +38,10 @@ struct FunctionInputSettings
     bool useSelection = false;
     bool useVoice = false;
     bool useScreenshot = false;
+    QStringList order = QStringList()
+        << QStringLiteral("voice")
+        << QStringLiteral("selection")
+        << QStringLiteral("screenshot");
     QString screenshotTriggerMode = QStringLiteral("separate");
     QString screenshotShortcut;
 };
@@ -33,6 +62,11 @@ struct FunctionRecordingSettings
 struct FunctionOutputSettings
 {
     QString outputMode = QStringLiteral("resultPopup");
+    QStringList order = QStringList()
+        << QStringLiteral("ai")
+        << QStringLiteral("autoWrite")
+        << QStringLiteral("resultPopup")
+        << QStringLiteral("screenshotPanel");
     QString resultTemplate = QStringLiteral("simple");
     QStringList resultActions = defaultResultActionIds();
     int floatingBarSeconds = 2;
@@ -53,6 +87,8 @@ struct FunctionSettings
     FunctionRecordingSettings recording;
     FunctionOutputSettings output;
     FunctionNetworkPolicies network;
+    FunctionExecutionMode executionMode = FunctionExecutionMode::Classic;
+    FunctionFlowState flow;
 };
 
 FunctionSettings normalizeFunctionSettings(

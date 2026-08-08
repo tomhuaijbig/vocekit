@@ -1,5 +1,6 @@
 #include "history_detail_widgets.h"
 
+#include "../domain/history_text.h"
 #include "ui_style.h"
 
 #include <QtWidgets>
@@ -41,7 +42,7 @@ QFrame *createHistoryDetailMetaCard(
         ? tr8("本次没有录音")
         : (audioExists ? tr8("文件存在") : tr8("文件不存在或已被删除"));
 
-    addMeta(0, 0, tr8("功能"), entry.mode);
+    addMeta(0, 0, tr8("功能"), historyEntryModeText(entry));
     addMeta(0, 1, tr8("时间"), texts.timeText);
     addMeta(1, 0, tr8("总耗时"), texts.elapsedText);
     addMeta(1, 1, tr8("语音识别耗时"), texts.speechElapsedText);
@@ -78,6 +79,52 @@ QFrame *createHistoryDetailMetaCard(
             tr8("%1 段，%2 段失败")
                 .arg(entry.segments.size())
                 .arg(failedSegments)
+        );
+        ++nextMetaRow;
+    }
+
+    if (!entry.flowRunId.trimmed().isEmpty()) {
+        addMeta(
+            nextMetaRow,
+            0,
+            tr8("流程运行 ID"),
+            entry.flowRunId
+        );
+        addMeta(
+            nextMetaRow,
+            1,
+            tr8("触发入口"),
+            entry.flowTrigger
+        );
+        ++nextMetaRow;
+        addMeta(
+            nextMetaRow,
+            0,
+            tr8("发布版本"),
+            QString::number(entry.flowPublishedRevision)
+        );
+        addMeta(
+            nextMetaRow,
+            1,
+            tr8("节点轨迹"),
+            tr8("%1 个节点").arg(entry.flowNodeTraces.size())
+        );
+        ++nextMetaRow;
+        addMeta(
+            nextMetaRow,
+            0,
+            tr8("发布哈希"),
+            entry.flowPublishedHash
+        );
+        addMeta(
+            nextMetaRow,
+            1,
+            tr8("流程状态"),
+            entry.flowCancelled
+                ? tr8("已取消")
+                : (entry.flowFailedNodeId.trimmed().isEmpty()
+                    ? tr8("完成")
+                    : tr8("失败"))
         );
         ++nextMetaRow;
     }

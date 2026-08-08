@@ -220,6 +220,14 @@ QString speechProviderCustom()
     return QStringLiteral("custom");
 }
 
+QStringList supportedSpeechProviderIds()
+{
+    return QStringList()
+        << speechProviderBaidu()
+        << speechProviderXfyun()
+        << speechProviderCustom();
+}
+
 QString normalizeSpeechProvider(const QString &provider)
 {
     const QString normalized = provider.trimmed().toLower();
@@ -267,6 +275,16 @@ QString ocrEngineCustomCloud()
 QString ocrEngineVision()
 {
     return QStringLiteral("vision");
+}
+
+QStringList supportedOcrEngineIds()
+{
+    return QStringList()
+        << ocrEngineAutomatic()
+        << ocrEngineRapid()
+        << ocrEngineWindows()
+        << ocrEngineCustomCloud()
+        << ocrEngineVision();
 }
 
 QString normalizeOcrEngine(const QString &engine)

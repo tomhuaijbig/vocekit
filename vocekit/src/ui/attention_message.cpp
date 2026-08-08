@@ -64,6 +64,9 @@ QString faqIdForTitle(const QString &title)
     if (textContains(title, "接口页只显示当前语音服务")) return QStringLiteral("36");
     if (textContains(title, "自定义接口调用失败")) return QStringLiteral("37");
     if (textContains(title, "图片识别失败") || textContains(title, "OCR 引擎不可用")) return QStringLiteral("38");
+    if (textContains(title, "功能流程配置错误")) return QStringLiteral("function-flow-model");
+    if (textContains(title, "目标窗口不可用")) return QStringLiteral("function-flow-output");
+    if (textContains(title, "功能流程运行失败")) return QStringLiteral("function-flow-runtime");
     return QString();
 }
 

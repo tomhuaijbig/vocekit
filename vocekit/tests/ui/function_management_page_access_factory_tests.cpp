@@ -37,7 +37,8 @@ class FunctionManagementPageAccessFactoryTests : public QObject
 private slots:
     void buildsBuiltInAndCustomItems();
     void forwardsAddAndEditActions();
-    void removesCustomFunctionAndRefreshesDependents();
+    void removesCustomFunctionThroughTheTransaction();
+    void failedRemovalLeavesTheStateUnchanged();
     void handlesMissingDependencies();
     void hubWindowUsesIndependentFactory();
 };
@@ -115,18 +116,26 @@ void FunctionManagementPageAccessFactoryTests::forwardsAddAndEditActions()
     );
 }
 
-void FunctionManagementPageAccessFactoryTests::removesCustomFunctionAndRefreshesDependents()
+void FunctionManagementPageAccessFactoryTests::
+removesCustomFunctionThroughTheTransaction()
 {
-    const AppSettingsData source = sampleSettings();
+    AppSettingsData source = sampleSettings();
     QStringList actions;
     HubWindowAccess stateAccess;
-    stateAccess.settingsSnapshotProvider = [source]() { return source; };
+    stateAccess.settingsSnapshotProvider = [&source]() { return source; };
     HubSettingsState settings(stateAccess);
 
     FunctionManagementPageAccessDependencies dependencies;
     dependencies.settings = &settings;
-    dependencies.saveSettings = [&actions]() {
-        actions.append(QStringLiteral("save"));
+    dependencies.flows.removeCustomFunction = [&](
+        const QString &id,
+        OperationError *
+    ) {
+        actions.append(QStringLiteral("remove:") + id);
+        const int index = source.functionIndex(id);
+        source.functions.remove(index);
+        source.functionOrder.removeAll(id);
+        return true;
     };
 
     const FunctionManagementPageAccess access =
@@ -139,7 +148,43 @@ void FunctionManagementPageAccessFactoryTests::removesCustomFunctionAndRefreshes
     access.removeFunction(item);
 
     QVERIFY(settings.customFunctions().isEmpty());
-    QCOMPARE(actions, QStringList() << QStringLiteral("save"));
+    QCOMPARE(
+        actions,
+        QStringList() << QStringLiteral("remove:custom_1")
+    );
+}
+
+void FunctionManagementPageAccessFactoryTests::
+failedRemovalLeavesTheStateUnchanged()
+{
+    AppSettingsData source = sampleSettings();
+    HubWindowAccess stateAccess;
+    stateAccess.settingsSnapshotProvider = [&source]() { return source; };
+    HubSettingsState settings(stateAccess);
+    int failures = 0;
+    FunctionManagementPageAccessDependencies dependencies;
+    dependencies.settings = &settings;
+    dependencies.flows.removeCustomFunction = [](
+        const QString &,
+        OperationError *error
+    ) {
+        error->code = QStringLiteral("flow_save_failed");
+        return false;
+    };
+    dependencies.operationFailed = [&failures](
+        const OperationError &
+    ) {
+        ++failures;
+    };
+    const FunctionManagementPageAccess access =
+        createFunctionManagementPageAccess(dependencies);
+    FunctionManagementItem item;
+    item.id = QStringLiteral("custom_1");
+    item.custom = true;
+    access.removeFunction(item);
+    QCOMPARE(settings.customFunctions().size(), 1);
+    QCOMPARE(source.functions.size(), 2);
+    QCOMPARE(failures, 1);
 }
 
 void FunctionManagementPageAccessFactoryTests::handlesMissingDependencies()

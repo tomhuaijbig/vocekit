@@ -27,6 +27,7 @@ VoiceRecordingCompletionResult VoiceRecordingCompletionExecutor::run(
     speechRequest.provider = request.provider;
     speechRequest.networkPolicy = request.networkPolicy;
     speechRequest.useSystemProxy = request.useSystemProxy;
+    speechRequest.cancellation = request.cancellation;
     result.speech = VoiceSpeechRecognitionExecutor::run(
         speechRequest,
         handlers.recognition

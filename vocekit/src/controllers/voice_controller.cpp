@@ -84,6 +84,13 @@ public:
                 );
             }
         };
+        screenshotAccess.cancelled = [this](
+            const QString &functionId
+        ) {
+            if (m_functionCommands) {
+                m_functionCommands->cancelInputSequence(functionId);
+            }
+        };
         m_screenshotWorkflow = new ScreenshotWorkflowController(
             screenshotAccess,
             m_bar,
@@ -118,7 +125,14 @@ public:
             const QString &modeId,
             const QString &text
         ) {
-            processRecognizedSpeech(modeId, text);
+            if (m_functionCommands) {
+                m_functionCommands->processRecognizedVoice(
+                    modeId,
+                    text
+                );
+            } else {
+                processRecognizedSpeech(modeId, text);
+            }
         };
         m_recordingWorkflow =
             new VoiceRecordingWorkflowController(
@@ -445,6 +459,13 @@ public:
         }
     }
 
+    void handleHotkeyPressed(const QString &id)
+    {
+        if (m_functionCommands) {
+            m_functionCommands->handleHotkeyPressed(id);
+        }
+    }
+
     void handleHotkeyReleased(const QString &id)
     {
         if (m_functionCommands) {
@@ -456,6 +477,86 @@ public:
     {
         if (m_functionCommands) {
             m_functionCommands->handleScreenshotTrigger(id);
+        }
+    }
+
+    void handleScreenshotLauncherTrigger(
+        const QString &id,
+        FunctionFlowTargetWindowHandle targetWindow)
+    {
+        if (m_functionCommands) {
+            m_functionCommands->handleScreenshotLauncherTrigger(
+                id,
+                static_cast<FunctionCommandWindowHandle>(
+                    targetWindow
+                )
+            );
+        }
+    }
+
+    bool beginVoiceForFlow(
+        const FunctionFlowRunContext &run,
+        const FunctionFlowCompiledNode &node,
+        const FunctionFlowNodeCompletion &completion)
+    {
+        if (m_recordingWorkflow
+            && m_recordingWorkflow->beginForFlow(
+                run,
+                node,
+                completion
+            )) {
+            return true;
+        }
+        if (completion) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error.code = QStringLiteral("flow_voice_failed");
+            completion(result);
+        }
+        return false;
+    }
+
+    bool beginScreenshotForFlow(
+        const FunctionFlowRunContext &run,
+        const FunctionFlowCompiledNode &node,
+        const FunctionFlowNodeCompletion &completion)
+    {
+        if (m_screenshotWorkflow) {
+            return m_screenshotWorkflow->beginForFlow(
+                run,
+                node,
+                completion
+            );
+        }
+        if (completion) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error.code =
+                QStringLiteral("flow_screenshot_failed");
+            completion(result);
+        }
+        return false;
+    }
+
+    SelectedTextWorkflowResult readSelectedTextForFlow(
+        const SelectedTextWorkflowRequest &request) const
+    {
+        return m_selectedTextWorkflow
+            ? m_selectedTextWorkflow->execute(request)
+            : SelectedTextWorkflowResult();
+    }
+
+    void addVocabularyForFlow(
+        const QString &sourceText,
+        const QString &scopeId,
+        const QString &editedText)
+    {
+        if (m_vocabularyQuickAdd) {
+            m_vocabularyQuickAdd->addText(
+                sourceText,
+                scopeId,
+                editedText
+            );
         }
     }
 
@@ -520,6 +621,11 @@ private:
                 && m_screenshotWorkflow->isActive();
         };
         access.processing = [this]() {
+            return m_processing
+                || (m_access.flowProcessing
+                    && m_access.flowProcessing());
+        };
+        access.classicProcessing = [this]() {
             return m_processing;
         };
         access.setStatus = [this](
@@ -555,6 +661,19 @@ private:
         access.captureTargetWindow = []() {
             return captureForegroundFunctionCommandWindow();
         };
+        access.startPublishedFlow =
+            m_access.startPublishedFlow;
+        access.releasePublishedFlowHold =
+            [this](const QString &id) {
+                return m_recordingWorkflow
+                    && m_recordingWorkflow
+                        ->handleFlowHotkeyReleased(id);
+            };
+        access.recordingOwnsPress =
+            [this](const QString &id) {
+                return m_recordingWorkflow
+                    && m_recordingWorkflow->ownsPress(id);
+            };
         access.recordingConsumesPress =
             [this](const QString &id) {
                 return m_recordingWorkflow
@@ -593,8 +712,9 @@ private:
                 targetAlreadyRemembered;
             request.externalBusy = externalBusy;
             if (m_screenshotWorkflow) {
-                m_screenshotWorkflow->start(request);
+                return m_screenshotWorkflow->start(request);
             }
+            return false;
         };
         access.readSelectedText =
             [this](const SelectedTextWorkflowRequest &request) {
@@ -607,6 +727,12 @@ private:
             const QString &text
         ) {
             processTextOnly(functionId, text);
+        };
+        access.processVoice = [this](
+            const QString &functionId,
+            const QString &text
+        ) {
+            processRecognizedSpeech(functionId, text);
         };
         access.speechConfigurationError =
             [](const QString &provider) {
@@ -885,6 +1011,11 @@ void VoiceController::setActiveHoldFunctions(const QSet<QString> &ids)
     d->setActiveHoldFunctions(ids);
 }
 
+void VoiceController::handleHotkeyPressed(const QString &id)
+{
+    d->handleHotkeyPressed(id);
+}
+
 void VoiceController::handleHotkeyReleased(const QString &id)
 {
     d->handleHotkeyReleased(id);
@@ -893,6 +1024,48 @@ void VoiceController::handleHotkeyReleased(const QString &id)
 void VoiceController::handleScreenshotTrigger(const QString &id)
 {
     d->handleScreenshotTrigger(id);
+}
+
+void VoiceController::handleScreenshotLauncherTrigger(
+    const QString &id,
+    FunctionFlowTargetWindowHandle targetWindow)
+{
+    d->handleScreenshotLauncherTrigger(id, targetWindow);
+}
+
+bool VoiceController::beginVoiceForFlow(
+    const FunctionFlowRunContext &run,
+    const FunctionFlowCompiledNode &node,
+    const FunctionFlowNodeCompletion &completion)
+{
+    return d->beginVoiceForFlow(run, node, completion);
+}
+
+bool VoiceController::beginScreenshotForFlow(
+    const FunctionFlowRunContext &run,
+    const FunctionFlowCompiledNode &node,
+    const FunctionFlowNodeCompletion &completion)
+{
+    return d->beginScreenshotForFlow(run, node, completion);
+}
+
+SelectedTextWorkflowResult
+VoiceController::readSelectedTextForFlow(
+    const SelectedTextWorkflowRequest &request) const
+{
+    return d->readSelectedTextForFlow(request);
+}
+
+void VoiceController::addVocabularyForFlow(
+    const QString &sourceText,
+    const QString &scopeId,
+    const QString &editedText)
+{
+    d->addVocabularyForFlow(
+        sourceText,
+        scopeId,
+        editedText
+    );
 }
 
 VocabularySuggestion VoiceController::suggestVocabularyEntry(

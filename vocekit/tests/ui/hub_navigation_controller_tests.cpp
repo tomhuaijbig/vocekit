@@ -49,6 +49,10 @@ struct NavigationFixture
             return true;
         };
         access.clearCurrentFunction = [this]() { functionId.clear(); };
+        access.canLeaveFunctionPage = [this]() {
+            ++canLeaveCalls;
+            return allowLeave;
+        };
         access.addFunction = [this]() {
             ++addFunctionCalls;
             return true;
@@ -63,6 +67,8 @@ struct NavigationFixture
     int functionActivations = 0;
     int addFunctionCalls = 0;
     int functionProviderCalls = 0;
+    int canLeaveCalls = 0;
+    bool allowLeave = true;
 };
 
 } // namespace
@@ -75,6 +81,8 @@ private slots:
     void synchronizesPageAndSidebarState();
     void opensFunctionOnlyOnce();
     void clearsFunctionWhenOpeningHomeOrTool();
+    void blocksEveryCrossPageNavigationWhenDraftFlushFails();
+    void doesNotGateFunctionToFunctionNavigation();
     void refreshesNavigationAndAddsFunction();
     void rejectsInvalidNavigation();
     void hubWindowDelegatesNavigation();
@@ -116,6 +124,47 @@ void HubNavigationControllerTests::clearsFunctionWhenOpeningHomeOrTool()
     QVERIFY(fixture.controller->openTool(QStringLiteral("settings")));
     QVERIFY(fixture.functionId.isEmpty());
     QCOMPARE(fixture.shell->activePageId(), QStringLiteral("settings"));
+}
+
+void HubNavigationControllerTests::blocksEveryCrossPageNavigationWhenDraftFlushFails()
+{
+    NavigationFixture fixture;
+    QVERIFY(fixture.controller->openFunction(QStringLiteral("dictate")));
+    fixture.allowLeave = false;
+
+    const int functionActivations = fixture.functionActivations;
+    const QString activePage = fixture.shell->activePageId();
+    const QString activeFunction = fixture.shell->activeFunctionId();
+
+    QVERIFY(!fixture.controller->selectPage(QStringLiteral("settings")));
+    QCOMPARE(fixture.canLeaveCalls, 1);
+    QCOMPARE(fixture.router->currentPageId(), QStringLiteral("function"));
+    QCOMPARE(fixture.shell->activePageId(), activePage);
+    QCOMPARE(fixture.shell->activeFunctionId(), activeFunction);
+    QCOMPARE(fixture.functionId, QStringLiteral("dictate"));
+    QCOMPARE(fixture.functionActivations, functionActivations);
+
+    QVERIFY(!fixture.controller->openTool(QStringLiteral("settings")));
+    QCOMPARE(fixture.canLeaveCalls, 2);
+    QCOMPARE(fixture.router->currentPageId(), QStringLiteral("function"));
+    QCOMPARE(fixture.functionId, QStringLiteral("dictate"));
+
+    QVERIFY(!fixture.controller->openFunction(QStringLiteral("home")));
+    QCOMPARE(fixture.canLeaveCalls, 3);
+    QCOMPARE(fixture.router->currentPageId(), QStringLiteral("function"));
+    QCOMPARE(fixture.functionId, QStringLiteral("dictate"));
+}
+
+void HubNavigationControllerTests::doesNotGateFunctionToFunctionNavigation()
+{
+    NavigationFixture fixture;
+    QVERIFY(fixture.controller->openFunction(QStringLiteral("dictate")));
+    fixture.allowLeave = false;
+
+    QVERIFY(fixture.controller->openFunction(QStringLiteral("translate")));
+    QCOMPARE(fixture.canLeaveCalls, 0);
+    QCOMPARE(fixture.functionId, QStringLiteral("translate"));
+    QCOMPARE(fixture.router->currentPageId(), QStringLiteral("function"));
 }
 
 void HubNavigationControllerTests::refreshesNavigationAndAddsFunction()

@@ -4,6 +4,7 @@
 #include "history_favorites.h"
 #include "history_store.h"
 
+#include "../domain/execution_types.h"
 #include "../domain/history_record_builder.h"
 
 #include <QString>
@@ -49,6 +50,12 @@ public:
     bool updateRetriedSegment(
         HistoryEntry *entry,
         const HistorySegmentRetryResult &result
+    ) const;
+    bool updateFlowEditedText(
+        const ExecutionId &runId,
+        const QString &detailPath,
+        const QString &editedText,
+        OperationError *error
     ) const;
     void rebuildIndex() const;
 

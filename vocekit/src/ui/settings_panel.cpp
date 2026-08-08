@@ -596,7 +596,7 @@ QString normalizedRecordDirectorySetting(const QString &path)
         refreshShortcutRows();
         refreshRecordDirectoryLabel();
         refreshApiSettings();
-        if (m_onChanged) {
+        if (saved && m_onChanged) {
             m_onChanged();
         }
     }

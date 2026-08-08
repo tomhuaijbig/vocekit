@@ -22,6 +22,9 @@ struct GlobalHotkeyFunction
     bool useScreenshot = false;
     QString screenshotTriggerMode;
     QString screenshotShortcut;
+    // 运行画像把主快捷键和独立截图入口分开解析，避免二者互相覆盖。
+    bool useHoldToTalk = false;
+    bool registerScreenshotHotkey = false;
 };
 
 struct GlobalHotkeySettingsSnapshot
@@ -41,6 +44,7 @@ public:
     );
 
     QSet<QString> activeHoldFunctions() const;
+    bool hasPressedHold() const;
     QStringList registerFromSnapshot(
         const GlobalHotkeySettingsSnapshot &snapshot
     );

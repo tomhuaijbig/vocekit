@@ -14,12 +14,13 @@ struct HubFunctionWorkspaceControllerAccess
 {
     HubSettingsState *settings = nullptr;
     PromptSettingsAccess prompts;
+    FunctionFlowSettingsAccess flows;
     QWidget *pageParent = nullptr;
-    QWidget *dialogParent = nullptr;
     std::function<void()> saveSettings;
+    std::function<void(const OperationError &)> operationFailed;
 };
 
-// 隔离主窗口与功能页面、编辑弹窗之间的组装细节。
+// 隔离主窗口与内置功能页面之间的组装细节。
 class HubFunctionWorkspaceController
 {
 public:
@@ -41,7 +42,17 @@ public:
     );
 
     void refreshActivePage();
+    void refreshActiveCanvas();
     void refreshManagementPage();
+    bool flushAllPendingFlowDrafts();
+    void discardAllPendingFlowDrafts();
+    bool canLeaveFunctionPage();
+    bool applyFunctionFlowRuntimeEvent(
+        const FunctionFlowNodeExecutionEvent &event
+    );
+    bool applyFunctionFlowRunEvent(
+        const FunctionFlowRunExecutionEvent &event
+    );
 
 private:
     Q_DISABLE_COPY(HubFunctionWorkspaceController)

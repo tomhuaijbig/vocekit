@@ -32,16 +32,12 @@ void FunctionPagesAccessFactoryTests::buildsCommandPageAccessFromSharedActions()
     dependencies.saveSettings = [&actions]() {
         actions.append(QStringLiteral("save"));
     };
-    dependencies.editFunction = [&actions](
-        const QString &id,
+    dependencies.flows.readState = [](
         const QString &,
-        bool custom,
-        const CustomFunctionDef &
+        FunctionFlowState *,
+        OperationError *
     ) {
-        actions.append(
-            QStringLiteral("edit:") + id
-            + (custom ? QStringLiteral(":custom") : QStringLiteral(":built-in"))
-        );
+        return true;
     };
 
     const FunctionPagesAccessAssembly assembly =
@@ -50,22 +46,9 @@ void FunctionPagesAccessFactoryTests::buildsCommandPageAccessFromSharedActions()
     QCOMPARE(assembly.command.settings, &settings);
     QVERIFY(assembly.command.prompts.snapshotProvider);
     QVERIFY(assembly.command.prompts.snapshotProvider().settings.promptLocked);
+    QVERIFY(assembly.command.flows.readState);
     assembly.command.saveSettings();
-
-    CustomFunctionDef function;
-    function.id = QStringLiteral("custom_1");
-    assembly.command.manageCustomFunction(
-        function.id,
-        QStringLiteral("Custom 1"),
-        function
-    );
-
-    QCOMPARE(
-        actions,
-        QStringList()
-            << QStringLiteral("save")
-            << QStringLiteral("edit:custom_1:custom")
-    );
+    QCOMPARE(actions, QStringList() << QStringLiteral("save"));
 }
 
 void FunctionPagesAccessFactoryTests::buildsManagementPageAccessFromSharedActions()
@@ -121,14 +104,19 @@ void FunctionPagesAccessFactoryTests::forwardsRemovalRefreshActions()
     source.functions.append(custom);
 
     HubWindowAccess stateAccess;
-    stateAccess.settingsSnapshotProvider = [source]() { return source; };
+    stateAccess.settingsSnapshotProvider = [&source]() { return source; };
     HubSettingsState settings(stateAccess);
     QStringList actions;
 
     FunctionPagesAccessDependencies dependencies;
     dependencies.settings = &settings;
-    dependencies.saveSettings = [&actions]() {
-        actions.append(QStringLiteral("save"));
+    dependencies.flows.removeCustomFunction = [&](
+        const QString &id,
+        OperationError *
+    ) {
+        actions.append(QStringLiteral("remove:") + id);
+        source.functions.remove(source.functionIndex(id));
+        return true;
     };
 
     const FunctionPagesAccessAssembly assembly =
@@ -139,7 +127,10 @@ void FunctionPagesAccessFactoryTests::forwardsRemovalRefreshActions()
     assembly.management.removeFunction(item);
 
     QVERIFY(settings.customFunctions().isEmpty());
-    QCOMPARE(actions, QStringList() << QStringLiteral("save"));
+    QCOMPARE(
+        actions,
+        QStringList() << QStringLiteral("remove:custom_1")
+    );
 }
 
 void FunctionPagesAccessFactoryTests::handlesMissingDependencies()
@@ -148,7 +139,6 @@ void FunctionPagesAccessFactoryTests::handlesMissingDependencies()
         createFunctionPagesAccess(FunctionPagesAccessDependencies());
 
     QVERIFY(assembly.command.settings == nullptr);
-    QVERIFY(assembly.command.manageCustomFunction);
     QVERIFY(assembly.management.itemsProvider);
     QVERIFY(assembly.management.itemsProvider().isEmpty());
     QVERIFY(assembly.management.removeFunction);

@@ -17,10 +17,16 @@ HubNavigationController::HubNavigationController(
 bool HubNavigationController::selectPage(const QString &pageId)
 {
     const QString id = pageId.trimmed();
-    if (id.isEmpty() || !m_pageRouter || !m_pageRouter->selectPage(id)) {
+    if (id.isEmpty()
+        || !m_pageRouter
+        || !canLeaveCurrentFunctionPage(id)
+        || !m_pageRouter->selectPage(id)) {
         return false;
     }
 
+    if (id != QStringLiteral("function")) {
+        clearCurrentFunction();
+    }
     synchronizeShell(id);
     return true;
 }
@@ -33,12 +39,7 @@ bool HubNavigationController::openFunction(const QString &functionId)
     }
 
     if (id == QStringLiteral("home")) {
-        if (!m_pageRouter || !m_pageRouter->selectPage(id)) {
-            return false;
-        }
-        clearCurrentFunction();
-        synchronizeShell(id);
-        return true;
+        return selectPage(id);
     }
 
     const QString previousFunctionId = currentFunctionId();
@@ -65,19 +66,16 @@ bool HubNavigationController::openFunction(const QString &functionId)
 
 bool HubNavigationController::openTool(const QString &pageId)
 {
-    const QString id = pageId.trimmed();
-    if (id.isEmpty() || !m_pageRouter || !m_pageRouter->selectPage(id)) {
-        return false;
-    }
-
-    clearCurrentFunction();
-    synchronizeShell(id);
-    return true;
+    return selectPage(pageId);
 }
 
 bool HubNavigationController::addFunction()
 {
-    return m_access.addFunction && m_access.addFunction();
+    if (!m_access.addFunction || !m_access.addFunction()) {
+        return false;
+    }
+    refreshFunctions();
+    return selectPage(QStringLiteral("function"));
 }
 
 void HubNavigationController::refreshFunctions()
@@ -97,6 +95,19 @@ QString HubNavigationController::currentFunctionId() const
     return m_access.currentFunctionId
         ? m_access.currentFunctionId().trimmed()
         : QString();
+}
+
+bool HubNavigationController::canLeaveCurrentFunctionPage(
+    const QString &targetPageId
+) const
+{
+    if (!m_pageRouter
+        || m_pageRouter->currentPageId() != QStringLiteral("function")
+        || targetPageId == QStringLiteral("function")) {
+        return true;
+    }
+    return !m_access.canLeaveFunctionPage
+        || m_access.canLeaveFunctionPage();
 }
 
 void HubNavigationController::clearCurrentFunction()

@@ -11,6 +11,8 @@ class FunctionCommandPageHeaderTests : public QObject
 
   private slots:
     void exposesIndependentPageInterface();
+    void exposesOnlyNarrowCanvasLifecycleOperations();
+    void canvasModeUsesFixedWorkspaceInsteadOfPageScrolling();
     void hubWindowDoesNotRenderFunctionSettingsPage();
 };
 
@@ -21,6 +23,56 @@ void FunctionCommandPageHeaderTests::exposesIndependentPageInterface()
                                    QWidget *>::value));
     QVERIFY(
         (std::is_same<decltype(std::declval<FunctionCommandPage>().functionId()), QString>::value));
+}
+
+void FunctionCommandPageHeaderTests::exposesOnlyNarrowCanvasLifecycleOperations()
+{
+    QVERIFY((std::is_same<
+        decltype(std::declval<FunctionCommandPage>()
+                     .flushPendingFlowDraft()),
+        bool
+    >::value));
+    QVERIFY((std::is_same<
+        decltype(std::declval<FunctionCommandPage>()
+                     .canvasEditor()),
+        FunctionCanvasEditor *
+    >::value));
+
+    const QString sourcePath = QFINDTESTDATA(
+        "../../src/ui/function_command_page.cpp"
+    );
+    QVERIFY2(!sourcePath.isEmpty(), "Cannot find FunctionCommandPage source");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray contents = source.readAll();
+
+    QVERIFY(contents.contains("flushAllPendingSaves"));
+    QVERIFY(contents.contains("discardPendingSaves"));
+    QVERIFY(contents.contains("FunctionCanvasEditor"));
+    QVERIFY(!contents.contains("FunctionFlowPublicationService"));
+    QVERIFY(!contents.contains("function_flow_json"));
+    QVERIFY(!contents.contains("FunctionCanvasNodeItem"));
+    QVERIFY(!contents.contains("FunctionCanvasEdgeItem"));
+}
+
+void FunctionCommandPageHeaderTests::
+canvasModeUsesFixedWorkspaceInsteadOfPageScrolling()
+{
+    const QString sourcePath = QFINDTESTDATA(
+        "../../src/ui/function_command_page.cpp"
+    );
+    QVERIFY2(!sourcePath.isEmpty(), "Cannot find FunctionCommandPage source");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray contents = source.readAll();
+
+    QVERIFY(contents.contains(
+        "m_pageStack->setCurrentWidget(m_canvasHost)"
+    ));
+    QVERIFY(contents.contains(
+        "m_pageStack->setCurrentWidget(m_scroll)"
+    ));
+    QVERIFY(contents.contains("m_contentLayout->addWidget(editor, 1)"));
 }
 
 void FunctionCommandPageHeaderTests::hubWindowDoesNotRenderFunctionSettingsPage()

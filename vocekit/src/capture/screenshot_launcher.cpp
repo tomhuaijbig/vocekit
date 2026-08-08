@@ -71,6 +71,7 @@ bool ScreenshotLauncher::eventFilter(QObject *watched, QEvent *event)
     if (event->type() == QEvent::MouseButtonPress) {
         auto *mouse = static_cast<QMouseEvent *>(event);
         if (mouse->button() == Qt::LeftButton) {
+            rememberTargetWindow();
             m_dragging = false;
             m_dragOffset = mouse->globalPos() - frameGeometry().topLeft();
         }
@@ -102,27 +103,51 @@ void ScreenshotLauncher::closeEvent(QCloseEvent *event)
     QWidget::closeEvent(event);
 }
 
+void ScreenshotLauncher::rememberTargetWindow()
+{
+    m_rememberedTargetWindow = captureTargetWindowCallback
+        ? captureTargetWindowCallback()
+        : nullptr;
+}
+
 void ScreenshotLauncher::showFunctionMenu()
 {
     if (m_functions.isEmpty()) {
         return;
     }
+    if (!m_rememberedTargetWindow) {
+        rememberTargetWindow();
+    }
+    const ScreenshotLauncherTargetWindowHandle targetWindow =
+        m_rememberedTargetWindow;
     if (m_functions.size() == 1) {
         if (functionTriggeredCallback) {
-            functionTriggeredCallback(m_functions.first().first);
+            functionTriggeredCallback(
+                m_functions.first().first,
+                targetWindow
+            );
         }
         return;
     }
 
-    QMenu menu;
-    menu.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
+    QMenu *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
     for (const auto &function : m_functions) {
-        QAction *action = menu.addAction(function.second);
-        connect(action, &QAction::triggered, this, [this, function]() {
+        QAction *action = menu->addAction(function.second);
+        connect(
+            action,
+            &QAction::triggered,
+            menu,
+            [this, function, targetWindow]() {
             if (functionTriggeredCallback) {
-                functionTriggeredCallback(function.first);
+                functionTriggeredCallback(
+                    function.first,
+                    targetWindow
+                );
             }
         });
     }
-    menu.exec(mapToGlobal(QPoint(0, height() + 4)));
+    connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
+    menu->popup(mapToGlobal(QPoint(0, height() + 4)));
 }

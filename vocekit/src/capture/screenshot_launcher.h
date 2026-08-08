@@ -10,6 +10,8 @@
 
 class QPushButton;
 
+using ScreenshotLauncherTargetWindowHandle = void *;
+
 class ScreenshotLauncher : public QWidget
 {
 public:
@@ -18,7 +20,12 @@ public:
     void setFunctions(const QVector<QPair<QString, QString>> &functions);
     void setSavedPosition(const QPoint &position, bool hasPosition);
 
-    std::function<void(const QString &)> functionTriggeredCallback;
+    std::function<ScreenshotLauncherTargetWindowHandle()>
+        captureTargetWindowCallback;
+    std::function<void(
+        const QString &,
+        ScreenshotLauncherTargetWindowHandle
+    )> functionTriggeredCallback;
     std::function<void(const QPoint &)> positionChangedCallback;
 
 protected:
@@ -26,12 +33,15 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
+    void rememberTargetWindow();
     void showFunctionMenu();
 
     QPushButton *m_button = nullptr;
     QVector<QPair<QString, QString>> m_functions;
     bool m_dragging = false;
     QPoint m_dragOffset;
+    ScreenshotLauncherTargetWindowHandle m_rememberedTargetWindow =
+        nullptr;
 };
 
 #endif // VOCEKIT_SCREENSHOT_LAUNCHER_H

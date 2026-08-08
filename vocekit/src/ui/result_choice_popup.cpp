@@ -105,6 +105,16 @@ ResultChoicePopup::ResultChoicePopup(
     m_actionButtons.insert(QStringLiteral("copy"), m_copyButton);
     m_actionButtons.insert(QStringLiteral("write"), m_writeButton);
     m_actionButtons.insert(QStringLiteral("replace"), m_replaceButton);
+    for (auto it = m_actionButtons.constBegin();
+         it != m_actionButtons.constEnd();
+         ++it) {
+        it.value()->setObjectName(
+            QStringLiteral("resultAction_") + it.key()
+        );
+    }
+    m_closeButton->setObjectName(
+        QStringLiteral("resultAction_close")
+    );
 
     layout->addLayout(m_advancedLayout);
     layout->addLayout(m_resultLayout);
@@ -127,6 +137,24 @@ ResultChoicePopup::ResultChoicePopup(
     connect(m_writeButton, &QPushButton::clicked, this, [this]() {
         syncResultFromEditor();
         const QString text = m_result;
+        if (m_onCheckedWrite) {
+            const ClipboardWriteResult write =
+                m_onCheckedWrite(
+                    QStringLiteral("write"),
+                    text,
+                    m_targetWindow,
+                    m_hasSelection
+                );
+            if (!write.ok) {
+                m_hint->setText(
+                    popupTr8("无法写回原目标窗口，请复制后手动粘贴")
+                );
+                return;
+            }
+            resolveResult(QStringLiteral("write"));
+            close();
+            return;
+        }
         resolveResult(QStringLiteral("write"));
         close();
         ClipboardWriter::pasteTextToWindow(text, m_targetWindow, false, m_hasSelection);
@@ -134,6 +162,24 @@ ResultChoicePopup::ResultChoicePopup(
     connect(m_replaceButton, &QPushButton::clicked, this, [this]() {
         syncResultFromEditor();
         const QString text = m_result;
+        if (m_onCheckedWrite) {
+            const ClipboardWriteResult write =
+                m_onCheckedWrite(
+                    QStringLiteral("replace"),
+                    text,
+                    m_targetWindow,
+                    true
+                );
+            if (!write.ok) {
+                m_hint->setText(
+                    popupTr8("原选区不可用，请复制后手动替换")
+                );
+                return;
+            }
+            resolveResult(QStringLiteral("replace"));
+            close();
+            return;
+        }
         resolveResult(QStringLiteral("replace"));
         close();
         ClipboardWriter::pasteTextToWindow(text, m_targetWindow, true, true);
@@ -204,6 +250,17 @@ void ResultChoicePopup::setResolvedCallback(
     m_onResolved = onResolved;
 }
 
+void ResultChoicePopup::setCheckedWriteCallback(
+    const std::function<ClipboardWriteResult(
+        const QString &,
+        const QString &,
+        ClipboardWindowHandle,
+        bool
+    )> &onWrite)
+{
+    m_onCheckedWrite = onWrite;
+}
+
 void ResultChoicePopup::setActionCallbacks(
     const std::function<void()> &onRegenerate,
     const std::function<void(const QString &)> &onRetryModel,
@@ -256,6 +313,12 @@ QString ResultChoicePopup::currentModel() const
     return m_currentModel;
 }
 
+void ResultChoicePopup::setHasSelection(bool hasSelection)
+{
+    m_hasSelection = hasSelection;
+    updateActionState();
+}
+
 void ResultChoicePopup::setResultText(
     const QString &result,
     bool resetDraftState)
@@ -301,6 +364,16 @@ void ResultChoicePopup::setBusy(bool busy, const QString &hint)
         ? (busy ? popupTr8("正在生成") : popupTr8("请选择下一步操作"))
         : hint);
     updateActionState();
+    if (!m_busy) {
+        scheduleAutoClose();
+    }
+}
+
+void ResultChoicePopup::setAutoCloseMsec(int autoCloseMsec)
+{
+    m_autoCloseMsec = qMax(0, autoCloseMsec);
+    ++m_autoCloseGeneration;
+    scheduleAutoClose();
 }
 
 void ResultChoicePopup::showNearBottom()
@@ -322,13 +395,10 @@ void ResultChoicePopup::showNearBottom()
             screen.bottom() - height() - 40
         );
     }
-    if (m_autoCloseMsec > 0) {
-        m_hint->setText(popupTr8("将在设定时间后自动关闭"));
-        QTimer::singleShot(m_autoCloseMsec, this, &QWidget::close);
-    }
     show();
     raise();
     activateWindow();
+    scheduleAutoClose();
 }
 
 void ResultChoicePopup::closeEvent(QCloseEvent *event)
@@ -389,7 +459,11 @@ void ResultChoicePopup::chooseModelAndRetry()
     for (const ModelOption &option : options) {
         models->addItem(option.title, option.id);
     }
-    const int currentIndex = models->findData(m_currentModel);
+    const QString displayedModelId = normalizeModelId(
+        m_currentModel,
+        m_currentModel
+    );
+    const int currentIndex = models->findData(displayedModelId);
     if (currentIndex >= 0) {
         models->setCurrentIndex(currentIndex);
     }
@@ -531,4 +605,23 @@ void ResultChoicePopup::resolveResult(const QString &action)
     if (m_onResolved) {
         m_onResolved(action);
     }
+}
+
+void ResultChoicePopup::scheduleAutoClose()
+{
+    if (!isVisible() || m_busy || m_autoCloseMsec <= 0) {
+        return;
+    }
+    const quint64 generation = ++m_autoCloseGeneration;
+    m_hint->setText(popupTr8("将在设定时间后自动关闭"));
+    QTimer::singleShot(
+        m_autoCloseMsec,
+        this,
+        [this, generation]() {
+            if (generation == m_autoCloseGeneration
+                && !m_busy) {
+                close();
+            }
+        }
+    );
 }

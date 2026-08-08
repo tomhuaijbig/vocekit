@@ -1,7 +1,5 @@
 #include "hub_function_workspace_controller.h"
 
-#include "function_editor_dialog.h"
-
 class HubFunctionWorkspaceController::Impl
 {
 public:
@@ -16,16 +14,10 @@ public:
             FunctionWorkspaceControllerAccess access;
             access.settings = this->access.settings;
             access.prompts = this->access.prompts;
+            access.flows = this->access.flows;
             access.saveSettings = this->access.saveSettings;
-            access.openEditorDialog = [this](
-                const FunctionEditorDialogRequest &request,
-                const FunctionEditorDialogAccess &dialogAccess
-            ) {
-                QWidget *parent = this->access.dialogParent
-                    ? this->access.dialogParent
-                    : this->access.pageParent;
-                return runFunctionEditorDialog(request, dialogAccess, parent);
-            };
+            access.operationFailed =
+                this->access.operationFailed;
             workspace.reset(
                 new FunctionWorkspaceController(this->access.pageParent, access)
             );
@@ -97,9 +89,48 @@ void HubFunctionWorkspaceController::refreshActivePage()
     }
 }
 
+void HubFunctionWorkspaceController::refreshActiveCanvas()
+{
+    if (m_impl->workspace) {
+        m_impl->workspace->refreshCanvasState();
+    }
+}
+
 void HubFunctionWorkspaceController::refreshManagementPage()
 {
     if (m_impl->workspace) {
         m_impl->workspace->refreshManagementPage();
     }
+}
+
+bool HubFunctionWorkspaceController::flushAllPendingFlowDrafts()
+{
+    return !m_impl->workspace
+        || m_impl->workspace->flushPendingFlowDraft();
+}
+
+void HubFunctionWorkspaceController::discardAllPendingFlowDrafts()
+{
+    if (m_impl->workspace) {
+        m_impl->workspace->discardPendingFlowDraft();
+    }
+}
+
+bool HubFunctionWorkspaceController::canLeaveFunctionPage()
+{
+    return flushAllPendingFlowDrafts();
+}
+
+bool HubFunctionWorkspaceController::applyFunctionFlowRuntimeEvent(
+    const FunctionFlowNodeExecutionEvent &event)
+{
+    return m_impl->workspace
+        && m_impl->workspace->applyFunctionFlowRuntimeEvent(event);
+}
+
+bool HubFunctionWorkspaceController::applyFunctionFlowRunEvent(
+    const FunctionFlowRunExecutionEvent &event)
+{
+    return m_impl->workspace
+        && m_impl->workspace->applyFunctionFlowRunEvent(event);
 }

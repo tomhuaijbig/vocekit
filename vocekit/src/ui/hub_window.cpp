@@ -84,7 +84,18 @@ public:
         const VocabularyAiCallback &onVocabularyAi = VocabularyAiCallback(),
         QWidget *parent = nullptr
     )
-        : HubWindow(parent), m_settings(new HubSettingsState(settingsAccess)), m_floatingBar(floatingBar), m_onSettingsChanged(onSettingsChanged), m_onVocabularyAi(onVocabularyAi)
+        : HubWindow(parent),
+          m_settings(new HubSettingsState(settingsAccess)),
+          m_functionFlows(settingsAccess.functionFlows),
+          m_refreshFunctionFlowRuntime(
+              settingsAccess.refreshFunctionFlowRuntime
+          ),
+          m_refreshFunctionFlowHotkeys(
+              settingsAccess.refreshFunctionFlowHotkeys
+          ),
+          m_floatingBar(floatingBar),
+          m_onSettingsChanged(onSettingsChanged),
+          m_onVocabularyAi(onVocabularyAi)
     {
         setWindowTitle(tr8("vocekit"));
         resize(1280, 820);
@@ -166,6 +177,13 @@ public:
         uiActions.refreshActiveFunction = [this]() {
             refreshActiveFunctionPage();
         };
+        uiActions.refreshActiveCanvas = [this]() {
+            if (m_functionWorkspaceController) {
+                m_functionWorkspaceController->refreshActiveCanvas();
+            }
+        };
+        uiActions.refreshRuntime = m_refreshFunctionFlowRuntime;
+        uiActions.refreshHotkeys = m_refreshFunctionFlowHotkeys;
         uiActions.refreshOcr = [this]() {
             contentPagesController()->refreshOcrConfiguration();
         };
@@ -180,13 +198,21 @@ public:
         ) {
             utilityPagesController()->updateLogPagination(snapshot);
         };
+        HubRefreshDataAccess dataAccess = createHubRefreshDataAccess(
+            m_settings.data(),
+            contentPagesController()->historyRefreshDataAccess()
+        );
+        dataAccess.reloadFunctionFlows = [this](
+            const QStringList &functionIds
+        ) {
+            for (const QString &functionId : functionIds) {
+                m_settings->reloadFunctionFlowState(functionId);
+            }
+        };
         m_refreshCoordinators.reset(
             new HubRefreshCoordinatorBundle(
                 createHubRefreshCoordinatorActions(
-                    createHubRefreshDataAccess(
-                        m_settings.data(),
-                        contentPagesController()->historyRefreshDataAccess()
-                    ),
+                    dataAccess,
                     uiActions
                 )
             )
@@ -248,8 +274,80 @@ public:
         activateWindow();
     }
 
+    bool requestApplicationQuit() override
+    {
+        if (m_quitRequestInProgress) {
+            return false;
+        }
+        m_quitRequestInProgress = true;
+
+        while (m_functionWorkspaceController
+               && !m_functionWorkspaceController
+                       ->flushAllPendingFlowDrafts()) {
+            QMessageBox prompt(
+                QMessageBox::Warning,
+                tr8("草稿尚未保存"),
+                tr8("流程草稿保存失败。可以重试、取消退出，或明确丢弃未保存草稿后退出。"),
+                QMessageBox::NoButton,
+                this
+            );
+            QPushButton *retry = prompt.addButton(
+                tr8("重试"),
+                QMessageBox::AcceptRole
+            );
+            QPushButton *cancel = prompt.addButton(
+                tr8("取消退出"),
+                QMessageBox::RejectRole
+            );
+            QPushButton *discard = prompt.addButton(
+                tr8("丢弃草稿并退出"),
+                QMessageBox::DestructiveRole
+            );
+            prompt.setDefaultButton(retry);
+            prompt.exec();
+
+            if (prompt.clickedButton() == retry) {
+                continue;
+            }
+            if (prompt.clickedButton() == discard) {
+                m_functionWorkspaceController
+                    ->discardAllPendingFlowDrafts();
+                break;
+            }
+            Q_UNUSED(cancel);
+            m_quitRequestInProgress = false;
+            return false;
+        }
+
+        m_quitApproved = true;
+        m_quitRequestInProgress = false;
+        qApp->quit();
+        return true;
+    }
+
+    bool applyFunctionFlowRuntimeEvent(
+        const FunctionFlowNodeExecutionEvent &event) override
+    {
+        return m_functionWorkspaceController
+            && m_functionWorkspaceController
+                ->applyFunctionFlowRuntimeEvent(event);
+    }
+
+    bool applyFunctionFlowRunEvent(
+        const FunctionFlowRunExecutionEvent &event) override
+    {
+        return m_functionWorkspaceController
+            && m_functionWorkspaceController
+                ->applyFunctionFlowRunEvent(event);
+    }
+
 private:
     QScopedPointer<HubSettingsState> m_settings;
+    FunctionFlowSettingsAccess m_functionFlows;
+    std::function<void(const QStringList &)>
+        m_refreshFunctionFlowRuntime;
+    std::function<void(const QStringList &)>
+        m_refreshFunctionFlowHotkeys;
     QScopedPointer<HubRefreshCoordinatorBundle> m_refreshCoordinators;
     FloatingBar *m_floatingBar = nullptr;
     std::function<void()> m_onSettingsChanged;
@@ -260,15 +358,21 @@ private:
     QScopedPointer<HubUtilityPagesController> m_utilityPagesController;
     QScopedPointer<HubContentPagesController> m_contentPagesController;
     QScopedPointer<HubFunctionWorkspaceController> m_functionWorkspaceController;
+    bool m_quitRequestInProgress = false;
+    bool m_quitApproved = false;
 protected:
     void closeEvent(QCloseEvent *event) override
     {
+        if (m_quitApproved) {
+            event->accept();
+            return;
+        }
         if (m_settings && m_settings->trayResident()) {
             hide();
             event->ignore();
         } else {
-            event->accept();
-            qApp->quit();
+            event->ignore();
+            requestApplicationQuit();
         }
     }
 
@@ -285,6 +389,11 @@ private:
         };
         access.clearCurrentFunction = [this]() {
             functionWorkspaceController()->clearFunction();
+        };
+        access.canLeaveFunctionPage = [this]() {
+            return !m_functionWorkspaceController
+                || m_functionWorkspaceController
+                    ->canLeaveFunctionPage();
         };
         access.addFunction = [this]() {
             return functionWorkspaceController()->addFunction();
@@ -457,18 +566,10 @@ private:
         if (!m_homePageController) {
             HomePageAccessDependencies dependencies;
             dependencies.settings = m_settings.data();
-            dependencies.editFunction = [this](
-                const QString &id,
-                const QString &title,
-                bool custom,
-                const CustomFunctionDef &customFunction
-            ) {
-                functionWorkspaceController()->editFunction(
-                    id,
-                    title,
-                    custom,
-                    customFunction
-                );
+            dependencies.openFunction = [this](const QString &id) {
+                if (m_navigationController) {
+                    navigationController()->openFunction(id);
+                }
             };
             dependencies.settingsChanged = [this]() {
                 notifySettingsChanged();
@@ -527,9 +628,23 @@ private:
             workspaceAccess.settings = m_settings.data();
             workspaceAccess.prompts =
                 utilityPagesController()->promptSettingsAccess();
+            workspaceAccess.flows = m_functionFlows;
             workspaceAccess.pageParent = this;
-            workspaceAccess.dialogParent = this;
             workspaceAccess.saveSettings = [this]() { saveHubSettings(); };
+            workspaceAccess.operationFailed = [this](
+                const OperationError &error
+            ) {
+                QString message = error.message.trimmed();
+                if (message.isEmpty()) {
+                    message = error.code.trimmed().isEmpty()
+                        ? tr8("操作未能保存，请稍后重试。")
+                        : error.code;
+                }
+                if (!error.detail.trimmed().isEmpty()) {
+                    message += QStringLiteral("\n\n") + error.detail;
+                }
+                showAttentionWarning(this, tr8("操作失败"), message);
+            };
             m_functionWorkspaceController.reset(
                 new HubFunctionWorkspaceController(workspaceAccess)
             );
@@ -547,8 +662,24 @@ private:
 
     void saveHubSettings()
     {
-        if (!m_settings->save()) {
-            showAttentionWarning(this, tr8("保存失败"), tr8("无法写入 config/settings.json。"));
+        OperationError error;
+        if (!m_settings->save(&error)) {
+            if (error.code == QStringLiteral(
+                    "settings_function_set_stale"
+                )) {
+                m_settings->load();
+                showAttentionWarning(
+                    this,
+                    tr8("设置已更新"),
+                    tr8("功能列表已在其他位置发生变化，")
+                        + tr8("请检查最新设置后重新操作。")
+                );
+                return;
+            }
+            const QString message = error.message.trimmed().isEmpty()
+                ? tr8("无法写入 config/settings.json。")
+                : error.message;
+            showAttentionWarning(this, tr8("保存失败"), message);
             return;
         }
         notifySettingsChanged();

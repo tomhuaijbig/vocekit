@@ -28,6 +28,10 @@ public:
         const AppSettingsData &data,
         OperationError *error = nullptr
     );
+    bool replaceNonFlowSettingsAndSave(
+        const AppSettingsData &editedSettings,
+        OperationError *error = nullptr
+    );
 
     QString path() const;
 

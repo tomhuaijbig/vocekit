@@ -12,7 +12,7 @@ class HubSettingsState;
 struct HomePageAccessDependencies
 {
     HubSettingsState *settings = nullptr;
-    FunctionModeGrid::EditCallback editFunction;
+    FunctionModeGrid::OpenCallback openFunction;
     FunctionModeGrid::SettingsChangedCallback settingsChanged;
     FunctionModeGrid::WarningCallback showWarning;
     RecentHistoryPanel::EntriesProvider recentEntries;

@@ -2,6 +2,7 @@
 #define VOCEKIT_APP_SETTINGS_DEFAULTS_H
 
 #include <QString>
+#include <QStringList>
 
 QString defaultModelForFunction(const QString &id);
 QString modelProvider(const QString &model);
@@ -38,6 +39,7 @@ int defaultResultPopupSeconds();
 QString speechProviderBaidu();
 QString speechProviderXfyun();
 QString speechProviderCustom();
+QStringList supportedSpeechProviderIds();
 QString normalizeSpeechProvider(const QString &provider);
 QString speechProviderTitle(const QString &provider);
 
@@ -46,6 +48,7 @@ QString ocrEngineRapid();
 QString ocrEngineWindows();
 QString ocrEngineCustomCloud();
 QString ocrEngineVision();
+QStringList supportedOcrEngineIds();
 QString normalizeOcrEngine(const QString &engine);
 
 #endif // VOCEKIT_APP_SETTINGS_DEFAULTS_H

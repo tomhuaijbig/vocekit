@@ -22,7 +22,6 @@ SOURCES += \
     ../../src/ui/custom_function_creation_coordinator.cpp \
     ../../src/ui/function_command_page_access_factory.cpp \
     ../../src/ui/function_editor_coordinator.cpp \
-    ../../src/ui/function_editor_dialog_access_factory.cpp \
     ../../src/ui/function_management_page_access_factory.cpp \
     ../../src/ui/function_pages_access_factory.cpp \
     ../../src/ui/function_pages_controller.cpp \
@@ -37,7 +36,6 @@ HEADERS += \
     ../../src/domain/function_settings.h \
     ../../src/domain/prompt_runtime_library.h \
     ../../src/ui/function_command_page.h \
-    ../../src/ui/function_editor_dialog.h \
     ../../src/ui/function_management_page.h \
     ../../src/ui/function_pages_controller.h \
     ../../src/ui/function_workspace_controller.h \

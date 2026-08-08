@@ -2,19 +2,24 @@
 #define VOCEKIT_CUSTOM_FUNCTION_CREATION_COORDINATOR_H
 
 #include "../domain/app_legacy_types.h"
+#include "function_flow_settings_access.h"
+
+#include <QString>
 
 #include <functional>
 
 class HubSettingsState;
 
-// 新增自定义功能的事务动作。编辑取消时会撤销刚创建的临时功能。
+// 创建自定义功能并立即持久化，返回新功能编号供内置功能页打开。
 struct CustomFunctionCreationActions
 {
     HubSettingsState *settings = nullptr;
-    std::function<void()> saveSettings;
-    std::function<bool(const CustomFunctionDef &)> editFunction;
+    FunctionFlowSettingsAccess flows;
 };
 
-bool createAndEditCustomFunction(const CustomFunctionCreationActions &actions);
+QString createCustomFunction(
+    const CustomFunctionCreationActions &actions,
+    OperationError *error = nullptr
+);
 
 #endif // VOCEKIT_CUSTOM_FUNCTION_CREATION_COORDINATOR_H

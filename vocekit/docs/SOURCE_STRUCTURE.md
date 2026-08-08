@@ -4,7 +4,7 @@
 
 项目保留 `src/voiceassistant.cpp` 作为应用启动和少量兼容组装入口。主窗口、页面、设置、历史、截图、录音和部分任务流程已经迁入独立 `.h/.cpp` 模块，不再通过旧 `.inc` 文件拼接实现。
 
-页面、输入收集、全局功能命令、语音识别、模型处理、运行收尾、历史持久化、配置读写、外部接口和结果输出已经拥有独立入口。模型、语音、OCR、接口自检和网络诊断的主要长任务均已接入统一取消令牌；历史修改已经统一经过记录服务，修改完成后再通过 `ApplicationEvents` 发布变化，由刷新协调器同步历史页和首页最近记录。当前重构重点是继续收口设置及少量页面间的直接刷新，为后续可配置的输入输出画布提供稳定节点。
+页面、输入收集、全局功能命令、语音识别、模型处理、运行收尾、历史持久化、配置读写、外部接口和结果输出已经拥有独立入口。模型、语音、OCR、接口自检和网络诊断的主要长任务均已接入统一取消令牌；历史修改已经统一经过记录服务，修改完成后再通过 `ApplicationEvents` 发布变化，由刷新协调器同步历史页和首页最近记录。功能流程画布现已建立独立的图模型、草稿/发布事务、编译计划、运行调度和结果收尾边界；经典流程仍作为没有可用发布画像时的兼容兜底。
 
 ## 主要目录
 
@@ -19,6 +19,7 @@
 - `src/ui/`：主窗口、独立页面、设置分区、历史列表、词库、OCR、测试工具、悬浮条和结果小框等界面模块。
 - `src/providers/`：统一接口提供商抽象、网络请求执行器、HTTP/SSE/WebSocket 可替换传输层和提供商注册表。DeepSeek、OpenAI、自定义 OpenAI 兼容接口、Claude、百度语音、讯飞语音和自定义语音均直接拥有请求与响应逻辑。
 - `src/recording/`：录音分段、长录音合并和旧录音器拆分头文件。
+- `src/runtime/`：功能流程运行日志等不依赖界面的运行期基础设施；只记录白名单元数据，不保存提示词、用户正文、图片、音频或密钥。
 - `src/storage/`：本地持久化服务。当前包含历史记录目录、索引、详情 JSON 扫描、可读文本生成及统一历史修改服务。
 - `src/tasks/`：可复用任务节点和任务控制基础设施。当前包含取消令牌、语音识别任务、诊断辅助和大模型请求任务。
 
@@ -47,6 +48,16 @@
 - `src/controllers/voice_run_lifecycle_controller.*`：集中管理模型执行、提示词和词库注入、输出后修正、运行耗时记录和历史持久化。每次模型运行都会创建新的 `CancellationSource`，开始下一次运行或销毁控制器前必须先取消旧请求。默认生产适配位于 `voice_run_lifecycle_adapters.cpp`，`VoiceController` 不再直接组装历史请求或调用模型执行器。
 - `src/controllers/voice_result_presentation_controller.*`：集中管理普通结果小框、截图结果窗、流式内容、自动写入、重新生成、换模型重试、继续追问、窗口位置和透明度、草稿及结果历史。结果小框在生成中关闭时通过访问接口取消当前模型任务，取消不会进入通用失败弹窗。它通过访问接口调用模型与存储，不直接依赖主窗口。
 - `src/controllers/function_command_controller.*`：统一处理功能快捷键按下与释放、目标窗口、词库快捷加入、截图入口、选中文字、语音配置检查和录音启动。Windows 前台窗口读取位于独立适配器，`VoiceController` 不再保存命令运行状态。
+- `src/domain/function_flow_graph.*`、`function_flow_ports.*` 与 `function_flow_runtime_types.*`：九种节点、类型化端口、触发画像、不可变运行计划、节点/运行事件及取消状态等纯数据结构。图层不得依赖 QWidget、Provider 或文件系统。
+- `src/domain/function_flow_validation.*`、`function_flow_compiler.*` 与 `function_flow_scheduler.*`：依次负责结构和端口校验、按触发入口编译不可变 DAG 计划，以及按依赖顺序串行调度、汇合、失败和有界取消。运行时不得直接解释可编辑草稿。
+- `src/config/function_flow_json.*`：流程 schema、草稿、编辑器视口和发布快照的兼容 JSON 边界。未知字段需要保留；较新 schema 和损坏数据必须安全只读或回退，不能静默覆盖。
+- `src/controllers/function_flow_editor_controller.*` 与 `function_flow_publication_service.*`：编辑命令、撤销/重做、自动保存、版本冲突和发布事务。草稿保存只发布草稿事件；校验、编译、完整哈希和原子设置保存全部成功后才替换发布版。
+- `src/controllers/function_flow_plan_cache.*`：按功能缓存已启用发布画像。设置事件带有 `functionIds` 时只重建对应功能；正在运行的 `QSharedPointer` 继续持有启动时冻结的 revision/hash。
+- `src/controllers/function_flow_execution_controller.*` 与 `function_flow_runtime_adapters.*`：冻结目标窗口、模型、提示词、语音、OCR、历史目录等依赖，协调九种节点并屏蔽取消后的迟到结果。模型/提示词或服务配置失效属于配置错误，不能转入经典流程重复执行。
+- `src/controllers/function_flow_result_controller.*`：统一处理结果小框、截图对照窗、自动写入、重新生成、换模型、继续追问和编辑后的最终文本。一次流程无论包含多少输出动作都只保存一条历史。
+- `src/tasks/function_flow_model_task_runner.*` 与 `src/domain/function_flow_model_message.*`：把上游输入按确定顺序转换为单次模型请求，传递取消令牌、模型 ID、提示词版本和流式结果；模型节点不直接访问 UI。
+- `src/ui/function_canvas_*.*`：画布视图、场景、节点、边、节点库、Inspector 和编辑器壳层。UI 只提交编辑命令和显示窄运行事件，不负责持久化、发布校验或运行调度。
+- `src/domain/function_flow_errors.*` 与 `src/runtime/function_flow_runtime_log.*`：集中维护稳定错误码、用户安全提示、FAQ 映射和白名单 JSONL 日志，避免 UI、历史和日志各自拼接 Provider 详情。
 - `src/domain/history_types.*`：历史记录详情、查询、摘要和分段重试结果等纯数据结构。新增历史字段时先改这里，再改读写逻辑。
 - `src/storage/history_store.*`：历史记录读取和底层文件实现，负责目录结构、`history_index.json`、详情 JSON 扫描及可读文本生成。追加、删除、收藏、重试和索引写入接口是私有实现，生产调用方不得绕过记录服务。
 - `src/storage/history_record_service.*`：生产环境唯一历史修改入口。语音和 OCR 保存、收藏更新、单条或批量删除、分段重试及导入后的索引重建都必须经过这里；服务会校验详情文件位于受管历史目录内。
@@ -65,9 +76,9 @@
 
 ## 下一步建议
 
-1. 按最终验收清单人工复核听写、翻译、问答、截图、历史和设置主流程。
-2. 生成便携测试包并执行隐私文件、运行库和首次启动检查。
-3. 后续新增画布式输入输出编排时，复用现有功能设置、执行管线和事件边界，不把流程重新写回主窗口。
+1. 使用真实测试账号继续复核语音、模型、云 OCR、快捷键冲突和跨应用自动写入；自动测试不得替代这些外部环境验收。
+2. 后续增加节点类型时先扩展 schema、端口表、校验器、编译器和纯测试，再接 UI 与运行适配器，不能只在画布中添加一个可见卡片。
+3. 保持草稿、发布版和正在运行的计划互相隔离；任何兼容迁移都要验证未知字段保留、发布失败不回滚旧版本以及经典流程只在 `NotAvailable` 时兜底。
 
 每完成一段拆分，都要至少运行：
 

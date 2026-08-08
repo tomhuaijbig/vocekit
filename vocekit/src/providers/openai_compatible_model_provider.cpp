@@ -97,8 +97,25 @@ ResolvedProviderConfig resolveConfig(
         config.endpoint = QUrl(QStringLiteral(
             "https://api.openai.com/v1/chat/completions"
         ));
+        const QString configuredBaseUrl =
+            secrets.openaiBaseUrl.trimmed();
+        if (!configuredBaseUrl.isEmpty()) {
+            config.endpoint = openAiCompatibleChatUrl(configuredBaseUrl);
+            if (!config.endpoint.isValid()
+                || config.endpoint.host().isEmpty()) {
+                config.error = operationError(
+                    QStringLiteral("provider.configuration"),
+                    tr8(
+                        "OpenAI Base URL 无效。"
+                        "请填写根地址、/v1 地址或完整的 "
+                        "/v1/chat/completions 地址。"
+                    )
+                );
+                return config;
+            }
+        }
         config.apiKey = secrets.openaiApiKey.trimmed();
-        config.defaultModel = QStringLiteral("gpt-5.5");
+        config.defaultModel = QStringLiteral("gpt-5.6-terra");
         if (config.apiKey.isEmpty()) {
             config.error = operationError(
                 QStringLiteral("provider.configuration"),

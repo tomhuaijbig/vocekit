@@ -117,6 +117,11 @@ unsigned int HoldShortcutMatcher::modifiers() const
     return m_modifiers;
 }
 
+bool HoldShortcutMatcher::isPressed() const
+{
+    return m_pressed;
+}
+
 #ifdef Q_OS_WIN
 static HoldToTalkHook *g_holdToTalkHook = nullptr;
 
@@ -240,6 +245,18 @@ void HoldToTalkHook::uninstall()
 bool HoldToTalkHook::isInstalled() const
 {
     return m_hook != nullptr;
+}
+
+bool HoldToTalkHook::hasPressedHold() const
+{
+    for (auto it = m_matchers.constBegin();
+         it != m_matchers.constEnd();
+         ++it) {
+        if (it.value().isPressed()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void HoldToTalkHook::processNativeKey(

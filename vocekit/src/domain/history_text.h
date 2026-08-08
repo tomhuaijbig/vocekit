@@ -8,6 +8,7 @@
 
 QString historyElapsedDurationText(qint64 elapsedMs);
 QString historyDisplayTimeText(const QString &iso);
+QString historyEntryModeText(const HistoryEntry &entry);
 QString historyEntryPreviewText(const HistoryEntry &entry, int maxLength = 160);
 QString historyEntryTitleText(const HistoryEntry &entry);
 QString historyEntryRecognizedText(const HistoryEntry &entry);

@@ -30,10 +30,12 @@ CustomFunctionDef toCustomFunction(const FunctionSettings &source)
     function.shortcut = settings.shortcut;
     function.model = settings.modelId;
     function.outputMode = settings.output.outputMode;
+    function.outputOrder = settings.output.order;
     function.resultTemplate = settings.output.resultTemplate;
     function.useSelection = settings.input.useSelection;
     function.useVoice = settings.input.useVoice;
     function.useScreenshot = settings.input.useScreenshot;
+    function.inputOrder = settings.input.order;
     function.screenshotTriggerMode = settings.input.screenshotTriggerMode;
     function.screenshotShortcut = settings.input.screenshotShortcut;
     function.floatingBarSeconds = settings.output.floatingBarSeconds;
@@ -52,7 +54,8 @@ CustomFunctionDef toCustomFunction(const FunctionSettings &source)
     return function;
 }
 
-FunctionSettings fromCustomFunction(const CustomFunctionDef &source)
+FunctionSettings buildFunctionSettingsFromCustomFunction(
+    const CustomFunctionDef &source)
 {
     FunctionSettings settings;
     settings.id = source.id.trimmed();
@@ -67,6 +70,7 @@ FunctionSettings fromCustomFunction(const CustomFunctionDef &source)
     settings.input.useSelection = source.useSelection;
     settings.input.useVoice = source.useVoice;
     settings.input.useScreenshot = source.useScreenshot;
+    settings.input.order = source.inputOrder;
     settings.input.screenshotTriggerMode = source.screenshotTriggerMode;
     settings.input.screenshotShortcut = source.screenshotShortcut;
     settings.recording.triggerMode = source.recordingTriggerMode;
@@ -77,6 +81,7 @@ FunctionSettings fromCustomFunction(const CustomFunctionDef &source)
     settings.recording.beepEnabled = source.recordingBeepEnabled;
     settings.recording.beepPath = source.recordingBeepPath;
     settings.output.outputMode = source.outputMode;
+    settings.output.order = source.outputOrder;
     settings.output.resultTemplate = source.resultTemplate;
     settings.output.resultActions = source.resultActions;
     settings.output.floatingBarSeconds = source.floatingBarSeconds;
@@ -86,6 +91,12 @@ FunctionSettings fromCustomFunction(const CustomFunctionDef &source)
 }
 
 } // namespace
+
+FunctionSettings functionSettingsFromCustomFunction(
+    const CustomFunctionDef &source)
+{
+    return buildFunctionSettingsFromCustomFunction(source);
+}
 
 HubSettingsState::HubSettingsState(const HubWindowAccess &access)
     : m_access(access)
@@ -109,24 +120,77 @@ void HubSettingsState::load()
     refreshCustomFunctions();
 }
 
-bool HubSettingsState::save() const
+bool HubSettingsState::save(OperationError *error) const
 {
+    if (m_access.applyNonFlowAndSave) {
+        return m_access.applyNonFlowAndSave(m_data, error);
+    }
     return m_access.applyAndSave
         ? m_access.applyAndSave(m_data)
         : false;
 }
 
-bool HubSettingsState::replaceAndSave(const AppSettingsData &data)
+bool HubSettingsState::replaceAndSave(
+    const AppSettingsData &data,
+    OperationError *error)
 {
+    OperationError localError;
+    OperationError *saveError = error ? error : &localError;
+    *saveError = OperationError();
     const AppSettingsData previous = m_data;
     m_data = data;
     refreshCustomFunctions();
-    if (save()) {
+    if (save(saveError)) {
         return true;
+    }
+    if (saveError->code
+        == QStringLiteral("settings_function_set_stale")) {
+        load();
+        return false;
     }
     m_data = previous;
     refreshCustomFunctions();
     return false;
+}
+
+void HubSettingsState::replaceFunctionFlowState(
+    const QString &functionId,
+    const FunctionFlowState &state)
+{
+    const int index = m_data.functionIndex(functionId);
+    if (index < 0) {
+        return;
+    }
+    m_data.functions[index].flow = state;
+    refreshCustomFunctions();
+}
+
+bool HubSettingsState::reloadFunctionFlowState(
+    const QString &functionId)
+{
+    if (!m_access.settingsSnapshotProvider) {
+        return false;
+    }
+    const AppSettingsData latest =
+        m_access.settingsSnapshotProvider();
+    const int index = latest.functionIndex(functionId);
+    if (index < 0) {
+        return false;
+    }
+    const int localIndex = m_data.functionIndex(functionId);
+    if (localIndex < 0) {
+        return false;
+    }
+    FunctionSettings synchronized =
+        m_data.functions.at(localIndex);
+    const FunctionSettings &remote =
+        latest.functions.at(index);
+    synchronized.executionMode = remote.executionMode;
+    synchronized.flow = remote.flow;
+    m_data.functions[localIndex] =
+        normalizeFunctionSettings(synchronized);
+    refreshCustomFunctions();
+    return true;
 }
 
 AppSettingsData HubSettingsState::toData() const
@@ -264,10 +328,25 @@ void HubSettingsState::refreshCustomFunctions()
 QString HubSettingsState::nextCustomFunctionId() const
 {
     int maximum = 0;
-    for (const CustomFunctionDef &function : m_customFunctions) {
-        if (function.id.startsWith(QStringLiteral("custom_"))) {
-            maximum = qMax(maximum, function.id.mid(7).toInt());
+    const auto includeId = [&maximum](const QString &id) {
+        if (!id.startsWith(QStringLiteral("custom_"))) {
+            return;
         }
+        bool ok = false;
+        const int number = id.mid(7).toInt(&ok);
+        if (ok && number > 0) {
+            maximum = qMax(maximum, number);
+        }
+    };
+    for (const FunctionSettings &function : m_data.functions) {
+        includeId(function.id);
+    }
+    for (const QString &id :
+         m_data.retainedOrphanFunctionFlows.keys()) {
+        includeId(id);
+    }
+    for (const QString &id : m_data.functionOrder) {
+        includeId(id);
     }
     return QStringLiteral("custom_%1").arg(maximum + 1);
 }
@@ -286,7 +365,8 @@ QString HubSettingsState::suggestedCustomShortcut() const
 
 void HubSettingsState::addCustomFunction(const CustomFunctionDef &function)
 {
-    const FunctionSettings settings = fromCustomFunction(function);
+    const FunctionSettings settings =
+        functionSettingsFromCustomFunction(function);
     if (settings.id.isEmpty() || settings.name.isEmpty()) {
         return;
     }
@@ -299,9 +379,11 @@ void HubSettingsState::addCustomFunction(const CustomFunctionDef &function)
 
 void HubSettingsState::updateCustomFunction(const CustomFunctionDef &function)
 {
-    const FunctionSettings settings = fromCustomFunction(function);
+    FunctionSettings settings =
+        functionSettingsFromCustomFunction(function);
     const int index = m_data.functionIndex(settings.id);
     if (index >= 0 && !m_data.functions.at(index).builtIn) {
+        settings.flow = m_data.functions.at(index).flow;
         m_data.functions[index] = settings;
     } else if (index < 0) {
         m_data.functions.append(settings);
@@ -462,6 +544,24 @@ void HubSettingsState::setOutputModeFor(const QString &id, const QString &mode)
     refreshCustomFunctions();
 }
 
+QStringList HubSettingsState::outputOrderFor(const QString &id) const
+{
+    const FunctionSettings *settings = findFunction(id);
+    return normalizeFunctionOutputOrder(
+        settings ? settings->output.order : QStringList()
+    );
+}
+
+void HubSettingsState::setOutputOrderFor(
+    const QString &id,
+    const QStringList &order
+)
+{
+    mutableFunction(id)->output.order =
+        normalizeFunctionOutputOrder(order);
+    refreshCustomFunctions();
+}
+
 QString HubSettingsState::resultTemplateFor(const QString &id) const
 {
     const FunctionSettings *settings = findFunction(id);
@@ -535,6 +635,24 @@ bool HubSettingsState::useScreenshotFor(const QString &id) const
 void HubSettingsState::setUseScreenshotFor(const QString &id, bool enabled)
 {
     mutableFunction(id)->input.useScreenshot = enabled;
+    refreshCustomFunctions();
+}
+
+QStringList HubSettingsState::inputOrderFor(const QString &id) const
+{
+    const FunctionSettings *settings = findFunction(id);
+    return normalizeFunctionInputOrder(
+        settings ? settings->input.order : QStringList()
+    );
+}
+
+void HubSettingsState::setInputOrderFor(
+    const QString &id,
+    const QStringList &order
+)
+{
+    mutableFunction(id)->input.order =
+        normalizeFunctionInputOrder(order);
     refreshCustomFunctions();
 }
 

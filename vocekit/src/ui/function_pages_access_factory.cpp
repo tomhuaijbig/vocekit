@@ -7,25 +7,19 @@ FunctionPagesAccessAssembly createFunctionPagesAccess(
     FunctionCommandPageAccessDependencies commandDependencies;
     commandDependencies.settings = dependencies.settings;
     commandDependencies.prompts = dependencies.prompts;
+    commandDependencies.flows = dependencies.flows;
     commandDependencies.saveSettings = dependencies.saveSettings;
-
-    const auto editFunction = dependencies.editFunction;
-    commandDependencies.editCustomFunction = [editFunction](
-        const QString &id,
-        const QString &title,
-        const CustomFunctionDef &function
-    ) {
-        if (editFunction) {
-            editFunction(id, title, true, function);
-        }
-    };
+    commandDependencies.operationFailed =
+        dependencies.operationFailed;
 
     FunctionManagementPageAccessDependencies managementDependencies;
     managementDependencies.settings = dependencies.settings;
     managementDependencies.summaryProvider = dependencies.summaryProvider;
     managementDependencies.addFunction = dependencies.addFunction;
     managementDependencies.editFunction = dependencies.editFunction;
-    managementDependencies.saveSettings = dependencies.saveSettings;
+    managementDependencies.flows = dependencies.flows;
+    managementDependencies.operationFailed =
+        dependencies.operationFailed;
 
     FunctionPagesAccessAssembly assembly;
     assembly.command = createFunctionCommandPageAccess(commandDependencies);

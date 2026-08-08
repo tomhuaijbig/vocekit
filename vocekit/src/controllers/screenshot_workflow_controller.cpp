@@ -4,6 +4,7 @@
 #include "../config/app_settings_data.h"
 #include "../config/secret_config.h"
 #include "../domain/function_catalog.h"
+#include "../domain/history_types.h"
 #include "../domain/history_record_builder.h"
 #include "../domain/vocabulary_runtime.h"
 #include "../domain/voice_screenshot_session.h"
@@ -25,6 +26,102 @@ QString tr8(const char *text)
     return QString::fromUtf8(text);
 }
 
+OperationError flowScreenshotError(const QString &message)
+{
+    OperationError error;
+    error.code = QStringLiteral("flow_screenshot_failed");
+    error.message = message;
+    return error;
+}
+
+bool flowOcrEngineFromId(const QString &engineId, OcrEngine *engine)
+{
+    if (!engine) {
+        return false;
+    }
+    const QString id = engineId.trimmed();
+    if (id == QStringLiteral("automatic")) {
+        *engine = OcrEngine::Automatic;
+        return true;
+    }
+    if (id == QStringLiteral("rapid")) {
+        *engine = OcrEngine::RapidOcr;
+        return true;
+    }
+    if (id == QStringLiteral("windows")) {
+        *engine = OcrEngine::WindowsOcr;
+        return true;
+    }
+    if (id == QStringLiteral("customCloud")) {
+        *engine = OcrEngine::CustomCloud;
+        return true;
+    }
+    if (id == QStringLiteral("vision")) {
+        *engine = OcrEngine::VisionModel;
+        return true;
+    }
+    return false;
+}
+
+bool flowOcrUploadsImage(OcrEngine engine)
+{
+    return engine == OcrEngine::CustomCloud
+        || engine == OcrEngine::VisionModel;
+}
+
+void removeFlowTemporaryFile(const QString &path)
+{
+    if (path.isEmpty()
+        || !QFileInfo::exists(path)
+        || QFile::remove(path)) {
+        return;
+    }
+
+    QCoreApplication *application =
+        QCoreApplication::instance();
+    if (!application) {
+        return;
+    }
+    QTimer *retryTimer = new QTimer(application);
+    retryTimer->setInterval(25);
+    QSharedPointer<int> attempts(new int(0));
+    QObject::connect(
+        retryTimer,
+        &QTimer::timeout,
+        application,
+        [retryTimer, attempts, path]() {
+            ++(*attempts);
+            if (!QFileInfo::exists(path)
+                || QFile::remove(path)
+                || *attempts >= 200) {
+                retryTimer->stop();
+                retryTimer->deleteLater();
+            }
+        }
+    );
+    retryTimer->start();
+}
+
+struct ScreenshotFlowState
+{
+    bool active = false;
+    bool capturePending = false;
+    bool recognitionStarted = false;
+    bool injectedCapture = false;
+    bool injectedOcr = false;
+    int generation = 0;
+    FunctionFlowRunContext run;
+    FunctionFlowCompiledNode node;
+    FunctionFlowNodeCompletion completion;
+    AppSettingsData settingsSnapshot;
+    OcrEngine engine = OcrEngine::Automatic;
+    int timeoutMs = 45000;
+    QString effectiveNetworkPolicy;
+    QImage capturedImage;
+    QRect capturedRect;
+    QString temporaryPath;
+};
+
 } // namespace
 
 class ScreenshotWorkflowController::Impl : public QObject
@@ -38,7 +135,9 @@ public:
         : QObject(parent),
           m_access(access),
           m_bar(bar),
-          m_ocrManager(new OcrManager(this))
+          m_ocrManager(new OcrManager(this)),
+          m_flowCancellationTimer(new QTimer(this)),
+          m_flowTimeoutTimer(new QTimer(this))
     {
         m_ocrManager->statusCallback = [this](const QString &status) {
             if (m_session.isActive()) {
@@ -48,10 +147,50 @@ public:
         m_ocrManager->finishedCallback = [this](const OcrResult &result) {
             handleOcrFinished(result);
         };
+        m_flowCancellationTimer->setInterval(10);
+        connect(
+            m_flowCancellationTimer,
+            &QTimer::timeout,
+            this,
+            [this]() {
+                if (m_flow.active
+                    && m_flow.run.cancellation
+                        .isCancellationRequested()) {
+                    completeFlowCancelled(true);
+                }
+            }
+        );
+        m_flowTimeoutTimer->setSingleShot(true);
+        connect(
+            m_flowTimeoutTimer,
+            &QTimer::timeout,
+            this,
+            [this]() {
+                if (!m_flow.active
+                    || !m_flow.recognitionStarted) {
+                    return;
+                }
+                FunctionFlowNodeResult result;
+                result.state = FunctionFlowNodeState::Failed;
+                result.error = flowScreenshotError(
+                    tr8("截图识别超时。")
+                );
+                appendFlowHistoryObservation(&result, nullptr);
+                completeFlow(
+                    result,
+                    true,
+                    tr8("识别超时"),
+                    QStringLiteral("错误码=TIMEOUT")
+                );
+            }
+        );
     }
 
     ~Impl() override
     {
+        if (m_flow.active) {
+            completeFlowCancelled(true);
+        }
         m_aiCancellation.cancel();
         if (m_ocrManager && m_ocrManager->isBusy()) {
             m_ocrManager->cancel();
@@ -132,10 +271,11 @@ public:
             handleWorkbenchAction(action);
         };
         overlay->cancelledCallback = [this]() {
+            const QString cancelledFunctionId = m_modeId;
             logRuntimeEvent(
                 tr8("截图输入"),
                 tr8("取消"),
-                QStringLiteral("功能=") + m_modeId,
+                QStringLiteral("功能=") + cancelledFunctionId,
                 elapsedMs()
             );
             if (m_bar) {
@@ -146,6 +286,9 @@ public:
                 m_bar->hideLater();
             }
             reset(false);
+            if (m_access.cancelled) {
+                m_access.cancelled(cancelledFunctionId);
+            }
         };
 
         QString error;
@@ -168,8 +311,201 @@ public:
         return true;
     }
 
+    bool beginForFlow(
+        const FunctionFlowRunContext &run,
+        const FunctionFlowCompiledNode &node,
+        const FunctionFlowNodeCompletion &completion)
+    {
+        if (!completion) {
+            return false;
+        }
+
+        if (isBusy() || m_session.isActive() || m_overlay) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("当前截图任务尚未结束。")
+            );
+            completion(result);
+            return false;
+        }
+        if (run.cancellation.isCancellationRequested()) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Cancelled;
+            completion(result);
+            return false;
+        }
+        if (node.type != FunctionFlowNodeType::ScreenshotSource
+            || node.nodeId.trimmed().isEmpty()
+            || !run.dependencies
+            || !run.dependencies->byNodeId.contains(node.nodeId)) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("截图流程配置不完整。")
+            );
+            completion(result);
+            return false;
+        }
+
+        const FunctionFlowResolvedNodeSettings resolved =
+            run.dependencies->byNodeId.value(node.nodeId);
+        OcrEngine engine = OcrEngine::Automatic;
+        if (!flowOcrEngineFromId(resolved.ocrEngineId, &engine)
+            || node.config.screenshot.timeoutMs <= 0
+            || (resolved.effectiveNetworkPolicy
+                    != QStringLiteral("direct")
+                && resolved.effectiveNetworkPolicy
+                    != QStringLiteral("systemProxy"))) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("截图 OCR 配置无效。")
+            );
+            completion(result);
+            return false;
+        }
+
+        m_flow = ScreenshotFlowState();
+        m_flow.active = true;
+        m_flow.capturePending = true;
+        m_flow.generation = ++m_nextFlowGeneration;
+        m_flow.run = run;
+        m_flow.node = node;
+        m_flow.completion = completion;
+        m_flow.settingsSnapshot = m_settings;
+        m_flow.engine = engine;
+        m_flow.timeoutMs = node.config.screenshot.timeoutMs;
+        m_flow.effectiveNetworkPolicy =
+            resolved.effectiveNetworkPolicy;
+        m_flowOcrConfig = m_ocrManager
+            ? m_ocrManager->config()
+            : OcrManagerConfig();
+        m_flowOcrConfig.timeoutMs = m_flow.timeoutMs;
+        m_flowOcrConfig.customCloud.timeoutMs =
+            m_flow.timeoutMs;
+        m_flowOcrConfig.customCloud.useSystemProxy =
+            m_flow.effectiveNetworkPolicy
+                == QStringLiteral("systemProxy");
+        m_flowOcrConfig.customCloud.networkPolicy =
+            m_flow.effectiveNetworkPolicy;
+
+        m_flowCancellationTimer->start();
+        setProcessing(true);
+        logFlow(
+            tr8("开始选区"),
+            QStringLiteral("节点=") + node.nodeId
+                + QStringLiteral("，引擎=")
+                + resolved.ocrEngineId
+        );
+
+        const int generation = m_flow.generation;
+        const QPointer<Impl> guard(this);
+        const ScreenshotWorkflowCapturedCallback captured =
+            [guard, generation](
+                const QImage &image,
+                const QRect &rect) {
+                if (guard) {
+                    guard->handleFlowCaptured(
+                        generation,
+                        image,
+                        rect
+                    );
+                }
+            };
+        const ScreenshotWorkflowCancelledCallback cancelled =
+            [guard, generation]() {
+                if (guard) {
+                    guard->handleFlowCaptureCancelled(generation);
+                }
+            };
+
+        QString captureError;
+        bool started = false;
+        if (m_access.beginFlowCapture) {
+            m_flow.injectedCapture = true;
+            started = m_access.beginFlowCapture(
+                captured,
+                cancelled,
+                &captureError
+            );
+        } else {
+            auto *overlay = new ScreenCaptureOverlay;
+            m_overlay = overlay;
+            if (run.dependencies) {
+                overlay->setFunctionActionTitle(
+                    run.dependencies->functionTitle
+                );
+            }
+            overlay->capturedCallback =
+                [guard, generation](
+                    const QImage &image,
+                    const QRect &rect) {
+                    if (!guard) {
+                        return;
+                    }
+                    QTimer::singleShot(
+                        0,
+                        guard.data(),
+                        [guard, generation, image, rect]() {
+                            if (guard) {
+                                guard->handleFlowCaptured(
+                                    generation,
+                                    image,
+                                    rect
+                                );
+                            }
+                        }
+                    );
+                };
+            overlay->actionRequestedCallback = nullptr;
+            overlay->cancelledCallback =
+                [guard, generation]() {
+                    if (!guard) {
+                        return;
+                    }
+                    QTimer::singleShot(
+                        0,
+                        guard.data(),
+                        [guard, generation]() {
+                            if (guard) {
+                                guard->handleFlowCaptureCancelled(
+                                    generation
+                                );
+                            }
+                        }
+                    );
+                };
+            started = overlay->beginCapture(&captureError);
+            if (!started) {
+                overlay->deleteLater();
+                m_overlay.clear();
+            }
+        }
+
+        if (!started
+            && m_flow.active
+            && m_flow.generation == generation) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("无法开始截图。")
+            );
+            completeFlow(
+                result,
+                false,
+                tr8("截图失败"),
+                QStringLiteral("阶段=capture")
+            );
+        }
+        return started;
+    }
+
     void reset(bool keepPendingContext)
     {
+        if (m_flow.active) {
+            completeFlowCancelled(true);
+        }
         if (m_aiWatcher) {
             m_aiCancellation.cancel();
         }
@@ -190,12 +526,14 @@ public:
 
     bool isActive() const
     {
-        return m_session.isActive();
+        return m_session.isActive() || m_flow.active;
     }
 
     bool isBusy() const
     {
         return m_processing
+            || m_flow.active
+            || m_flowOcrManager
             || (m_ocrManager && m_ocrManager->isBusy())
             || m_aiWatcher;
     }
@@ -206,6 +544,401 @@ public:
     }
 
 private:
+    bool matchesFlow(int generation) const
+    {
+        return m_flow.active
+            && m_flow.generation == generation;
+    }
+
+    void logFlow(
+        const QString &action,
+        const QString &detail = QString()) const
+    {
+        if (m_access.flowLog) {
+            m_access.flowLog(action, detail);
+            return;
+        }
+        logRuntimeEvent(
+            tr8("流程截图"),
+            action,
+            detail,
+            elapsedMs()
+        );
+    }
+
+    QSharedPointer<const FunctionFlowScreenshotPayload>
+    flowPayload(
+        const OcrResult *ocrResult,
+        const QString &recognizedText) const
+    {
+        FunctionFlowScreenshotPayload *payload =
+            new FunctionFlowScreenshotPayload;
+        payload->image = m_flow.capturedImage;
+        payload->recognizedText = recognizedText;
+        payload->engine = ocrResult
+            ? ocrResult->engine
+            : m_flow.engine;
+        payload->elapsedMs = ocrResult
+            ? ocrResult->elapsedMs
+            : -1;
+        payload->usedFallback = ocrResult
+            && ocrResult->usedFallback;
+        payload->rect = m_flow.capturedRect;
+        if (ocrResult) {
+            payload->blocks = ocrResult->blocks;
+        }
+        return QSharedPointer<
+            const FunctionFlowScreenshotPayload
+        >(payload);
+    }
+
+    void appendFlowHistoryObservation(
+        FunctionFlowNodeResult *result,
+        const OcrResult *ocrResult) const
+    {
+        if (!result
+            || m_flow.capturedImage.isNull()
+            || !m_flow.recognitionStarted) {
+            return;
+        }
+        const QString recognizedText =
+            ocrResult ? ocrResult->text : QString();
+        FunctionFlowValue value;
+        value.text = recognizedText;
+        value.sourceNodeId = m_flow.node.nodeId;
+        value.screenshot = flowPayload(
+            ocrResult,
+            recognizedText
+        );
+        result->historyObservations.append(value);
+    }
+
+    void completeFlow(
+        const FunctionFlowNodeResult &result,
+        bool cancelOutstanding,
+        const QString &logAction,
+        const QString &logDetail)
+    {
+        if (!m_flow.active) {
+            return;
+        }
+
+        const FunctionFlowNodeCompletion completion =
+            m_flow.completion;
+        const bool cancelInjectedCapture =
+            cancelOutstanding
+            && m_flow.capturePending
+            && m_flow.injectedCapture
+            && bool(m_access.cancelFlowCapture);
+        const bool cancelInjectedOcr =
+            cancelOutstanding
+            && m_flow.recognitionStarted
+            && m_flow.injectedOcr
+            && bool(m_access.cancelFlowOcr);
+        const QString temporaryPath = m_flow.temporaryPath;
+        m_flow.active = false;
+        m_flow.completion = FunctionFlowNodeCompletion();
+        m_flowCancellationTimer->stop();
+        m_flowTimeoutTimer->stop();
+
+        if (cancelInjectedCapture) {
+            m_access.cancelFlowCapture();
+        }
+        if (cancelInjectedOcr) {
+            m_access.cancelFlowOcr();
+        }
+
+        OcrManager *flowManager = m_flowOcrManager.data();
+        m_flowOcrManager.clear();
+        if (flowManager) {
+            flowManager->statusCallback = nullptr;
+            flowManager->finishedCallback = nullptr;
+            if (cancelOutstanding && flowManager->isBusy()) {
+                flowManager->cancel();
+            }
+            flowManager->deleteLater();
+        }
+        m_flowOcrConfig = OcrManagerConfig();
+
+        closeOverlay();
+        if (!temporaryPath.isEmpty()) {
+            removeFlowTemporaryFile(temporaryPath);
+        }
+        m_flow = ScreenshotFlowState();
+        setProcessing(false);
+        logFlow(logAction, logDetail);
+        if (completion) {
+            completion(result);
+        }
+    }
+
+    void completeFlowCancelled(bool cancelOutstanding)
+    {
+        FunctionFlowNodeResult result;
+        result.state = FunctionFlowNodeState::Cancelled;
+        appendFlowHistoryObservation(&result, nullptr);
+        completeFlow(
+            result,
+            cancelOutstanding,
+            tr8("取消"),
+            QStringLiteral("状态=cancelled")
+        );
+    }
+
+    void handleFlowCaptureCancelled(int generation)
+    {
+        if (!matchesFlow(generation)) {
+            return;
+        }
+        completeFlowCancelled(false);
+    }
+
+    void handleFlowCaptured(
+        int generation,
+        const QImage &image,
+        const QRect &globalRect)
+    {
+        if (!matchesFlow(generation)
+            || !m_flow.capturePending) {
+            return;
+        }
+        m_flow.capturePending = false;
+        closeOverlay();
+
+        if (m_flow.run.cancellation
+                .isCancellationRequested()) {
+            completeFlowCancelled(true);
+            return;
+        }
+        if (image.isNull()) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("截图内容为空。")
+            );
+            completeFlow(
+                result,
+                false,
+                tr8("截图失败"),
+                QStringLiteral("阶段=image")
+            );
+            return;
+        }
+
+        m_flow.capturedImage = image;
+        m_flow.capturedRect = globalRect;
+        if (flowOcrUploadsImage(m_flow.engine)) {
+            bool authorized = false;
+            if (m_access.authorizeFlowOcrUpload) {
+                authorized =
+                    m_access.authorizeFlowOcrUpload(m_flow.engine);
+            } else {
+                const QMessageBox::StandardButton choice =
+                    QMessageBox::question(
+                        hostWidget(),
+                        tr8("发送截图到云端"),
+                        tr8("这次识别会把当前截图发送到云端。是否继续？"),
+                        QMessageBox::Yes | QMessageBox::No,
+                        QMessageBox::No
+                    );
+                authorized = choice == QMessageBox::Yes;
+            }
+            if (!authorized) {
+                completeFlowCancelled(false);
+                return;
+            }
+        }
+
+        if (m_flow.run.cancellation
+                .isCancellationRequested()) {
+            completeFlowCancelled(true);
+            return;
+        }
+
+        QString tempRoot;
+        if (m_access.flowTemporaryDirectory) {
+            tempRoot = m_access.flowTemporaryDirectory();
+        }
+        if (tempRoot.trimmed().isEmpty()) {
+            tempRoot = QDir(
+                QStandardPaths::writableLocation(
+                    QStandardPaths::TempLocation
+                )
+            ).filePath(QStringLiteral("vocekit-screenshots"));
+        }
+        if (!QDir().mkpath(tempRoot)) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("无法准备截图临时文件。")
+            );
+            completeFlow(
+                result,
+                false,
+                tr8("截图失败"),
+                QStringLiteral("阶段=temp-directory")
+            );
+            return;
+        }
+
+        m_flow.temporaryPath = QDir(tempRoot).filePath(
+            QUuid::createUuid().toString().mid(1, 36)
+                + QStringLiteral(".png")
+        );
+        if (!image.save(m_flow.temporaryPath, "PNG")) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("无法准备截图临时文件。")
+            );
+            completeFlow(
+                result,
+                false,
+                tr8("截图失败"),
+                QStringLiteral("阶段=temp-save")
+            );
+            return;
+        }
+
+        if (m_flow.run.cancellation
+                .isCancellationRequested()) {
+            completeFlowCancelled(true);
+            return;
+        }
+
+        ScreenshotWorkflowFlowOcrRequest flowRequest;
+        flowRequest.request.requestId =
+            QUuid::createUuid().toString();
+        flowRequest.request.imagePath =
+            QDir::toNativeSeparators(m_flow.temporaryPath);
+        flowRequest.request.languages = QStringList()
+            << QStringLiteral("zh-Hans")
+            << QStringLiteral("en");
+        flowRequest.request.engine = m_flow.engine;
+        flowRequest.timeoutMs = m_flow.timeoutMs;
+        flowRequest.effectiveNetworkPolicy =
+            m_flow.effectiveNetworkPolicy;
+        flowRequest.cancellation = m_flow.run.cancellation;
+
+        m_flow.recognitionStarted = true;
+        logFlow(
+            tr8("开始识别"),
+            QStringLiteral("节点=") + m_flow.node.nodeId
+                + QStringLiteral("，引擎=")
+                + QString::number(int(m_flow.engine))
+        );
+        m_flowTimeoutTimer->start(m_flow.timeoutMs);
+
+        const QPointer<Impl> guard(this);
+        const ScreenshotWorkflowOcrFinishedCallback finished =
+            [guard, generation](const OcrResult &result) {
+                if (guard) {
+                    guard->handleFlowOcrFinished(
+                        generation,
+                        result
+                    );
+                }
+            };
+        if (m_access.recognizeForFlow) {
+            m_flow.injectedOcr = true;
+            m_access.recognizeForFlow(flowRequest, finished);
+            return;
+        }
+
+        OcrManager *manager = new OcrManager(this);
+        m_flowOcrManager = manager;
+        manager->setConfig(m_flowOcrConfig);
+        manager->statusCallback = nullptr;
+        manager->finishedCallback =
+            [guard, generation](const OcrResult &result) {
+                if (!guard) {
+                    return;
+                }
+                QTimer::singleShot(
+                    0,
+                    guard.data(),
+                    [guard, generation, result]() {
+                        if (guard) {
+                            guard->handleFlowOcrFinished(
+                                generation,
+                                result
+                            );
+                        }
+                    }
+                );
+            };
+        manager->recognize(flowRequest.request);
+    }
+
+    void handleFlowOcrFinished(
+        int generation,
+        const OcrResult &ocrResult)
+    {
+        if (!matchesFlow(generation)
+            || !m_flow.recognitionStarted) {
+            return;
+        }
+        m_flowTimeoutTimer->stop();
+
+        if (m_flow.run.cancellation
+                .isCancellationRequested()
+            || ocrResult.errorCode
+                == QStringLiteral("CANCELLED")) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Cancelled;
+            appendFlowHistoryObservation(&result, &ocrResult);
+            completeFlow(
+                result,
+                false,
+                tr8("取消"),
+                QStringLiteral("状态=cancelled")
+            );
+            return;
+        }
+        if (!ocrResult.ok) {
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowScreenshotError(
+                tr8("截图识别失败。")
+            );
+            appendFlowHistoryObservation(&result, &ocrResult);
+            completeFlow(
+                result,
+                false,
+                tr8("识别失败"),
+                QStringLiteral("错误码=OCR_FAILED")
+            );
+            return;
+        }
+
+        const QString correctedText =
+            applyVocabularyPreCorrectionForRun(
+                m_flow.settingsSnapshot,
+                ocrResult.text,
+                m_flow.run.functionId,
+                false
+            );
+        FunctionFlowValue value;
+        value.text = correctedText;
+        value.sourceNodeId = m_flow.node.nodeId;
+        value.screenshot = flowPayload(
+            &ocrResult,
+            correctedText
+        );
+
+        FunctionFlowNodeResult result;
+        result.state = FunctionFlowNodeState::Succeeded;
+        result.values.append(value);
+        completeFlow(
+            result,
+            false,
+            tr8("识别完成"),
+            QStringLiteral("节点=") + m_flow.node.nodeId
+                + QStringLiteral("，字数=")
+                + QString::number(correctedText.size())
+        );
+    }
+
     QWidget *hostWidget() const
     {
         return m_access.hostWidget ? m_access.hostWidget() : nullptr;
@@ -618,6 +1351,12 @@ private:
     FloatingBar *m_bar = nullptr;
     AppSettingsData m_settings;
     OcrManager *m_ocrManager = nullptr;
+    QTimer *m_flowCancellationTimer = nullptr;
+    QTimer *m_flowTimeoutTimer = nullptr;
+    QPointer<OcrManager> m_flowOcrManager;
+    OcrManagerConfig m_flowOcrConfig;
+    ScreenshotFlowState m_flow;
+    int m_nextFlowGeneration = 0;
     QFutureWatcher<OcrAiTaskResult> *m_aiWatcher = nullptr;
     CancellationSource m_aiCancellation;
     QPointer<ScreenCaptureOverlay> m_overlay;
@@ -652,6 +1391,14 @@ bool ScreenshotWorkflowController::start(
     const ScreenshotWorkflowStartRequest &request)
 {
     return d->start(request);
+}
+
+bool ScreenshotWorkflowController::beginForFlow(
+    const FunctionFlowRunContext &run,
+    const FunctionFlowCompiledNode &node,
+    const FunctionFlowNodeCompletion &completion)
+{
+    return d->beginForFlow(run, node, completion);
 }
 
 void ScreenshotWorkflowController::reset(bool keepPendingContext)

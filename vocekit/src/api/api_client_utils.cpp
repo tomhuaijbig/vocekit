@@ -4,6 +4,51 @@
 #include <QJsonArray>
 #include <QRegExp>
 
+namespace {
+
+QUrl normalizedEndpointUrl(QString text, const QString &endpointPath)
+{
+    text = text.trimmed();
+    if (text.isEmpty()) {
+        return QUrl();
+    }
+    if (!text.contains(QStringLiteral("://"))) {
+        text.prepend(QStringLiteral("https://"));
+    }
+
+    QUrl url(text, QUrl::StrictMode);
+    const QString scheme = url.scheme().toLower();
+    if (!url.isValid()
+        || (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))
+        || url.host().isEmpty()
+        || url.hasQuery()
+        || url.hasFragment()) {
+        return QUrl();
+    }
+
+    QString path = url.path(QUrl::FullyEncoded);
+    while (path.size() > 1 && path.endsWith(QLatin1Char('/'))) {
+        path.chop(1);
+    }
+    if (path.contains(QStringLiteral("/v1/v1/"))
+        || path.endsWith(QStringLiteral("/v1/v1"))) {
+        return QUrl();
+    }
+    if (path.isEmpty() || path == QStringLiteral("/")) {
+        path = endpointPath;
+    } else if (path.endsWith(endpointPath)) {
+        // The caller supplied the complete endpoint, possibly below a gateway path.
+    } else if (path.endsWith(QStringLiteral("/v1"))) {
+        path += endpointPath.mid(3);
+    } else {
+        path += endpointPath;
+    }
+    url.setPath(path, QUrl::StrictMode);
+    return url;
+}
+
+} // namespace
+
 QString compactLogText(QString text, int maxLength)
 {
     text.replace(QRegExp(QStringLiteral("[\\r\\n\\t]+")), QStringLiteral(" "));
@@ -37,22 +82,18 @@ QUrl urlWithDefaultHttps(QString text)
 
 QUrl openAiCompatibleChatUrl(QString text)
 {
-    text = text.trimmed();
-    if (text.isEmpty()) {
-        return QUrl();
-    }
-    if (!text.contains(QStringLiteral("://"))) {
-        text.prepend(QStringLiteral("https://"));
-    }
-    while (text.endsWith(QLatin1Char('/'))) {
-        text.chop(1);
-    }
-    if (!text.endsWith(QStringLiteral("/chat/completions"))) {
-        text += text.endsWith(QStringLiteral("/v1"))
-            ? QStringLiteral("/chat/completions")
-            : QStringLiteral("/v1/chat/completions");
-    }
-    return QUrl(text);
+    return normalizedEndpointUrl(
+        text,
+        QStringLiteral("/v1/chat/completions")
+    );
+}
+
+QUrl anthropicMessagesUrl(QString text)
+{
+    return normalizedEndpointUrl(
+        text,
+        QStringLiteral("/v1/messages")
+    );
 }
 
 QString jsonPathStringValue(const QJsonValue &value, const QStringList &path)

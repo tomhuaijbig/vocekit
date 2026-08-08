@@ -57,11 +57,15 @@ SpeechRecognitionTaskResult runSpeechRecognitionProviderTask(
     providerRequest.network.globalUseSystemProxy = request.useSystemProxy;
     providerRequest.network.networkPolicy = request.networkPolicy;
 
-    CancellationSource cancellation;
+    CancellationSource ownedCancellation;
+    const CancellationToken cancellation =
+        request.cancellation.isValid()
+            ? request.cancellation
+            : ownedCancellation.token();
     providerRequest.executionId = cancellation.executionId();
 
     const SpeechRecognitionResult providerResult =
-        provider->recognize(providerRequest, cancellation.token());
+        provider->recognize(providerRequest, cancellation);
 
     result.text = providerResult.text;
     result.error = providerResult.error.message;

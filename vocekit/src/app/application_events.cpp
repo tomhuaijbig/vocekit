@@ -1,5 +1,30 @@
 #include "application_events.h"
 
+QString functionDefinitionsSettingsKey()
+{
+    return QStringLiteral("functionDefinitions");
+}
+
+QString functionFlowDraftSettingsKey()
+{
+    return QStringLiteral("functionFlowDraft");
+}
+
+QString functionFlowEditorStateSettingsKey()
+{
+    return QStringLiteral("functionFlowEditorState");
+}
+
+QString functionFlowPublishedSettingsKey()
+{
+    return QStringLiteral("functionFlowPublished");
+}
+
+QString functionExecutionModeSettingsKey()
+{
+    return QStringLiteral("function.executionMode");
+}
+
 ApplicationEvents::ApplicationEvents(QObject *parent)
     : QObject(parent)
 {

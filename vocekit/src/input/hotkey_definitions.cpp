@@ -16,19 +16,19 @@ const QVector<HotkeyDef> &hotkeyDefs()
     static const QVector<HotkeyDef> defs = {
         {
             QStringLiteral("dictate"),
-            text8("听写（Dictate）"),
+            text8("听写"),
             QStringLiteral("Ctrl+Alt+Space"),
             text8("开始或停止语音输入")
         },
         {
             QStringLiteral("translate"),
-            text8("翻译（Translate）"),
+            text8("翻译"),
             QStringLiteral("Ctrl+Alt+T"),
             text8("翻译鼠标拖选的文字")
         },
         {
             QStringLiteral("ask"),
-            text8("问答（Ask）"),
+            text8("问答"),
             QStringLiteral("Ctrl+Alt+Q"),
             text8("基于选中文本回答语音问题")
         },

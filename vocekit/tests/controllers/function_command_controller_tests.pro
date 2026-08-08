@@ -1,4 +1,4 @@
-QT += core testlib
+QT += core gui testlib
 
 CONFIG += c++11 console testcase
 CONFIG -= app_bundle
@@ -12,6 +12,7 @@ SOURCES += \
     function_command_controller_tests.cpp \
     ../../src/controllers/function_command_controller.cpp \
     ../../src/capture/screenshot_types.cpp \
+    ../../src/domain/function_settings.cpp \
     ../../src/result_flow_config.cpp
 
 HEADERS += \

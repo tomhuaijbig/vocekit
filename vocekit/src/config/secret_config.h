@@ -22,7 +22,9 @@ struct SecretConfig
 {
     QString deepseekApiKey;
     QString openaiApiKey;
+    QString openaiBaseUrl;
     QString anthropicApiKey;
+    QString anthropicBaseUrl;
     QString baiduApiKey;
     QString baiduSecretKey;
     QString baiduAppId;

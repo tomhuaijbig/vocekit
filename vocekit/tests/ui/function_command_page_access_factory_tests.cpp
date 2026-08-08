@@ -11,7 +11,6 @@ class FunctionCommandPageAccessFactoryTests : public QObject
 
 private slots:
     void buildsTypedPageAccess();
-    void composesCustomFunctionRefreshActions();
     void handlesMissingDependencies();
     void hubWindowUsesIndependentFactory();
 };
@@ -31,6 +30,13 @@ void FunctionCommandPageAccessFactoryTests::buildsTypedPageAccess()
     FunctionCommandPageAccessDependencies dependencies;
     dependencies.settings = &settings;
     dependencies.prompts = prompts;
+    dependencies.flows.readState = [](
+        const QString &,
+        FunctionFlowState *,
+        OperationError *
+    ) {
+        return true;
+    };
     dependencies.saveSettings = [&saved]() {
         saved = true;
     };
@@ -41,47 +47,10 @@ void FunctionCommandPageAccessFactoryTests::buildsTypedPageAccess()
     QCOMPARE(access.settings, &settings);
     QVERIFY(access.prompts.snapshotProvider);
     QVERIFY(access.prompts.snapshotProvider().settings.promptLocked);
+    QVERIFY(access.flows.readState);
     QVERIFY(access.saveSettings);
     access.saveSettings();
     QVERIFY(saved);
-}
-
-void FunctionCommandPageAccessFactoryTests::composesCustomFunctionRefreshActions()
-{
-    QStringList actions;
-    QString editedId;
-    QString editedTitle;
-    CustomFunctionDef editedFunction;
-
-    FunctionCommandPageAccessDependencies dependencies;
-    dependencies.editCustomFunction = [
-        &actions,
-        &editedId,
-        &editedTitle,
-        &editedFunction
-    ](
-        const QString &id,
-        const QString &title,
-        const CustomFunctionDef &function
-    ) {
-        actions.append(QStringLiteral("edit"));
-        editedId = id;
-        editedTitle = title;
-        editedFunction = function;
-    };
-    const FunctionCommandPageAccess access =
-        createFunctionCommandPageAccess(dependencies);
-    QVERIFY(access.manageCustomFunction);
-
-    CustomFunctionDef function;
-    function.id = QStringLiteral("custom_1");
-    function.name = QStringLiteral("润色");
-    access.manageCustomFunction(function.id, function.name, function);
-
-    QCOMPARE(actions, QStringList() << QStringLiteral("edit"));
-    QCOMPARE(editedId, function.id);
-    QCOMPARE(editedTitle, function.name);
-    QCOMPARE(editedFunction.id, function.id);
 }
 
 void FunctionCommandPageAccessFactoryTests::handlesMissingDependencies()
@@ -90,9 +59,8 @@ void FunctionCommandPageAccessFactoryTests::handlesMissingDependencies()
         createFunctionCommandPageAccess(FunctionCommandPageAccessDependencies());
 
     QVERIFY(access.settings == nullptr);
+    QVERIFY(!access.flows.readState);
     QVERIFY(!access.saveSettings);
-    QVERIFY(access.manageCustomFunction);
-    access.manageCustomFunction(QString(), QString(), CustomFunctionDef());
 }
 
 void FunctionCommandPageAccessFactoryTests::hubWindowUsesIndependentFactory()

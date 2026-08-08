@@ -11,6 +11,7 @@ class HubRefreshCoordinatorActionFactoryTests : public QObject
 private slots:
     void mapsSettingsAndLogActions();
     void mapsSharedUiActionsToBothFlows();
+    void mapsFunctionFlowRefreshActions();
     void mapsHistoryActions();
     void handlesMissingActions();
     void hubWindowUsesActionFactory();
@@ -70,6 +71,50 @@ void HubRefreshCoordinatorActionFactoryTests::mapsSharedUiActionsToBothFlows()
 
     QCOMPARE(recentRefreshes, 2);
     QCOMPARE(activeRefreshes, 2);
+}
+
+void HubRefreshCoordinatorActionFactoryTests::mapsFunctionFlowRefreshActions()
+{
+    QStringList receivedIds;
+    int activeFunctionRefreshes = 0;
+    int canvasRefreshes = 0;
+    int runtimeRefreshes = 0;
+    int hotkeyRefreshes = 0;
+    HubRefreshDataAccess data;
+    data.reloadFunctionFlows = [&receivedIds](const QStringList &ids) {
+        receivedIds = ids;
+    };
+    HubRefreshUiActions ui;
+    ui.refreshActiveFunction = [&activeFunctionRefreshes]() {
+        ++activeFunctionRefreshes;
+    };
+    ui.refreshActiveCanvas = [&canvasRefreshes]() {
+        ++canvasRefreshes;
+    };
+    ui.refreshRuntime = [&runtimeRefreshes](const QStringList &) {
+        ++runtimeRefreshes;
+    };
+    ui.refreshHotkeys = [&hotkeyRefreshes](const QStringList &) {
+        ++hotkeyRefreshes;
+    };
+
+    const HubRefreshCoordinatorBundleActions actions =
+        createHubRefreshCoordinatorActions(data, ui);
+    actions.reloadFunctionFlows(
+        QStringList() << QStringLiteral("custom_1")
+    );
+    actions.refreshActiveFunction();
+    actions.refreshActiveCanvas();
+    const QStringList ids =
+        QStringList() << QStringLiteral("custom_1");
+    actions.refreshRuntime(ids);
+    actions.refreshHotkeys(ids);
+
+    QCOMPARE(receivedIds, QStringList() << QStringLiteral("custom_1"));
+    QCOMPARE(activeFunctionRefreshes, 1);
+    QCOMPARE(canvasRefreshes, 1);
+    QCOMPARE(runtimeRefreshes, 1);
+    QCOMPARE(hotkeyRefreshes, 1);
 }
 
 void HubRefreshCoordinatorActionFactoryTests::mapsHistoryActions()

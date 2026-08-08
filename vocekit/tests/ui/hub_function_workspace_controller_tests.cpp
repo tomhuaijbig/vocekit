@@ -44,7 +44,6 @@ void HubFunctionWorkspaceControllerTests::hubWindowDelegatesWorkspaceOwnership()
     QVERIFY(hubContents.contains("functionWorkspaceController()->page()"));
     QVERIFY(hubContents.contains("functionWorkspaceController()->selectFunction("));
     QVERIFY(hubContents.contains("functionWorkspaceController()->addFunction()"));
-    QVERIFY(hubContents.contains("functionWorkspaceController()->editFunction("));
     QVERIFY(!hubContents.contains("QScopedPointer<FunctionWorkspaceController>"));
     QVERIFY(!hubContents.contains("new FunctionWorkspaceController"));
     QVERIFY(!hubContents.contains("FunctionWorkspaceControllerAccess access"));
@@ -52,7 +51,19 @@ void HubFunctionWorkspaceControllerTests::hubWindowDelegatesWorkspaceOwnership()
 
     QVERIFY(controllerContents.contains("new FunctionWorkspaceController"));
     QVERIFY(controllerContents.contains("FunctionWorkspaceControllerAccess access"));
-    QVERIFY(controllerContents.contains("runFunctionEditorDialog"));
+    QVERIFY(controllerContents.contains(
+        "access.flows = this->access.flows"
+    ));
+    QVERIFY(controllerContents.contains("!m_impl->workspace"));
+    QVERIFY(controllerContents.contains("flushAllPendingFlowDrafts"));
+    QVERIFY(controllerContents.contains("discardAllPendingFlowDrafts"));
+    QVERIFY(hubContents.contains("workspaceAccess.flows = m_functionFlows"));
+    QVERIFY(hubContents.contains(
+        "m_functionWorkspaceController->refreshActiveCanvas()"
+    ));
+    QVERIFY(hubContents.contains("canLeaveFunctionPage"));
+    QVERIFY(!controllerContents.contains("runFunctionEditorDialog"));
+    QVERIFY(!controllerContents.contains("FunctionEditorDialog"));
 }
 
 QTEST_MAIN(HubFunctionWorkspaceControllerTests)

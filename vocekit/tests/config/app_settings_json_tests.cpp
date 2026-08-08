@@ -70,6 +70,7 @@ private slots:
         const QJsonObject written = appSettingsDataToJson(original);
         QVERIFY(written.contains(QStringLiteral("models")));
         QVERIFY(written.contains(QStringLiteral("inputModes")));
+        QVERIFY(written.contains(QStringLiteral("outputOrders")));
         QVERIFY(written.contains(QStringLiteral("displayTimes")));
         QVERIFY(written.contains(QStringLiteral("recordingModes")));
         QVERIFY(written.contains(QStringLiteral("customFunctions")));
@@ -91,6 +92,20 @@ private slots:
         original.windows.floatingBarPosition = QPoint(120, 240);
         original.windows.hasResultPopupGeometry = true;
         original.windows.resultPopupGeometry = QRect(10, 20, 780, 540);
+        const int translateIndex =
+            original.functionIndex(QStringLiteral("translate"));
+        QVERIFY(translateIndex >= 0);
+        original.functions[translateIndex].input.order =
+            QStringList()
+                << QStringLiteral("selection")
+                << QStringLiteral("screenshot")
+                << QStringLiteral("voice");
+        original.functions[translateIndex].output.order =
+            QStringList()
+                << QStringLiteral("resultPopup")
+                << QStringLiteral("ai")
+                << QStringLiteral("screenshotPanel")
+                << QStringLiteral("autoWrite");
 
         const AppSettingsData restored = appSettingsDataFromJson(
             appSettingsDataToJson(original)
@@ -112,6 +127,21 @@ private slots:
                 .output
                 .resultTemplate,
             QStringLiteral("compare")
+        );
+        QCOMPARE(
+            restored.function(QStringLiteral("translate")).input.order,
+            QStringList()
+                << QStringLiteral("selection")
+                << QStringLiteral("screenshot")
+                << QStringLiteral("voice")
+        );
+        QCOMPARE(
+            restored.function(QStringLiteral("translate")).output.order,
+            QStringList()
+                << QStringLiteral("resultPopup")
+                << QStringLiteral("ai")
+                << QStringLiteral("screenshotPanel")
+                << QStringLiteral("autoWrite")
         );
         QVERIFY(restored.windows.hasFloatingBarPosition);
         QCOMPARE(restored.windows.floatingBarPosition, QPoint(120, 240));
@@ -339,6 +369,206 @@ private slots:
             settings.snapshot().speechProvider,
             QStringLiteral("baidu")
         );
+    }
+
+    void rollsBackSnapshotWhenReplaceNonFlowSettingsAndSaveFails()
+    {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+
+        const QString blockingPath =
+            temporaryDirectory.filePath(QStringLiteral("not-a-directory"));
+        QFile blockingFile(blockingPath);
+        QVERIFY(blockingFile.open(QIODevice::WriteOnly));
+        blockingFile.write("block");
+        blockingFile.close();
+
+        AppSettingsData current = appSettingsDataFromJson(
+            readFixture("../fixtures/settings/current_settings.json")
+        );
+        const int customIndex =
+            current.functionIndex(QStringLiteral("custom_1"));
+        QVERIFY(customIndex >= 0);
+        current.speechProvider = QStringLiteral("baidu");
+        current.functions[customIndex].shortcut =
+            QStringLiteral("Ctrl+Alt+M");
+        current.functions[customIndex].flow.draft.revision = 11;
+        current.functions[customIndex].flow.draft.graphHash =
+            QString(64, QLatin1Char('c'));
+        current.functions[customIndex].executionMode =
+            FunctionExecutionMode::Canvas;
+        current.functions[customIndex] =
+            normalizeFunctionSettings(current.functions.at(customIndex));
+
+        AppSettingsData edited = current;
+        edited.speechProvider = QStringLiteral("xfyun");
+        edited.functions[customIndex].shortcut = QStringLiteral("Alt+M");
+        edited.functions[customIndex].flow.draft.revision = 10;
+        edited.functions[customIndex].flow.draft.graphHash =
+            QString(64, QLatin1Char('d'));
+        edited.functions[customIndex].executionMode =
+            FunctionExecutionMode::Classic;
+        edited.functions[customIndex] =
+            normalizeFunctionSettings(edited.functions.at(customIndex));
+
+        AppSettingsStore settings(
+            QDir(blockingPath).filePath(QStringLiteral("settings.json"))
+        );
+        settings.replaceSnapshot(current);
+
+        OperationError error;
+        QVERIFY(
+            !settings.replaceNonFlowSettingsAndSave(edited, &error)
+        );
+        QVERIFY(!error.code.isEmpty());
+        QCOMPARE(
+            settings.snapshot().speechProvider,
+            QStringLiteral("baidu")
+        );
+        const FunctionSettings rolledBackFunction =
+            settings.function(QStringLiteral("custom_1"));
+        QCOMPARE(
+            rolledBackFunction.shortcut,
+            QStringLiteral("Ctrl+Alt+M")
+        );
+        QVERIFY(
+            rolledBackFunction.executionMode
+                == FunctionExecutionMode::Canvas
+        );
+        QVERIFY(rolledBackFunction.flow.enabled);
+        QCOMPARE(rolledBackFunction.flow.draft.revision, 11);
+        QCOMPARE(
+            rolledBackFunction.flow.draft.graphHash,
+            QString(64, QLatin1Char('c'))
+        );
+    }
+
+    void mergesOnlyNonFlowSettingsFromAnOlderSnapshot()
+    {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        const QString path =
+            temporaryDirectory.filePath(QStringLiteral("settings.json"));
+
+        AppSettingsData current = appSettingsDataFromJson(
+            readFixture("../fixtures/settings/current_settings.json")
+        );
+        const int customIndex =
+            current.functionIndex(QStringLiteral("custom_1"));
+        QVERIFY(customIndex >= 0);
+        current.functions[customIndex].flow.draft.revision = 4;
+        const QString currentDraftHash = functionFlowGraphHash(
+            current.functions.at(customIndex).flow.draft.graph
+        );
+        current.functions[customIndex].flow.draft.graphHash =
+            currentDraftHash;
+        current.functions[customIndex].executionMode =
+            FunctionExecutionMode::Canvas;
+        current.functions[customIndex] =
+            normalizeFunctionSettings(current.functions.at(customIndex));
+        QJsonObject orphan;
+        orphan.insert(QStringLiteral("future"), 9);
+        current.retainedOrphanFunctionFlows.insert(
+            QStringLiteral("removed"),
+            orphan
+        );
+
+        AppSettingsData stale = current;
+        stale.functions[customIndex].flow.draft.revision = 3;
+        stale.functions[customIndex].flow.draft.graphHash =
+            QString(64, QLatin1Char('b'));
+        stale.functions[customIndex].executionMode =
+            FunctionExecutionMode::Classic;
+        stale.functions[customIndex] =
+            normalizeFunctionSettings(stale.functions.at(customIndex));
+        const QString editedShortcut = QStringLiteral("Ctrl+Shift+9");
+        stale.functions[customIndex].shortcut = editedShortcut;
+        stale.functions[customIndex].builtIn =
+            !current.functions.at(customIndex).builtIn;
+        stale.trayResident = false;
+        stale.retainedOrphanFunctionFlows = QJsonObject();
+
+        AppSettingsStore store(path);
+        store.replaceSnapshot(current);
+        OperationError error;
+        QVERIFY(store.replaceNonFlowSettingsAndSave(stale, &error));
+
+        QCOMPARE(store.snapshot().trayResident, false);
+        const FunctionSettings savedFunction =
+            store.function(QStringLiteral("custom_1"));
+        QCOMPARE(savedFunction.shortcut, editedShortcut);
+        QCOMPARE(
+            savedFunction.builtIn,
+            current.functions.at(customIndex).builtIn
+        );
+        QCOMPARE(
+            functionExecutionModeId(savedFunction.executionMode),
+            QStringLiteral("canvas")
+        );
+        const FunctionFlowState savedFlow = savedFunction.flow;
+        QCOMPARE(savedFlow.draft.revision, 4);
+        QCOMPARE(
+            savedFlow.draft.graphHash,
+            currentDraftHash
+        );
+        QVERIFY(savedFlow.enabled);
+        QCOMPARE(
+            store.snapshot().retainedOrphanFunctionFlows
+                .value(QStringLiteral("removed")).toObject(),
+            orphan
+        );
+
+        AppSettingsStore restored(path);
+        QVERIFY2(restored.load(&error), qPrintable(error.message));
+        QCOMPARE(restored.snapshot().trayResident, false);
+        const FunctionSettings restoredFunction =
+            restored.function(QStringLiteral("custom_1"));
+        QCOMPARE(restoredFunction.shortcut, editedShortcut);
+        QCOMPARE(
+            restoredFunction.builtIn,
+            current.functions.at(customIndex).builtIn
+        );
+        QVERIFY(
+            restoredFunction.executionMode
+                == FunctionExecutionMode::Canvas
+        );
+        QVERIFY(restoredFunction.flow.enabled);
+        QCOMPARE(restoredFunction.flow.draft.revision, 4);
+        QCOMPARE(
+            restoredFunction.flow.draft.graphHash,
+            currentDraftHash
+        );
+        QCOMPARE(
+            restored.snapshot().retainedOrphanFunctionFlows
+                .value(QStringLiteral("removed")).toObject(),
+            orphan
+        );
+    }
+
+    void rejectsStaleFunctionSetsWithoutSaving()
+    {
+        QTemporaryDir temporaryDirectory;
+        QVERIFY(temporaryDirectory.isValid());
+        const QString path =
+            temporaryDirectory.filePath(QStringLiteral("settings.json"));
+        AppSettingsData current = appSettingsDataFromJson(
+            readFixture("../fixtures/settings/current_settings.json")
+        );
+        AppSettingsData stale = current;
+        stale.functions.removeLast();
+        stale.trayResident = false;
+
+        AppSettingsStore store(path);
+        store.replaceSnapshot(current);
+        OperationError error;
+        QVERIFY(!store.replaceNonFlowSettingsAndSave(stale, &error));
+        QCOMPARE(
+            error.code,
+            QStringLiteral("settings_function_set_stale")
+        );
+        QCOMPARE(store.snapshot().functions.size(), current.functions.size());
+        QCOMPARE(store.snapshot().trayResident, current.trayResident);
+        QVERIFY(!QFileInfo::exists(path));
     }
 };
 

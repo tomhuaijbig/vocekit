@@ -19,15 +19,44 @@ QString FunctionCommandPage::functionId() const
     return m_functionId;
 }
 
-void FunctionCommandPage::setFunctionId(const QString &id)
+bool FunctionCommandPage::setFunctionId(const QString &id)
 {
-    m_functionId = id.trimmed();
+    const QString normalized = id.trimmed();
+    const QString rejected =
+        property("rejectedFunctionId").toString();
+    if (!rejected.isEmpty() && rejected == normalized) {
+        return false;
+    }
+    m_functionId = normalized;
     refresh();
+    return true;
 }
 
 void FunctionCommandPage::refresh()
 {
     setProperty("refreshCount", property("refreshCount").toInt() + 1);
+}
+
+void FunctionCommandPage::refreshCanvasState()
+{
+    setProperty(
+        "canvasRefreshCount",
+        property("canvasRefreshCount").toInt() + 1
+    );
+}
+
+bool FunctionCommandPage::applyFunctionFlowRuntimeEvent(
+    const FunctionFlowNodeExecutionEvent &event)
+{
+    setProperty("runtimeEventFunctionId", event.functionId);
+    return true;
+}
+
+bool FunctionCommandPage::applyFunctionFlowRunEvent(
+    const FunctionFlowRunExecutionEvent &event)
+{
+    setProperty("runEventFunctionId", event.functionId);
+    return true;
 }
 
 FunctionManagementPage::FunctionManagementPage(
@@ -52,7 +81,10 @@ private slots:
     void createsAndCachesBothPagesFromOneAssembly();
     void appliesFunctionSelectedBeforePageCreation();
     void updatesAndClearsCurrentFunction();
+    void rejectedPageSwitchKeepsControllerAndPageIdsAligned();
     void refreshesOnlyCreatedPages();
+    void refreshesCanvasStateWithoutRebuildingThePage();
+    void forwardsRuntimeEventsOnlyToCreatedMatchingPage();
     void handlesMissingAccessProvider();
     void hubWindowDelegatesPageOwnership();
 };
@@ -116,6 +148,32 @@ void FunctionPagesControllerTests::updatesAndClearsCurrentFunction()
     QVERIFY(page->functionId().isEmpty());
 }
 
+void FunctionPagesControllerTests::
+rejectedPageSwitchKeepsControllerAndPageIdsAligned()
+{
+    QWidget parent;
+    FunctionPagesController controller(
+        &parent,
+        FunctionPagesControllerAccess()
+    );
+    FunctionCommandPage *page = controller.commandPageWidget();
+
+    QVERIFY(controller.setCurrentFunctionId(QStringLiteral("ask")));
+    page->setProperty(
+        "rejectedFunctionId",
+        QStringLiteral("translate")
+    );
+
+    QVERIFY(!controller.setCurrentFunctionId(
+        QStringLiteral("translate")
+    ));
+    QCOMPARE(
+        controller.currentFunctionId(),
+        QStringLiteral("ask")
+    );
+    QCOMPARE(page->functionId(), QStringLiteral("ask"));
+}
+
 void FunctionPagesControllerTests::refreshesOnlyCreatedPages()
 {
     QWidget parent;
@@ -141,6 +199,71 @@ void FunctionPagesControllerTests::refreshesOnlyCreatedPages()
     QCOMPARE(
         management->property("refreshCount").toInt(),
         managementBefore + 1
+    );
+}
+
+void FunctionPagesControllerTests::
+refreshesCanvasStateWithoutRebuildingThePage()
+{
+    QWidget parent;
+    FunctionPagesController controller(
+        &parent,
+        FunctionPagesControllerAccess()
+    );
+
+    controller.refreshCanvasState();
+    QVERIFY(!controller.commandPageCreated());
+    FunctionCommandPage *page = controller.commandPageWidget();
+    const int fullBefore =
+        page->property("refreshCount").toInt();
+    const int canvasBefore =
+        page->property("canvasRefreshCount").toInt();
+
+    controller.refreshCanvasState();
+
+    QCOMPARE(
+        page->property("refreshCount").toInt(),
+        fullBefore
+    );
+    QCOMPARE(
+        page->property("canvasRefreshCount").toInt(),
+        canvasBefore + 1
+    );
+}
+
+void FunctionPagesControllerTests::forwardsRuntimeEventsOnlyToCreatedMatchingPage()
+{
+    QWidget parent;
+    FunctionPagesController controller(
+        &parent,
+        FunctionPagesControllerAccess()
+    );
+    FunctionFlowNodeExecutionEvent nodeEvent;
+    nodeEvent.functionId = QStringLiteral("translate");
+    FunctionFlowRunExecutionEvent runEvent;
+    runEvent.functionId = QStringLiteral("translate");
+
+    QVERIFY(!controller.applyFunctionFlowRuntimeEvent(nodeEvent));
+    QVERIFY(!controller.applyFunctionFlowRunEvent(runEvent));
+    QVERIFY(!controller.commandPageCreated());
+
+    FunctionCommandPage *page = controller.commandPageWidget();
+    QVERIFY(controller.setCurrentFunctionId(QStringLiteral("ask")));
+    QVERIFY(!controller.applyFunctionFlowRuntimeEvent(nodeEvent));
+    QVERIFY(!controller.applyFunctionFlowRunEvent(runEvent));
+    QVERIFY(!page->property("runtimeEventFunctionId").isValid());
+    QVERIFY(!page->property("runEventFunctionId").isValid());
+
+    QVERIFY(controller.setCurrentFunctionId(QStringLiteral("translate")));
+    QVERIFY(controller.applyFunctionFlowRuntimeEvent(nodeEvent));
+    QVERIFY(controller.applyFunctionFlowRunEvent(runEvent));
+    QCOMPARE(
+        page->property("runtimeEventFunctionId").toString(),
+        QStringLiteral("translate")
+    );
+    QCOMPARE(
+        page->property("runEventFunctionId").toString(),
+        QStringLiteral("translate")
     );
 }
 

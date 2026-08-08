@@ -14,14 +14,100 @@ QVector<ModelOption> builtInModelOptions()
     QVector<ModelOption> options;
     options << ModelOption{QStringLiteral("deepseek-v4-flash"), QStringLiteral("deepseek-v4-flash"), mcTr8("DeepSeek")};
     options << ModelOption{QStringLiteral("deepseek-v4-pro"), QStringLiteral("deepseek-v4-pro"), mcTr8("DeepSeek")};
-    options << ModelOption{QStringLiteral("openai:gpt-5.5"), QStringLiteral("gpt-5.5"), mcTr8("OpenAI")};
-    options << ModelOption{QStringLiteral("openai:gpt-5.4"), QStringLiteral("gpt-5.4"), mcTr8("OpenAI")};
-    options << ModelOption{QStringLiteral("openai:gpt-5.4-mini"), QStringLiteral("gpt-5.4-mini"), mcTr8("OpenAI")};
-    options << ModelOption{QStringLiteral("claude:claude-opus-4-8"), QStringLiteral("claude-opus-4-8"), mcTr8("Anthropic")};
-    options << ModelOption{QStringLiteral("claude:claude-opus-4-7"), QStringLiteral("claude-opus-4-7"), mcTr8("Anthropic")};
-    options << ModelOption{QStringLiteral("claude:claude-sonnet-4-6"), QStringLiteral("claude-sonnet-4-6"), mcTr8("Anthropic")};
-    options << ModelOption{QStringLiteral("claude:claude-haiku-4-5"), QStringLiteral("claude-haiku-4-5"), mcTr8("Anthropic")};
+    options << ModelOption{QStringLiteral("openai:gpt-5.6-sol"), QStringLiteral("GPT-5.6 Sol"), mcTr8("OpenAI")};
+    options << ModelOption{QStringLiteral("openai:gpt-5.6-terra"), QStringLiteral("GPT-5.6 Terra"), mcTr8("OpenAI")};
+    options << ModelOption{QStringLiteral("openai:gpt-5.6-luna"), QStringLiteral("GPT-5.6 Luna"), mcTr8("OpenAI")};
+    options << ModelOption{QStringLiteral("claude:claude-fable-5"), QStringLiteral("Claude Fable 5"), mcTr8("Anthropic")};
+    options << ModelOption{QStringLiteral("claude:claude-opus-5"), QStringLiteral("Claude Opus 5"), mcTr8("Anthropic")};
+    options << ModelOption{QStringLiteral("claude:claude-sonnet-5"), QStringLiteral("Claude Sonnet 5"), mcTr8("Anthropic")};
+    options << ModelOption{QStringLiteral("claude:claude-haiku-4-5"), QStringLiteral("Claude Haiku 4.5"), mcTr8("Anthropic")};
     return options;
+}
+
+QString migratedBuiltInModelId(const QString &value)
+{
+    QString modelId = value;
+    bool isOpenAi = false;
+    if (modelId.startsWith(QStringLiteral("openai:"))) {
+        isOpenAi = true;
+        modelId = modelId.mid(QStringLiteral("openai:").size());
+    }
+
+    if (modelId == QStringLiteral("gpt-5.6-sol")) {
+        return QStringLiteral("openai:gpt-5.6-sol");
+    }
+    if (modelId == QStringLiteral("gpt-5.6-terra")) {
+        return QStringLiteral("openai:gpt-5.6-terra");
+    }
+    if (modelId == QStringLiteral("gpt-5.6-luna")) {
+        return QStringLiteral("openai:gpt-5.6-luna");
+    }
+    if (modelId == QStringLiteral("gpt-5.5")) {
+        return QStringLiteral("openai:gpt-5.6-sol");
+    }
+    if (modelId == QStringLiteral("gpt-5.4-mini")) {
+        return QStringLiteral("openai:gpt-5.6-luna");
+    }
+    if (modelId == QStringLiteral("gpt-5.4") || modelId.startsWith(QStringLiteral("gpt-4"))) {
+        return QStringLiteral("openai:gpt-5.6-terra");
+    }
+    if (modelId.startsWith(QStringLiteral("gpt-")) || isOpenAi) {
+        return QStringLiteral("openai:gpt-5.6-terra");
+    }
+
+    bool isClaude = false;
+    if (modelId.startsWith(QStringLiteral("claude:"))) {
+        isClaude = true;
+        modelId = modelId.mid(QStringLiteral("claude:").size());
+    }
+
+    if (modelId == QStringLiteral("claude-fable-5")) {
+        return QStringLiteral("claude:claude-fable-5");
+    }
+    if (modelId == QStringLiteral("claude-opus-5")) {
+        return QStringLiteral("claude:claude-opus-5");
+    }
+    if (modelId == QStringLiteral("claude-sonnet-5")) {
+        return QStringLiteral("claude:claude-sonnet-5");
+    }
+    if (modelId == QStringLiteral("claude-haiku-4-5")) {
+        return QStringLiteral("claude:claude-haiku-4-5");
+    }
+    if (modelId == QStringLiteral("opus-4-8") || modelId == QStringLiteral("claude-opus-4-8")
+        || modelId == QStringLiteral("opus-4-7") || modelId == QStringLiteral("claude-opus-4-7")) {
+        return QStringLiteral("claude:claude-opus-5");
+    }
+    if (modelId == QStringLiteral("sonnet-4-6") || modelId == QStringLiteral("claude-sonnet-4-6")) {
+        return QStringLiteral("claude:claude-sonnet-5");
+    }
+    if (modelId.startsWith(QStringLiteral("claude-3")) || modelId.startsWith(QStringLiteral("3."))) {
+        return QStringLiteral("claude:claude-sonnet-5");
+    }
+    if (modelId.startsWith(QStringLiteral("claude-")) || isClaude) {
+        return QStringLiteral("claude:claude-sonnet-5");
+    }
+    return QString();
+}
+
+const ModelOption *modelOptionForId(const QVector<ModelOption> &options, const QString &id)
+{
+    for (const ModelOption &option : options) {
+        if (option.id == id) {
+            return &option;
+        }
+    }
+    return 0;
+}
+
+QString displayTextForOption(const ModelOption &option, const QString &id)
+{
+    if (option.title == id) {
+        return option.title;
+    }
+    return option.title
+        + QString::fromUtf8("\uff08")
+        + id
+        + QString::fromUtf8("\uff09");
 }
 
 QString customModelIdForTitle(const QString &title, const QVector<ModelOption> &options)
@@ -71,10 +157,18 @@ QVector<ModelOption> modelOptions()
 QString modelTitle(const QString &id)
 {
     const QVector<ModelOption> options = modelOptions();
-    for (const ModelOption &option : options) {
-        if (option.id == id) {
-            return option.title;
-        }
+    const QString trimmed = id.trimmed();
+    if (const ModelOption *option = modelOptionForId(options, trimmed)) {
+        return option->title;
+    }
+
+    const QString migratedId = migratedBuiltInModelId(trimmed);
+    if (const ModelOption *option = modelOptionForId(options, migratedId)) {
+        return option->title;
+    }
+
+    if (!trimmed.isEmpty()) {
+        return trimmed;
     }
 
     if (!options.isEmpty()) {
@@ -91,16 +185,13 @@ QString modelDisplayText(const QString &id)
     }
 
     const QVector<ModelOption> options = modelOptions();
-    for (const ModelOption &option : options) {
-        if (option.id == trimmed) {
-            if (option.title == trimmed) {
-                return option.title;
-            }
-            return option.title
-                + QString::fromUtf8("\uff08")
-                + trimmed
-                + QString::fromUtf8("\uff09");
-        }
+    if (const ModelOption *option = modelOptionForId(options, trimmed)) {
+        return displayTextForOption(*option, trimmed);
+    }
+
+    const QString migratedId = migratedBuiltInModelId(trimmed);
+    if (const ModelOption *option = modelOptionForId(options, migratedId)) {
+        return displayTextForOption(*option, trimmed);
     }
     return trimmed;
 }
@@ -118,24 +209,17 @@ QString normalizeModelId(const QString &value, const QString &fallback)
         }
     }
 
+    const QString migratedId = migratedBuiltInModelId(trimmed);
+    if (!migratedId.isEmpty()) {
+        return migratedId;
+    }
+
     const QString customId = customModelIdForTitle(trimmed, options);
     if (!customId.isEmpty()) {
         return customId;
     }
-    if (trimmed.startsWith(QStringLiteral("gpt-"))) {
-        return QStringLiteral("openai:") + trimmed;
-    }
-    if (trimmed.startsWith(QStringLiteral("claude-"))) {
-        return QStringLiteral("claude:") + trimmed;
-    }
     if (trimmed.startsWith(QStringLiteral("custom:"))) {
         return trimmed;
-    }
-    if (trimmed.startsWith(QStringLiteral("openai:"))) {
-        return QStringLiteral("openai:gpt-5.5");
-    }
-    if (trimmed.startsWith(QStringLiteral("claude:"))) {
-        return QStringLiteral("claude:claude-opus-4-8");
     }
 
     return fallback.trimmed().isEmpty() ? defaultModelForFunction(QString()) : fallback;

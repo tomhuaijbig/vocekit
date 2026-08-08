@@ -36,6 +36,7 @@ public:
 
     int nativeKey() const;
     unsigned int modifiers() const;
+    bool isPressed() const;
 
 private:
     int m_nativeKey = 0;
@@ -58,6 +59,7 @@ public:
     );
     void uninstall();
     bool isInstalled() const;
+    bool hasPressedHold() const;
 
     void processNativeKey(
         unsigned int message,

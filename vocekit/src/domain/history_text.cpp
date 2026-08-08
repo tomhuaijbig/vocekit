@@ -13,6 +13,50 @@ QString text(const char *value)
     return QString::fromUtf8(value);
 }
 
+QString builtInModeTitle(const QString &modeId)
+{
+    if (modeId == QStringLiteral("dictate")) {
+        return text("听写");
+    }
+    if (modeId == QStringLiteral("translate")) {
+        return text("翻译");
+    }
+    if (modeId == QStringLiteral("ask")) {
+        return text("问答");
+    }
+    if (modeId == QStringLiteral("ocr")) {
+        return text("图片识别");
+    }
+    return QString();
+}
+
+QString legacyBuiltInModeId(const QString &modeTitle)
+{
+    const QString title = modeTitle.trimmed();
+    if (title == text("听写")
+        || title == text("听写（Dictate）")
+        || title == QStringLiteral("听写 (Dictate)")
+        || title.compare(QStringLiteral("Dictate"), Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("dictate");
+    }
+    if (title == text("翻译")
+        || title == text("翻译（Translate）")
+        || title == QStringLiteral("翻译 (Translate)")
+        || title.compare(QStringLiteral("Translate"), Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("translate");
+    }
+    if (title == text("问答")
+        || title == text("问答（Ask）")
+        || title == QStringLiteral("问答 (Ask)")
+        || title.compare(QStringLiteral("Ask"), Qt::CaseInsensitive) == 0) {
+        return QStringLiteral("ask");
+    }
+    if (title == text("图片识别")) {
+        return QStringLiteral("ocr");
+    }
+    return QString();
+}
+
 } // namespace
 
 QString historyElapsedDurationText(qint64 elapsedMs)
@@ -44,6 +88,17 @@ QString historyDisplayTimeText(const QString &iso)
     return QString(iso).replace(QStringLiteral("T"), QStringLiteral(" "));
 }
 
+QString historyEntryModeText(const HistoryEntry &entry)
+{
+    const QString byId = builtInModeTitle(entry.modeId.trimmed());
+    if (!byId.isEmpty()) {
+        return byId;
+    }
+    const QString legacyId = legacyBuiltInModeId(entry.mode);
+    const QString legacyTitle = builtInModeTitle(legacyId);
+    return legacyTitle.isEmpty() ? entry.mode : legacyTitle;
+}
+
 QString historyEntryPreviewText(const HistoryEntry &entry, int maxLength)
 {
     QString preview = entry.output.trimmed();
@@ -73,7 +128,7 @@ QString historyEntryTitleText(const HistoryEntry &entry)
         ? (folder.isEmpty() ? text(" · 已收藏") : text(" · 已收藏：") + folder)
         : QString();
     const QString draftMark = entry.draft ? text(" · 草稿") : QString();
-    return entry.mode
+    return historyEntryModeText(entry)
         + text(" · ")
         + historyDisplayTimeText(entry.time)
         + favoriteMark
@@ -108,7 +163,7 @@ QString historyEntryDetailPlainText(
         : modelText;
 
     QStringList parts;
-    parts << text("功能：") + entry.mode;
+    parts << text("功能：") + historyEntryModeText(entry);
     parts << text("时间：") + historyDisplayTimeText(entry.time);
     parts << text("耗时：") + historyElapsedDurationText(entry.elapsedMs);
     parts << text("语音识别耗时：") + historyElapsedDurationText(entry.speechElapsedMs);
@@ -212,6 +267,7 @@ bool historyEntryMatchesSearchText(
     }
     const QString searchable = (QStringList()
         << entry.mode
+        << historyEntryModeText(entry)
         << historyDisplayTimeText(entry.time)
         << entry.input
         << entry.output

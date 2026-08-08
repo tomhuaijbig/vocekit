@@ -9,6 +9,17 @@ static QString tr8(const char *text)
 {
     return QString::fromUtf8(text);
 }
+
+static QString faqCardsStyle()
+{
+    return cardStyle() + QStringLiteral(
+        "QFrame#card { background: #ffffff; }"
+        "QLabel#faqNumber { background: #111827; color: #ffffff; border-radius: 14px; font-weight: 700; }"
+        "QLabel#faqLabel { color: #047857; font-weight: 700; }"
+        "QLabel#faqBody { color: #344054; line-height: 1.45; }"
+        "QFrame#faqBlock { background: #f8fafc; border: 1px solid #edf0f3; border-radius: 8px; }"
+    );
+}
 QString FaqPanel::faqCategoryForText(const QString &text) const
     {
         if (text.contains(tr8("历史"), Qt::CaseInsensitive)
@@ -87,7 +98,8 @@ void FaqPanel::applyFaqSearch()
         }
         const QString keyword = m_faqSearchEdit ? m_faqSearchEdit->text().trimmed() : QString();
         const QString category = m_faqCategoryBox ? m_faqCategoryBox->currentData().toString() : QStringLiteral("all");
-        int visibleCount = 0;
+        int matchedCount = 0;
+        int renderedCount = 0;
         for (int i = 0; i < m_faqItemsLayout->count(); ++i) {
             QLayoutItem *item = m_faqItemsLayout->itemAt(i);
             QWidget *widget = item ? item->widget() : nullptr;
@@ -103,13 +115,27 @@ void FaqPanel::applyFaqSearch()
                 || widget->property("faqCategory").toString() == category;
             const bool matched = categoryMatched
                 && (keyword.isEmpty() || searchText.contains(keyword, Qt::CaseInsensitive));
-            widget->setVisible(matched);
             if (matched) {
-                ++visibleCount;
+                ++matchedCount;
+            }
+            const bool shouldShow = matched && renderedCount < m_faqRenderLimit;
+            if (shouldShow) {
+                ensureFaqCardMaterialized(widget);
+                ++renderedCount;
+            }
+            if (widget->isHidden() == shouldShow) {
+                widget->setVisible(shouldShow);
             }
         }
         if (m_faqEmptyLabel) {
-            m_faqEmptyLabel->setVisible(visibleCount == 0);
+            m_faqEmptyLabel->setVisible(matchedCount == 0);
+        }
+        if (m_faqLoadMoreButton) {
+            const int remainingCount = matchedCount - renderedCount;
+            m_faqLoadMoreButton->setVisible(remainingCount > 0);
+            m_faqLoadMoreButton->setText(
+                tr8("显示更多（还有 %1 条）").arg(remainingCount)
+            );
         }
     }
 
@@ -175,6 +201,7 @@ FaqPanel::FaqPanel(
             "}"
         ));
         connect(m_faqSearchEdit, &QLineEdit::textChanged, this, [this]() {
+            m_faqRenderLimit = 8;
             applyFaqSearch();
         });
         m_faqCategoryBox = new QComboBox;
@@ -193,6 +220,7 @@ FaqPanel::FaqPanel(
             "QComboBox { background: #ffffff; border: 1px solid #d0d5dd; border-radius: 8px; padding: 0 10px; }"
         ));
         connect(m_faqCategoryBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, [this]() {
+            m_faqRenderLimit = 8;
             applyFaqSearch();
         });
         filterRow->addWidget(m_faqSearchEdit, 1);
@@ -209,6 +237,7 @@ FaqPanel::FaqPanel(
         ));
 
         auto *holder = new QWidget;
+        holder->setStyleSheet(faqCardsStyle());
         auto *items = new QVBoxLayout(holder);
         m_faqItemsLayout = items;
         items->setContentsMargins(0, 0, 10, 0);
@@ -467,6 +496,17 @@ FaqPanel::FaqPanel(
 
         addRecentWorkflowFaqItems(items);
 
+        m_faqLoadMoreButton = new QPushButton;
+        m_faqLoadMoreButton->setMinimumHeight(42);
+        m_faqLoadMoreButton->setStyleSheet(
+            compactButtonStyle(QStringLiteral("#ffffff"), QStringLiteral("#111827"))
+        );
+        connect(m_faqLoadMoreButton, &QPushButton::clicked, this, [this]() {
+            m_faqRenderLimit += 8;
+            applyFaqSearch();
+        });
+        items->addWidget(m_faqLoadMoreButton);
+
         m_faqEmptyLabel = new QLabel(tr8("没有找到匹配的常见问题。"));
         m_faqEmptyLabel->setWordWrap(true);
         m_faqEmptyLabel->setAlignment(Qt::AlignCenter);
@@ -482,13 +522,85 @@ FaqPanel::FaqPanel(
         items->addWidget(m_faqEmptyLabel);
 
         items->addStretch();
+        applyFaqSearch();
         scroll->setWidget(holder);
         layout->addWidget(scroll, 1);
-        applyFaqSearch();
 }
 
 void FaqPanel::addLatestFeatureFaqItems(QVBoxLayout *items)
     {
+        items->addWidget(faqCard(
+            tr8("功能流程：版本或发布内容不兼容"),
+            tr8("流程由更高版本创建、发布哈希不一致，或保存文件中的流程结构已经损坏时，软件会停止使用该发布版并保留经典功能作为安全兜底。"),
+            QStringList()
+                << tr8("先备份 config/settings.json，再升级到创建该流程的软件版本。")
+                << tr8("当前版本可读取但发布校验失败时，在流程编辑器确认修复并重新发布；不要直接手改发布哈希。"),
+            QStringLiteral("function-flow-schema")
+        ));
+
+        items->addWidget(faqCard(
+            tr8("功能流程：草稿保存冲突"),
+            tr8("同时打开多个编辑窗口或多个程序实例时，较旧草稿不会覆盖较新版本，编辑器会报告版本冲突。"),
+            QStringList()
+                << tr8("保留需要的内容后重新加载当前功能，再继续编辑。")
+                << tr8("关闭重复运行的软件实例；草稿和已发布版本彼此独立，未发布草稿不会改变快捷键运行。"),
+            QStringLiteral("function-flow-draft")
+        ));
+
+        items->addWidget(faqCard(
+            tr8("功能流程：无法发布节点或连线"),
+            tr8("环路、悬空连线、端口方向错误、必需输入缺失、触发快捷键冲突或结果动作不完整都会阻止发布。"),
+            QStringList()
+                << tr8("点击编辑器中的错误定位，逐项检查红色节点和连线。")
+                << tr8("确保只有一个输出节点、至少一个结果动作，并让每个模型输入先经过输入节点。"),
+            QStringLiteral("function-flow-publish")
+        ));
+
+        items->addWidget(faqCard(
+            tr8("功能流程：没有取得选区、语音或截图"),
+            tr8("当前触发入口无法满足必需输入，或读取选区、录音识别、截图 OCR 被取消或失败时，流程会停止且不会再执行一遍经典功能。"),
+            QStringList()
+                << tr8("确认使用的是主快捷键、独立截图快捷键或截图悬浮入口中正确的一种。")
+                << tr8("检查目标窗口选区、麦克风和 OCR 测试；可选输入允许为空，必需输入必须取得内容。"),
+            QStringLiteral("function-flow-input")
+        ));
+
+        items->addWidget(faqCard(
+            tr8("功能流程：模型、提示词或服务不可用"),
+            tr8("发布后删除提示词、修改模型配置、缺少接口密钥，或语音/OCR 服务配置失效时，流程会在运行前报告配置错误，不会经典兜底。"),
+            QStringList()
+                << tr8("打开“设置 -> 接口”和“提示词库”，确认流程引用的稳定 ID 仍存在且密钥完整。")
+                << tr8("修复配置后重新触发；如节点引用已经改变，请重新选择并发布流程。"),
+            QStringLiteral("function-flow-model")
+        ));
+
+        items->addWidget(faqCard(
+            tr8("功能流程：结果无法写回目标窗口"),
+            tr8("原目标窗口关闭、切换到软件自身窗口、替换时原选区已经消失，或系统拒绝输入注入时，为避免误写到其它窗口，自动写入会停止。"),
+            QStringList()
+                << tr8("保留结果窗口并手动复制，不要依赖后来切换到的新前台窗口。")
+                << tr8("替换写入前保持原选区；若选区已取消，重新选择文字后再运行。"),
+            QStringLiteral("function-flow-output")
+        ));
+
+        items->addWidget(faqCard(
+            tr8("功能流程：历史保存或编辑回写失败"),
+            tr8("历史目录不可写、记录文件被移动，或结果窗口关闭时记录路径已不再属于本次运行冻结的历史目录，会拒绝新增或回写。"),
+            QStringList()
+                << tr8("检查历史目录权限和剩余空间，避免在流程运行中移动该条详情文件。")
+                << tr8("结果窗口的人工编辑只更新同一条流程历史，不会创建第二条记录。"),
+            QStringLiteral("function-flow-history")
+        ));
+
+        items->addWidget(faqCard(
+            tr8("功能流程：运行取消、忙碌或异常终止"),
+            tr8("同一切换式流程再次触发会取消当前运行；其它流程在录音、截图、模型或已有流程占用时会被拒绝，以保证一次只运行一个节点和一个流程。"),
+            QStringList()
+                << tr8("等待当前任务结束，或再次触发同一流程进行取消。")
+                << tr8("若持续异常，查看 logs/function-flow.jsonl；日志只含功能、节点、耗时和稳定错误码，不含正文、图片或密钥。"),
+            QStringLiteral("function-flow-runtime")
+        ));
+
         items->addWidget(faqCard(
             tr8("结果小框：重新生成、换模型或继续追问失败"),
             tr8("这些按钮会重新调用当前功能对应的大模型。失败通常和模型密钥、模型名称、网络代理、选中文本过长或当前服务不可用有关。"),
@@ -622,24 +734,41 @@ void FaqPanel::addRecentWorkflowFaqItems(QVBoxLayout *items)
         ));
     }
 
-QWidget *FaqPanel::faqCard(const QString &title, const QString &cause, const QStringList &solutions)
+QWidget *FaqPanel::faqCard(
+    const QString &title,
+    const QString &cause,
+    const QStringList &solutions,
+    const QString &explicitFaqId)
     {
         auto *frame = new QFrame;
         frame->setObjectName(QStringLiteral("card"));
-        const QString faqId = attentionFaqIdForTitle(title);
+        const QString faqId = explicitFaqId.trimmed().isEmpty()
+            ? attentionFaqIdForTitle(title)
+            : explicitFaqId.trimmed();
         const QString searchText = (QStringList() << faqId << (tr8("问题") + faqId) << title << cause << solutions).join(QStringLiteral("\n"));
         const QString category = faqCategoryForText(title);
         frame->setProperty("faqSearchText", searchText);
         frame->setProperty("faqCategory", category);
-        frame->setStyleSheet(cardStyle() + QStringLiteral(
-            "QFrame#card { background: #ffffff; }"
-            "QLabel#faqNumber { background: #111827; color: #ffffff; border-radius: 14px; font-weight: 700; }"
-            "QLabel#faqLabel { color: #047857; font-weight: 700; }"
-            "QLabel#faqBody { color: #344054; line-height: 1.45; }"
-            "QFrame#faqBlock { background: #f8fafc; border: 1px solid #edf0f3; border-radius: 8px; }"
-        ));
+        frame->setProperty("faqId", faqId);
+        frame->setProperty("faqTitle", title);
+        frame->setProperty("faqCause", cause);
+        frame->setProperty("faqSolutions", solutions);
+        frame->setProperty("faqMaterialized", false);
+        return frame;
+    }
 
-        auto *layout = new QVBoxLayout(frame);
+void FaqPanel::ensureFaqCardMaterialized(QWidget *card)
+    {
+        if (!card || card->property("faqMaterialized").toBool()) {
+            return;
+        }
+
+        const QString faqId = card->property("faqId").toString();
+        const QString title = card->property("faqTitle").toString();
+        const QString cause = card->property("faqCause").toString();
+        const QStringList solutions = card->property("faqSolutions").toStringList();
+        const QString category = card->property("faqCategory").toString();
+        auto *layout = new QVBoxLayout(card);
         layout->setContentsMargins(16, 14, 16, 14);
         layout->setSpacing(12);
 
@@ -709,5 +838,5 @@ QWidget *FaqPanel::faqCard(const QString &title, const QString &cause, const QSt
 
         layout->addWidget(causeBlock);
         layout->addWidget(solutionBlock);
-        return frame;
+        card->setProperty("faqMaterialized", true);
     }

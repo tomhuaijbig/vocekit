@@ -1,5 +1,6 @@
 #include "hotkey_settings_snapshot.h"
 
+#include "../capture/screenshot_types.h"
 #include "hotkey_definitions.h"
 
 namespace {
@@ -30,13 +31,162 @@ GlobalHotkeyFunction globalHotkeyFunctionFromData(
         function.screenshotShortcut =
             screenshotShortcutFromFunctionShortcut(shortcut);
     }
+    function.useHoldToTalk =
+        function.recordingTriggerMode == QStringLiteral("hold")
+        && function.useVoice
+        && !(function.useScreenshot
+            && screenshotTriggerUsesPrimary(
+                function.screenshotTriggerMode
+            ));
+    function.registerScreenshotHotkey =
+        function.useScreenshot
+        && screenshotTriggerUsesSeparate(
+            function.screenshotTriggerMode
+        );
     return function;
+}
+
+bool triggerHasNodeType(
+    const FunctionFlowExecutionPlan &plan,
+    const FunctionFlowTriggerPlan &trigger,
+    FunctionFlowNodeType type)
+{
+    for (const QString &nodeId : trigger.activeSourceNodeIds) {
+        if (plan.nodes.contains(nodeId)
+            && plan.nodes.value(nodeId).type == type) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString screenshotShortcutForTrigger(
+    const FunctionFlowExecutionPlan &plan,
+    const FunctionFlowTriggerPlan &trigger)
+{
+    for (const QString &nodeId : trigger.activeSourceNodeIds) {
+        if (!plan.nodes.contains(nodeId)) {
+            continue;
+        }
+        const FunctionFlowCompiledNode node =
+            plan.nodes.value(nodeId);
+        if (node.type == FunctionFlowNodeType::ScreenshotSource) {
+            return node.config.screenshot.separateShortcut.trimmed();
+        }
+    }
+    return QString();
+}
+
+void applyPublishedFlowProfiles(
+    const FunctionFlowExecutionPlan &plan,
+    GlobalHotkeyFunction *function)
+{
+    if (!function) {
+        return;
+    }
+
+    const FunctionFlowTriggerPlan main =
+        plan.triggers.value(FunctionFlowTrigger::MainHotkey);
+    if (main.available) {
+        function->useVoice = triggerHasNodeType(
+            plan,
+            main,
+            FunctionFlowNodeType::VoiceSource
+        );
+        function->recordingTriggerMode =
+            main.usesHoldToTalk
+                ? QStringLiteral("hold")
+                : QStringLiteral("toggle");
+        function->useHoldToTalk = main.usesHoldToTalk;
+    }
+
+    const FunctionFlowTriggerPlan screenshot =
+        plan.triggers.value(FunctionFlowTrigger::ScreenshotHotkey);
+    if (screenshot.available) {
+        function->registerScreenshotHotkey =
+            triggerHasNodeType(
+                plan,
+                screenshot,
+                FunctionFlowNodeType::ScreenshotSource
+            );
+        function->useScreenshot =
+            function->useScreenshot
+            || function->registerScreenshotHotkey;
+        function->screenshotTriggerMode =
+            screenshotTriggerSeparate();
+        const QString shortcut = screenshotShortcutForTrigger(
+            plan,
+            screenshot
+        );
+        if (!shortcut.isEmpty()) {
+            function->screenshotShortcut = shortcut;
+        }
+    }
+}
+
+void clearClassicExecutionProfiles(GlobalHotkeyFunction *function)
+{
+    if (!function) {
+        return;
+    }
+    function->recordingTriggerMode = QStringLiteral("toggle");
+    function->useVoice = false;
+    function->useScreenshot = false;
+    function->useHoldToTalk = false;
+    function->registerScreenshotHotkey = false;
+    function->screenshotShortcut.clear();
+}
+
+void applyExecutionModeProfiles(
+    const FunctionSettings &settings,
+    const FunctionFlowPlanProvider &flowPlanProvider,
+    GlobalHotkeyFunction *function)
+{
+    if (settings.executionMode != FunctionExecutionMode::Canvas) {
+        return;
+    }
+
+    clearClassicExecutionProfiles(function);
+    if (!flowPlanProvider) {
+        return;
+    }
+    const QSharedPointer<const FunctionFlowExecutionPlan> plan =
+        flowPlanProvider(settings.id);
+    if (!plan.isNull()) {
+        applyPublishedFlowProfiles(*plan, function);
+    }
 }
 
 } // namespace
 
+bool functionUsesScreenshotLauncher(
+    const FunctionSettings &function,
+    const QSharedPointer<const FunctionFlowExecutionPlan> &plan)
+{
+    if (function.executionMode == FunctionExecutionMode::Classic) {
+        return function.input.useScreenshot
+            && screenshotTriggerUsesLauncher(
+                function.input.screenshotTriggerMode
+            );
+    }
+    return !plan.isNull()
+        && plan->triggers.value(
+            FunctionFlowTrigger::ScreenshotLauncher
+        ).available;
+}
+
 GlobalHotkeySettingsSnapshot globalHotkeySnapshotFromData(
     const AppSettingsData &settings)
+{
+    return globalHotkeySnapshotFromData(
+        settings,
+        FunctionFlowPlanProvider()
+    );
+}
+
+GlobalHotkeySettingsSnapshot globalHotkeySnapshotFromData(
+    const AppSettingsData &settings,
+    const FunctionFlowPlanProvider &flowPlanProvider)
 {
     GlobalHotkeySettingsSnapshot snapshot;
     for (const HotkeyDef &def : hotkeyDefs()) {
@@ -45,27 +195,37 @@ GlobalHotkeySettingsSnapshot globalHotkeySnapshotFromData(
         const QString shortcut = settings.applicationHotkeys
             .value(def.id, def.defaultValue)
             .trimmed();
-        snapshot.functions.append(
+        GlobalHotkeyFunction function =
             globalHotkeyFunctionFromData(
                 functionSettings,
                 def.id,
                 def.title,
                 shortcut.isEmpty() ? def.defaultValue : shortcut
-            )
+            );
+        applyExecutionModeProfiles(
+            functionSettings,
+            flowPlanProvider,
+            &function
         );
+        snapshot.functions.append(function);
     }
     for (const FunctionSettings &functionSettings : settings.functions) {
         if (functionSettings.builtIn) {
             continue;
         }
-        snapshot.functions.append(
+        GlobalHotkeyFunction function =
             globalHotkeyFunctionFromData(
                 functionSettings,
                 functionSettings.id,
                 functionSettings.name,
                 functionSettings.shortcut
-            )
+            );
+        applyExecutionModeProfiles(
+            functionSettings,
+            flowPlanProvider,
+            &function
         );
+        snapshot.functions.append(function);
     }
     return snapshot;
 }

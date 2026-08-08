@@ -37,7 +37,7 @@ HomePage::HomePage(const HomePageAccess &access, QWidget *parent)
     ));
 
     m_functionModes = new FunctionModeGrid(m_access.functionModes);
-    m_functionModes->setEditCallback(m_access.editFunction);
+    m_functionModes->setOpenCallback(m_access.openFunction);
     m_functionModes->setSettingsChangedCallback(m_access.settingsChanged);
     m_functionModes->setWarningCallback(m_access.showWarning);
     m_functionModes->refresh();

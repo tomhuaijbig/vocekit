@@ -2,6 +2,7 @@
 #define VOCEKIT_SCREENSHOT_RESULT_WINDOW_H
 
 #include "../ocr/ocr_types.h"
+#include "../output/clipboard_writer.h"
 
 #include <QImage>
 #include <QPair>
@@ -51,6 +52,12 @@ public:
         const std::function<void(const QString &)> &onFollowUp,
         const std::function<void(const QString &)> &onWrite,
         const std::function<void(const QString &)> &onReplace
+    );
+    void setCheckedWriteCallback(
+        const std::function<ClipboardWriteResult(
+            const QString &action,
+            const QString &text
+        )> &callback
     );
     void setDraftCallback(const std::function<void(const QString &)> &onDraft);
     void setLiveDraftCallback(
@@ -107,6 +114,10 @@ private:
     std::function<void(const QString &)> m_onFollowUp;
     std::function<void(const QString &)> m_onWrite;
     std::function<void(const QString &)> m_onReplace;
+    std::function<ClipboardWriteResult(
+        const QString &,
+        const QString &
+    )> m_checkedWrite;
     std::function<void(const QString &)> m_onDraft;
     std::function<void(const QString &)> m_onLiveDraft;
     std::function<void()> m_onResolved;

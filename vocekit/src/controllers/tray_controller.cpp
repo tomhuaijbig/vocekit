@@ -16,7 +16,7 @@ TrayController::TrayController(
     m_tray->setIcon(QApplication::style()->standardIcon(QStyle::SP_MediaVolume));
     m_tray->setToolTip(QStringLiteral("vocekit"));
 
-    auto *menu = new QMenu;
+    auto *menu = new QMenu(m_hubWindow);
     auto *openHub = menu->addAction(QString::fromUtf8("打开主界面"));
     auto *settingsAction = menu->addAction(QString::fromUtf8("设置"));
     menu->addSeparator();
@@ -40,6 +40,7 @@ TrayController::TrayController(
     auto *showBar = menu->addAction(QString::fromUtf8("测试浮动条"));
     menu->addSeparator();
     auto *quit = menu->addAction(QString::fromUtf8("退出"));
+    quit->setObjectName(QStringLiteral("trayQuitAction"));
 
     connect(openHub, &QAction::triggered, this, [this]() {
         showHubWindow();
@@ -116,7 +117,11 @@ TrayController::TrayController(
             m_callbacks.openSettings();
         }
     });
-    connect(quit, &QAction::triggered, qApp, &QApplication::quit);
+    connect(quit, &QAction::triggered, this, [this]() {
+        if (m_callbacks.requestApplicationQuit) {
+            m_callbacks.requestApplicationQuit();
+        }
+    });
     connect(
         m_tray,
         &QSystemTrayIcon::activated,

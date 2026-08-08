@@ -24,10 +24,19 @@ struct CustomFunctionDef
     QString shortcut;
     QString model;
     QString outputMode;
+    QStringList outputOrder = QStringList()
+        << QStringLiteral("ai")
+        << QStringLiteral("autoWrite")
+        << QStringLiteral("resultPopup")
+        << QStringLiteral("screenshotPanel");
     QString resultTemplate;
     bool useSelection = true;
     bool useVoice = true;
     bool useScreenshot = false;
+    QStringList inputOrder = QStringList()
+        << QStringLiteral("voice")
+        << QStringLiteral("selection")
+        << QStringLiteral("screenshot");
     QString screenshotTriggerMode = QStringLiteral("separate");
     QString screenshotShortcut;
     int floatingBarSeconds = 2;

@@ -22,6 +22,8 @@ SOURCES += \
 HEADERS += \
     ../../src/domain/history_record_builder.h \
     ../../src/domain/history_types.h \
+    ../../src/domain/execution_types.h \
+    ../../src/domain/operation_error.h \
     ../../src/domain/voice_history_recorder.h \
     ../../src/domain/voice_history_request_builder.h \
     ../../src/domain/voice_run_context.h \

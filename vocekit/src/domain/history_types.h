@@ -7,6 +7,17 @@
 #include <QStringList>
 #include <QVector>
 
+struct HistoryFlowNodeTrace
+{
+    QString nodeId;
+    QString nodeType;
+    QString state;
+    qint64 elapsedMs = -1;
+    QString errorCode;
+    QString modelId;
+    QString promptVersion;
+};
+
 // 历史记录详情结构：对应每条 detail json 中保存的核心字段。
 struct HistoryEntry
 {
@@ -38,6 +49,14 @@ struct HistoryEntry
     bool favorite = false;
     QString favoriteFolder;
     bool draft = false;
+    QString flowRunId;
+    int flowPublishedRevision = 0;
+    QString flowPublishedHash;
+    QString flowTrigger;
+    QVector<HistoryFlowNodeTrace> flowNodeTraces;
+    QString flowFailedNodeId;
+    QString flowFailedNodeType;
+    bool flowCancelled = false;
 };
 
 // 历史列表查询条件：后续 HistoryStore 使用，当前先集中定义避免继续散落在 UI 里。

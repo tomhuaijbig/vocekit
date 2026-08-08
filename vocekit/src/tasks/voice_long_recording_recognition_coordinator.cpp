@@ -38,6 +38,7 @@ void VoiceLongRecordingRecognitionCoordinator::reset()
     m_cancellation = CancellationSource();
     m_session = nullptr;
     m_completionNotified = false;
+    m_effectiveCancellation = CancellationToken();
 }
 
 void VoiceLongRecordingRecognitionCoordinator::schedule(
@@ -49,6 +50,9 @@ void VoiceLongRecordingRecognitionCoordinator::schedule(
     m_session = &session;
     m_config = config;
     m_handlers = handlers;
+    m_effectiveCancellation = config.cancellation.isValid()
+        ? config.cancellation
+        : m_cancellation.token();
     processNext();
 }
 
@@ -102,7 +106,10 @@ void VoiceLongRecordingRecognitionCoordinator::processNext()
     request.speech.provider = m_config.provider;
     request.speech.useSystemProxy = m_config.useSystemProxy;
     request.speech.networkPolicy = m_config.networkPolicy;
-    request.cancellation = m_cancellation.token();
+    request.cancellation = m_effectiveCancellation.isValid()
+        ? m_effectiveCancellation
+        : m_cancellation.token();
+    request.speech.cancellation = request.cancellation;
     const VoiceSpeechRecognitionHandlers handlers = m_handlers;
     m_watcher.setFuture(QtConcurrent::run([request, handlers]() {
         return VoiceLongRecordingSegmentExecutor::run(
@@ -115,7 +122,11 @@ void VoiceLongRecordingRecognitionCoordinator::processNext()
 void VoiceLongRecordingRecognitionCoordinator::handleFinished()
 {
     const VoiceLongRecordingSegmentResult result = m_watcher.result();
-    if (result.executionId != m_cancellation.executionId()) {
+    const ExecutionId expectedExecutionId =
+        m_effectiveCancellation.isValid()
+            ? m_effectiveCancellation.executionId()
+            : m_cancellation.executionId();
+    if (result.executionId != expectedExecutionId) {
         processNext();
         return;
     }

@@ -13,6 +13,7 @@ class HubPageRouterTests : public QObject
 private slots:
     void exposesIndependentRouterInterface();
     void selectsRegisteredPagesAndReportsChanges();
+    void createsDeferredPageOnceOnFirstSelection();
     void rejectsInvalidAndDuplicatePages();
     void hubWindowDoesNotUseFixedPageIndexes();
 };
@@ -53,6 +54,37 @@ void HubPageRouterTests::selectsRegisteredPagesAndReportsChanges()
     QCOMPARE(historyChanges, QVector<bool>() << true << false);
     QVERIFY(!router.selectPage(QStringLiteral("missing")));
     QCOMPARE(router.currentPageId(), QStringLiteral("history"));
+}
+
+void HubPageRouterTests::createsDeferredPageOnceOnFirstSelection()
+{
+    HubPageRouter router;
+    int creations = 0;
+    QWidget *createdPage = nullptr;
+    QVector<bool> activationChanges;
+
+    QVERIFY(router.registerDeferredPage(
+        QStringLiteral("history"),
+        [&creations, &createdPage]() {
+            ++creations;
+            createdPage = new QWidget;
+            return createdPage;
+        },
+        [&activationChanges](bool changed) {
+            activationChanges.append(changed);
+        }
+    ));
+    QCOMPARE(creations, 0);
+    QCOMPARE(router.count(), 1);
+
+    QVERIFY(router.selectPage(QStringLiteral("history")));
+    QCOMPARE(creations, 1);
+    QCOMPARE(router.currentWidget(), createdPage);
+    QCOMPARE(activationChanges, QVector<bool>() << true);
+
+    QVERIFY(router.selectPage(QStringLiteral("history")));
+    QCOMPARE(creations, 1);
+    QCOMPARE(activationChanges, QVector<bool>() << true << false);
 }
 
 void HubPageRouterTests::rejectsInvalidAndDuplicatePages()

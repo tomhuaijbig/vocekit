@@ -51,17 +51,23 @@ FunctionManagementPageAccess createFunctionManagementPageAccess(
         }
     };
 
-    const auto saveSettings = dependencies.saveSettings;
-    access.removeFunction = [settings, saveSettings](
+    const FunctionFlowSettingsAccess flows = dependencies.flows;
+    const auto operationFailed = dependencies.operationFailed;
+    access.removeFunction = [settings, flows, operationFailed](
         const FunctionManagementItem &item
     ) {
-        if (!settings || !item.custom) {
+        if (!settings || !item.custom
+            || !flows.removeCustomFunction) {
             return;
         }
-        settings->removeCustomFunction(item.id);
-        if (saveSettings) {
-            saveSettings();
+        OperationError error;
+        if (!flows.removeCustomFunction(item.id, &error)) {
+            if (operationFailed) {
+                operationFailed(error);
+            }
+            return;
         }
+        settings->load();
     };
     return access;
 }

@@ -16,11 +16,11 @@
 #include "../tasks/speech_recognition_task.h"
 #include "../tasks/voice_long_recording_completion_executor.h"
 #include "../tasks/voice_long_recording_recognition_coordinator.h"
-#include "../tasks/voice_recording_completion_executor.h"
 #include "../tasks/voice_speech_recognition_executor.h"
 #include "../ui/floating_bar.h"
 
 #include <QtMultimedia>
+#include <QtConcurrent>
 #include <QtWidgets>
 
 namespace {
@@ -30,10 +30,57 @@ QString tr8(const char *text)
     return QString::fromUtf8(text);
 }
 
+VoiceRecordingCaptureHandlers recordingCaptureHandlers(
+    const VoiceRecordingWorkflowAccess &access,
+    VoiceAudioRecorderAdapter *adapter
+)
+{
+    if (access.recordingCapture.start) {
+        return access.recordingCapture;
+    }
+    return adapter
+        ? adapter->handlers()
+        : VoiceRecordingCaptureHandlers();
+}
+
+OperationError flowVoiceError(
+    const QString &code,
+    const QString &message = QString()
+)
+{
+    OperationError error;
+    error.code = code;
+    error.message = message;
+    return error;
+}
+
 } // namespace
 
 class VoiceRecordingWorkflowController::Impl : public QObject
 {
+private:
+    struct FlowState
+    {
+        bool active = false;
+        bool processing = false;
+        quint64 generation = 0;
+        ExecutionId runId;
+        CancellationToken cancellation;
+        QString functionId;
+        QString nodeId;
+        QString functionTitle;
+        QString recordDirectory;
+        QString provider;
+        QString networkPolicy;
+        FunctionFlowRecordingConfig recording;
+        QString effectiveTriggerMode = QStringLiteral("toggle");
+        FunctionFlowNodeCompletion completion;
+        VoiceRecordingStopResult normalRecording;
+        qint64 speechElapsedMs = -1;
+        bool longRecognitionSawResult = false;
+        bool longRecognitionOnlyEmpty = true;
+    };
+
 public:
     Impl(
         const VoiceRecordingWorkflowAccess &access,
@@ -45,7 +92,10 @@ public:
           m_access(access),
           m_bar(bar),
           m_runSession(runSession),
-          m_recordingCapture(m_audioRecorderAdapter.handlers()),
+          m_recordingCapture(recordingCaptureHandlers(
+              access,
+              &m_audioRecorderAdapter
+          )),
           m_recordingCoordinator(
               m_recordingCapture,
               m_recordingLifecycle
@@ -58,10 +108,20 @@ public:
         configureLifecycleCallbacks();
         configureCoordinatorCallbacks();
         configureRecognitionCallbacks();
+        m_flowCancellationTimer.setInterval(10);
+        connect(
+            &m_flowCancellationTimer,
+            &QTimer::timeout,
+            this,
+            [this]() {
+                cancelFlowIfRequested();
+            }
+        );
     }
 
     ~Impl() override
     {
+        m_flowCancellationTimer.stop();
         m_recordingCoordinator.cancelPreparation();
         m_longRecognitionCoordinator.cancel();
         if (m_recordingLifecycle.isRecording()) {
@@ -88,18 +148,26 @@ public:
             return false;
         }
 
+        ++m_operationGeneration;
         m_modeId = id;
+        m_coordinatorModeId = id;
+        m_classicEffectiveTriggerMode =
+            functionSettings(id).recording.triggerMode
+                    == QStringLiteral("hold")
+                && m_activeHoldFunctions.contains(id)
+                ? QStringLiteral("hold")
+                : QStringLiteral("toggle");
         m_longRecognitionCoordinator.reset();
         if (m_runSession) {
             m_runSession->setRecordingTriggerMode(
-                recordingTriggerModeFor(id)
+                m_classicEffectiveTriggerMode
             );
         }
 
         const bool longRecordingEnabled =
             longRecordingEnabledFor(id);
         VoiceRecordingCoordinatorRequest request;
-        request.modeId = id;
+        request.modeId = m_coordinatorModeId;
         request.countdownSeconds = m_settings.preRecordCountdownEnabled
             ? countdownSecondsFor(id)
             : 0;
@@ -117,11 +185,104 @@ public:
         return true;
     }
 
+    bool beginForFlow(
+        const FunctionFlowRunContext &run,
+        const FunctionFlowCompiledNode &node,
+        const FunctionFlowNodeCompletion &completion
+    )
+    {
+        if (!completion
+            || !run.runId.isValid()
+            || !run.cancellation.isValid()
+            || run.cancellation.executionId() != run.runId
+            || run.functionId.trimmed().isEmpty()
+            || node.nodeId.trimmed().isEmpty()
+            || node.type != FunctionFlowNodeType::VoiceSource
+            || run.dependencies.isNull()
+            || !run.dependencies->byNodeId.contains(node.nodeId)
+            || isBusy()
+            || externalProcessing()) {
+            return false;
+        }
+
+        const FunctionFlowResolvedNodeSettings resolved =
+            run.dependencies->byNodeId.value(node.nodeId);
+        if (resolved.speechProviderId.trimmed().isEmpty()
+            || resolved.effectiveNetworkPolicy.trimmed().isEmpty()) {
+            return false;
+        }
+
+        FlowState flow;
+        flow.active = true;
+        flow.generation = ++m_operationGeneration;
+        flow.runId = run.runId;
+        flow.cancellation = run.cancellation;
+        flow.functionId = run.functionId.trimmed();
+        flow.nodeId = node.nodeId;
+        flow.functionTitle =
+            run.dependencies->functionTitle.trimmed().isEmpty()
+                ? flow.functionId
+                : run.dependencies->functionTitle;
+        flow.recordDirectory = run.dependencies->recordDirectory;
+        flow.provider = resolved.speechProviderId;
+        flow.networkPolicy = resolved.effectiveNetworkPolicy;
+        flow.recording = node.config.voice.recording;
+        flow.effectiveTriggerMode =
+            flow.recording.triggerMode == QStringLiteral("hold")
+            && m_activeHoldFunctions.contains(flow.functionId)
+                ? QStringLiteral("hold")
+                : QStringLiteral("toggle");
+        flow.completion = completion;
+        flow.speechElapsedMs =
+            flow.recording.longRecordingEnabled ? 0 : -1;
+        m_flow = flow;
+        m_modeId = flow.functionId;
+        m_coordinatorModeId =
+            QStringLiteral("flow:") + flow.runId.value;
+        m_longRecognitionCoordinator.reset();
+        m_flowCancellationTimer.start();
+
+        if (m_flow.cancellation.isCancellationRequested()) {
+            cancelActiveFlow();
+            return true;
+        }
+
+        const quint64 generation = m_flow.generation;
+        const ExecutionId runId = m_flow.runId;
+        VoiceRecordingCoordinatorRequest request;
+        request.modeId = m_coordinatorModeId;
+        request.countdownSeconds =
+            m_flow.recording.countdownSeconds;
+        request.playBeep = m_flow.recording.beepEnabled;
+        request.captureRequestBuilder =
+            [this, generation, runId]() {
+                return flowMatches(generation, runId)
+                    ? buildFlowRecordingStartRequest()
+                    : VoiceRecordingStartRequest();
+            };
+        request.segmentIntervalMs =
+            m_flow.recording.longRecordingEnabled
+                ? m_flow.recording.segmentSeconds * 1000
+                : 0;
+        request.limitIntervalMs =
+            m_flow.recording.longRecordingEnabled
+                ? m_flow.recording.maximumMinutes * 60 * 1000
+                : 0;
+        m_recordingCoordinator.begin(request);
+        return true;
+    }
+
     bool handleHotkey(const QString &functionId)
     {
         const QString id = functionId.trimmed();
+        if (m_flow.active
+            && m_flow.cancellation.isCancellationRequested()) {
+            const bool matched = id == m_modeId;
+            cancelActiveFlow();
+            return matched;
+        }
         if (m_recordingCoordinator.isPreparing()) {
-            if (m_recordingCoordinator.preparationMatchesMode(id)) {
+            if (preparationMatchesCurrent(id)) {
                 if (usesHoldToTalk(id)) {
                     logRuntimeEvent(
                         tr8("快捷键"),
@@ -130,14 +291,18 @@ public:
                     );
                     return true;
                 }
-                m_recordingCoordinator.cancelPreparation();
-                setStatus(tr8("已取消"), tr8("录音准备已取消"));
-                hideBarLater();
-                logRuntimeEvent(
-                    tr8("录音"),
-                    tr8("取消准备"),
-                    QStringLiteral("功能=") + id
-                );
+                if (m_flow.active) {
+                    cancelActiveFlow();
+                } else {
+                    m_recordingCoordinator.cancelPreparation();
+                    setStatus(tr8("已取消"), tr8("录音准备已取消"));
+                    hideBarLater();
+                    logRuntimeEvent(
+                        tr8("录音"),
+                        tr8("取消准备"),
+                        QStringLiteral("功能=") + id
+                    );
+                }
             } else {
                 setStatus(
                     tr8("正在准备录音"),
@@ -186,24 +351,42 @@ public:
         return true;
     }
 
+    bool ownsPress(const QString &functionId) const
+    {
+        const QString id = functionId.trimmed();
+        if (id.isEmpty() || id != m_modeId) {
+            return false;
+        }
+        if (m_flow.active
+            && m_flow.cancellation.isCancellationRequested()) {
+            return true;
+        }
+        return m_recordingCoordinator.isPreparing()
+            || m_recordingLifecycle.isRecording();
+    }
+
     bool handleHotkeyReleased(const QString &functionId)
     {
         const QString id = functionId.trimmed();
         if (!usesHoldToTalk(id) || id != m_modeId) {
             return false;
         }
-        if (m_recordingCoordinator.preparationMatchesMode(id)) {
-            m_recordingCoordinator.cancelPreparation();
-            setStatus(
-                tr8("已取消"),
-                tr8("已在录音开始前松开快捷键")
-            );
-            hideBarLater();
-            logRuntimeEvent(
-                tr8("录音"),
-                tr8("按住说话取消准备"),
-                QStringLiteral("功能=") + id
-            );
+        if (preparationMatchesCurrent(id)) {
+            if (m_flow.active) {
+                cancelActiveFlow();
+            } else {
+                m_recordingCoordinator.cancelPreparation();
+                setStatus(
+                    tr8("已取消"),
+                    tr8("已在录音开始前松开快捷键")
+                );
+                hideBarLater();
+                logRuntimeEvent(
+                    tr8("录音"),
+                    tr8("按住说话取消准备"),
+                    QStringLiteral("功能=") + id
+                );
+            }
             return true;
         }
         if (m_recordingLifecycle.isRecording()) {
@@ -219,9 +402,17 @@ public:
         return false;
     }
 
+    bool handleFlowHotkeyReleased(const QString &functionId)
+    {
+        return m_flow.active
+            && handleHotkeyReleased(functionId);
+    }
+
     bool isBusy() const
     {
-        return m_recordingCoordinator.isPreparing()
+        return m_flow.active
+            || m_classicRecognitionRunning
+            || m_recordingCoordinator.isPreparing()
             || m_recordingLifecycle.isRecording()
             || m_longRecordingSession.isActive()
             || m_longRecognitionCoordinator.isRunning();
@@ -278,7 +469,10 @@ private:
             const QString &id,
             int seconds
         ) {
-            if (id == m_modeId) {
+            if (id == m_coordinatorModeId) {
+                if (cancelFlowIfRequested()) {
+                    return;
+                }
                 setStatus(
                     tr8("准备录音"),
                     tr8("%1 秒后开始").arg(seconds)
@@ -286,25 +480,31 @@ private:
             }
         };
         callbacks.beepRequested = [this](const QString &id) {
-            if (id == m_modeId) {
+            if (id == m_coordinatorModeId) {
+                if (cancelFlowIfRequested()) {
+                    return;
+                }
                 setStatus(tr8("准备录音"), tr8("提示音后开始"));
-                playRecordingBeep(id);
+                playRecordingBeep(m_modeId);
             }
         };
         callbacks.started = [this](
             const QString &id,
             bool longRecording
         ) {
-            if (id == m_modeId) {
-                handleRecordingStarted(id, longRecording);
+            if (id == m_coordinatorModeId) {
+                if (cancelFlowIfRequested()) {
+                    return;
+                }
+                handleRecordingStarted(m_modeId, longRecording);
             }
         };
         callbacks.startFailed = [this](
             const QString &id,
             const QString &error
         ) {
-            if (id == m_modeId) {
-                handleRecordingStartFailed(id, error);
+            if (id == m_coordinatorModeId) {
+                handleRecordingStartFailed(m_modeId, error);
             }
         };
         m_recordingCoordinator.setCallbacks(callbacks);
@@ -332,7 +532,27 @@ private:
         callbacks.segmentFinished = [this](
             const VoiceLongRecordingSegmentResult &result
         ) {
-            if (m_runSession && result.elapsedMs >= 0) {
+            if (m_flow.active) {
+                if (cancelFlowIfRequested()) {
+                    return;
+                }
+                if (result.elapsedMs >= 0) {
+                    m_flow.speechElapsedMs =
+                        qMax<qint64>(0, m_flow.speechElapsedMs)
+                        + result.elapsedMs;
+                }
+                bool onlyEmpty =
+                    !result.attemptResults.isEmpty();
+                for (const VoiceSpeechRecognitionResult &attempt :
+                     result.attemptResults) {
+                    if (!attempt.emptyRecognition) {
+                        onlyEmpty = false;
+                    }
+                }
+                m_flow.longRecognitionSawResult = true;
+                m_flow.longRecognitionOnlyEmpty =
+                    m_flow.longRecognitionOnlyEmpty && onlyEmpty;
+            } else if (m_runSession && result.elapsedMs >= 0) {
                 m_runSession->addSpeechElapsedMs(result.elapsedMs);
             }
             logRuntimeEvent(
@@ -362,47 +582,78 @@ private:
 
     bool longRecordingEnabledFor(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.recording.longRecordingEnabled;
+        }
         return functionSettings(id).recording.longRecordingEnabled;
     }
 
     QString recordingTriggerModeFor(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.effectiveTriggerMode;
+        }
+        if (id == m_modeId
+            && !m_classicEffectiveTriggerMode.isEmpty()) {
+            return m_classicEffectiveTriggerMode;
+        }
         return functionSettings(id).recording.triggerMode;
     }
 
     int countdownSecondsFor(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.recording.countdownSeconds;
+        }
         return functionSettings(id).recording.countdownSeconds;
     }
 
     int segmentSecondsFor(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.recording.segmentSeconds;
+        }
         return functionSettings(id).recording.segmentSeconds;
     }
 
     int maxRecordingMinutesFor(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.recording.maximumMinutes;
+        }
         return functionSettings(id).recording.maximumMinutes;
     }
 
     bool recordingBeepEnabledFor(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.recording.beepEnabled;
+        }
         return functionSettings(id).recording.beepEnabled;
     }
 
     QString recordingBeepPathFor(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.recording.beepPath;
+        }
         return functionSettings(id).recording.beepPath;
     }
 
     bool usesHoldToTalk(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.effectiveTriggerMode == QStringLiteral("hold");
+        }
         return recordingTriggerModeFor(id) == QStringLiteral("hold")
             && m_activeHoldFunctions.contains(id);
     }
 
     QString functionTitle(const QString &id) const
     {
+        if (m_flow.active && id == m_flow.functionId) {
+            return m_flow.functionTitle;
+        }
         return functionDisplayTitle(
             m_settings,
             id,
@@ -412,6 +663,9 @@ private:
 
     QString recordDirectoryPath() const
     {
+        if (m_flow.active) {
+            return m_flow.recordDirectory;
+        }
         return historyRootPath(m_settings.recordDirectory);
     }
 
@@ -424,11 +678,66 @@ private:
     void playRecordingBeep(const QString &id) const
     {
         const QString path = recordingBeepPathFor(id);
-        if (!path.isEmpty() && QFileInfo(path).isFile()) {
-            QSound::play(path);
+        const QString playablePath =
+            !path.isEmpty() && QFileInfo(path).isFile()
+                ? path
+                : QString();
+        if (m_access.playRecordingBeep) {
+            m_access.playRecordingBeep(playablePath);
+            return;
+        }
+        if (!playablePath.isEmpty()) {
+            QSound::play(playablePath);
             return;
         }
         QApplication::beep();
+    }
+
+    bool preparationMatchesCurrent(const QString &id) const
+    {
+        return id == m_modeId
+            && m_recordingCoordinator.preparationMatchesMode(
+                m_coordinatorModeId
+            );
+    }
+
+    VoiceRecordingStartRequest buildFlowRecordingStartRequest() const
+    {
+        QString longRecordingAudioDirectory;
+        QString longRecordingFileBase;
+        if (m_flow.recording.longRecordingEnabled) {
+            const QString date = QDate::currentDate().toString(
+                QStringLiteral("yyyy-MM-dd")
+            );
+            ensureHistoryModeDateStructure(
+                m_flow.recordDirectory,
+                m_flow.functionTitle,
+                date
+            );
+            longRecordingAudioDirectory =
+                historyModeDateSubDirectory(
+                    m_flow.recordDirectory,
+                    m_flow.functionTitle,
+                    date,
+                    historyAudioSubFolderName()
+                );
+            longRecordingFileBase =
+                QDateTime::currentDateTime().toString(
+                    QStringLiteral("HHmmss_zzz")
+                );
+        }
+
+        VoiceRecordingStartRequest request;
+        request.normalTitle = m_flow.functionTitle;
+        request.normalDirectory = m_flow.recordDirectory;
+        request.longRecordingEnabled =
+            m_flow.recording.longRecordingEnabled;
+        request.firstSegmentTitle =
+            m_flow.functionTitle + tr8("_第1段");
+        request.longRecordingDirectory =
+            longRecordingAudioDirectory;
+        request.longRecordingFileBase = longRecordingFileBase;
+        return request;
     }
 
     VoiceRecordingStartRequest buildRecordingStartRequest(
@@ -476,6 +785,20 @@ private:
         const QString &error
     )
     {
+        if (m_flow.active) {
+            if (m_flow.cancellation.isCancellationRequested()) {
+                cancelActiveFlow();
+                return;
+            }
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowVoiceError(
+                QStringLiteral("flow_voice_failed"),
+                error
+            );
+            finishFlow(result, m_flow.generation, m_flow.runId);
+            return;
+        }
         if (m_runSession) {
             m_runSession->setLongRecording(
                 m_longRecordingSession.isActive()
@@ -498,7 +821,12 @@ private:
         bool longRecordingActive
     )
     {
-        if (m_runSession) {
+        if (m_flow.active
+            && m_flow.cancellation.isCancellationRequested()) {
+            cancelActiveFlow();
+            return;
+        }
+        if (!m_flow.active && m_runSession) {
             m_runSession->setLongRecording(longRecordingActive);
         }
         setWaveformVisible(true);
@@ -512,7 +840,7 @@ private:
                     ? tr8(" · 长录音分段识别")
                     : QString())
         );
-        const QString triggerMode = m_runSession
+        const QString triggerMode = !m_flow.active && m_runSession
             ? m_runSession->recordingTriggerMode()
             : recordingTriggerModeFor(id);
         logRuntimeEvent(
@@ -528,15 +856,17 @@ private:
         );
 
         if (longRecordingActive) {
-            if (m_runSession) {
+            if (!m_flow.active && m_runSession) {
                 m_runSession->setSpeechElapsedMs(0);
             }
             return;
         }
 
-        QTimer::singleShot(60000, this, [this, id]() {
+        const quint64 generation = m_operationGeneration;
+        QTimer::singleShot(60000, this, [this, id, generation]() {
             if (m_recordingLifecycle.isRecording()
                 && m_modeId == id
+                && m_operationGeneration == generation
                 && !m_longRecordingSession.isActive()) {
                 stopAndProcess();
             }
@@ -571,6 +901,9 @@ private:
 
     void rotateLongRecordingSegment()
     {
+        if (cancelFlowIfRequested()) {
+            return;
+        }
         if (!m_recordingLifecycle.isRecording()
             || !m_longRecordingSession.isActive()
             || m_longRecordingSession.isFinalizing()) {
@@ -647,6 +980,10 @@ private:
 
     void stopAndProcess()
     {
+        if (m_flow.active) {
+            stopFlowAndProcess();
+            return;
+        }
         if (externalProcessing()) {
             setStatus(tr8("正在处理"), tr8("请等待当前任务完成。"));
             return;
@@ -679,56 +1016,290 @@ private:
                     + tr8("识别语音")
         );
 
-        VoiceRecordingCompletionRequest request;
-        request.modeId = modeId;
-        request.provider = m_settings.speechProvider;
-        request.useSystemProxy = m_settings.useSystemProxy;
-        request.networkPolicy = QStringLiteral("inherit");
-        VoiceRecordingCompletionHandlers handlers;
-        handlers.stopRecording = [this]() {
-            return m_recordingCoordinator.stopNormal();
-        };
-        handlers.recognition = speechRecognitionHandlers();
-        const VoiceRecordingCompletionResult result =
-            VoiceRecordingCompletionExecutor::run(request, handlers);
+        const quint64 generation = m_operationGeneration;
+        const VoiceRecordingStopResult recording =
+            m_recordingCoordinator.stopNormal();
 
         if (m_runSession) {
             m_runSession->setRecordingAudioPath(
-                result.recording.wavPath
+                recording.wavPath
             );
             m_runSession->setRecordingTriggerMode(
                 recordingTriggerModeFor(modeId)
             );
             m_runSession->setLongRecording(false);
-            m_runSession->setSpeechElapsedMs(result.speech.elapsedMs);
         }
         logRuntimeEvent(
             tr8("录音"),
             tr8("结束"),
             QStringLiteral("功能=") + modeId
                 + QStringLiteral("，PCM字节=")
-                + QString::number(result.recording.pcm.size()),
-            elapsedMs()
-        );
-        logRuntimeEvent(
-            result.speech.logCategory,
-            result.speech.logAction,
-            result.speech.logDetail,
+                + QString::number(recording.pcm.size()),
             elapsedMs()
         );
 
-        if (!result.ok) {
-            showFailure(result.error);
-            saveFailureHistory(modeId, result.error);
+        VoiceSpeechRecognitionRequest request;
+        request.modeId = modeId;
+        request.audioData = recording.pcm;
+        request.provider = m_settings.speechProvider;
+        request.networkPolicy = QStringLiteral("inherit");
+        request.useSystemProxy = m_settings.useSystemProxy;
+        const VoiceSpeechRecognitionHandlers handlers =
+            speechRecognitionHandlers();
+        m_classicRecognitionRunning = true;
+        const QPointer<Impl> self(this);
+        const VoiceRecordingFlowSpeechCompletion completion =
+            [self, generation, modeId](
+                const VoiceSpeechRecognitionResult &speech) {
+                if (!self) {
+                    return;
+                }
+                if (QThread::currentThread() != self->thread()) {
+                    QTimer::singleShot(
+                        0,
+                        self.data(),
+                        [self, generation, modeId, speech]() {
+                            if (self) {
+                                self->handleClassicSpeechFinished(
+                                    generation,
+                                    modeId,
+                                    speech
+                                );
+                            }
+                        }
+                    );
+                    return;
+                }
+                self->handleClassicSpeechFinished(
+                    generation,
+                    modeId,
+                    speech
+                );
+            };
+        if (m_access.runSpeechRecognition) {
+            m_access.runSpeechRecognition(
+                request,
+                handlers,
+                completion
+            );
+            return;
+        }
+        QFutureWatcher<VoiceSpeechRecognitionResult> *watcher =
+            new QFutureWatcher<VoiceSpeechRecognitionResult>(this);
+        connect(
+            watcher,
+            &QFutureWatcher<VoiceSpeechRecognitionResult>::finished,
+            this,
+            [watcher, completion]() {
+                const VoiceSpeechRecognitionResult result =
+                    watcher->result();
+                watcher->deleteLater();
+                completion(result);
+            }
+        );
+        watcher->setFuture(QtConcurrent::run(
+            [request, handlers]() {
+                return VoiceSpeechRecognitionExecutor::run(
+                    request,
+                    handlers
+                );
+            }
+        ));
+    }
+
+    void handleClassicSpeechFinished(
+        quint64 generation,
+        const QString &modeId,
+        const VoiceSpeechRecognitionResult &speech
+    )
+    {
+        if (!m_classicRecognitionRunning
+            || generation != m_operationGeneration
+            || modeId != m_modeId) {
+            return;
+        }
+        m_classicRecognitionRunning = false;
+        if (m_runSession) {
+            m_runSession->setSpeechElapsedMs(speech.elapsedMs);
+        }
+        logRuntimeEvent(
+            speech.logCategory,
+            speech.logAction,
+            speech.logDetail,
+            elapsedMs()
+        );
+
+        if (!speech.ok) {
+            showFailure(speech.error);
+            saveFailureHistory(modeId, speech.error);
             setProcessing(false);
             return;
         }
-        processRecognizedSpeech(modeId, result.speech.text);
+        processRecognizedSpeech(modeId, speech.text);
         setProcessing(false);
+    }
+
+    void stopFlowAndProcess()
+    {
+        if (!m_flow.active) {
+            return;
+        }
+        if (m_flow.cancellation.isCancellationRequested()) {
+            cancelActiveFlow();
+            return;
+        }
+        if (m_longRecordingSession.isActive()) {
+            stopLongRecordingAndProcess();
+            return;
+        }
+
+        const quint64 generation = m_flow.generation;
+        const ExecutionId runId = m_flow.runId;
+        m_flow.processing = true;
+        setProcessing(true);
+        setWaveformVisible(false);
+        setTimedStatus(
+            tr8("识别中"),
+            tr8("正在识别流程语音")
+        );
+        m_flow.normalRecording =
+            m_recordingCoordinator.stopNormal();
+        logRuntimeEvent(
+            tr8("录音"),
+            tr8("结束"),
+            QStringLiteral("功能=") + m_flow.functionId
+                + QStringLiteral("，PCM字节=")
+                + QString::number(
+                    m_flow.normalRecording.pcm.size()
+                ),
+            elapsedMs()
+        );
+
+        if (m_flow.cancellation.isCancellationRequested()) {
+            cancelActiveFlow();
+            return;
+        }
+
+        VoiceSpeechRecognitionRequest request;
+        request.modeId = m_flow.functionId;
+        request.audioData = m_flow.normalRecording.pcm;
+        request.provider = m_flow.provider;
+        request.networkPolicy = m_flow.networkPolicy;
+        request.useSystemProxy =
+            m_flow.networkPolicy == QStringLiteral("systemProxy");
+        request.cancellation = m_flow.cancellation;
+        const VoiceSpeechRecognitionHandlers handlers =
+            speechRecognitionHandlers();
+        const QPointer<Impl> self(this);
+        const VoiceRecordingFlowSpeechCompletion completion =
+            [self, generation, runId](
+                const VoiceSpeechRecognitionResult &result) {
+                if (!self) {
+                    return;
+                }
+                if (QThread::currentThread() != self->thread()) {
+                    QTimer::singleShot(
+                        0,
+                        self.data(),
+                        [self, generation, runId, result]() {
+                            if (self) {
+                                self->handleFlowSpeechFinished(
+                                    generation,
+                                    runId,
+                                    result
+                                );
+                            }
+                        }
+                    );
+                    return;
+                }
+                self->handleFlowSpeechFinished(
+                    generation,
+                    runId,
+                    result
+                );
+            };
+        if (m_access.runSpeechRecognition) {
+            m_access.runSpeechRecognition(
+                request,
+                handlers,
+                completion
+            );
+            return;
+        }
+        QFutureWatcher<VoiceSpeechRecognitionResult> *watcher =
+            new QFutureWatcher<VoiceSpeechRecognitionResult>(this);
+        connect(
+            watcher,
+            &QFutureWatcher<VoiceSpeechRecognitionResult>::finished,
+            this,
+            [watcher, completion]() {
+                const VoiceSpeechRecognitionResult result =
+                    watcher->result();
+                watcher->deleteLater();
+                completion(result);
+            }
+        );
+        watcher->setFuture(QtConcurrent::run(
+            [request, handlers]() {
+                return VoiceSpeechRecognitionExecutor::run(
+                    request,
+                    handlers
+                );
+            }
+        ));
+    }
+
+    void handleFlowSpeechFinished(
+        quint64 generation,
+        const ExecutionId &runId,
+        const VoiceSpeechRecognitionResult &speech
+    )
+    {
+        if (!flowMatches(generation, runId)) {
+            return;
+        }
+        m_flow.speechElapsedMs = speech.elapsedMs;
+        logRuntimeEvent(
+            speech.logCategory,
+            speech.logAction,
+            speech.logDetail,
+            elapsedMs()
+        );
+
+        if (m_flow.cancellation.isCancellationRequested()
+            || speech.cancelled) {
+            cancelActiveFlow();
+            return;
+        }
+
+        const QSharedPointer<const FunctionFlowVoicePayload> payload =
+            flowPayload(
+                m_flow.normalRecording.wavPath,
+                QVector<RecordingSegment>(),
+                speech.elapsedMs,
+                false
+            );
+        FunctionFlowNodeResult result;
+        if (speech.ok || speech.emptyRecognition) {
+            result.state = FunctionFlowNodeState::Succeeded;
+            result.values.append(flowValue(speech.text, payload));
+        } else {
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowVoiceError(
+                QStringLiteral("flow_voice_failed"),
+                speech.error
+            );
+            appendFlowObservation(payload, &result);
+        }
+        finishFlow(result, generation, runId);
     }
 
     void stopLongRecordingAndProcess()
     {
+        if (cancelFlowIfRequested()) {
+            return;
+        }
         if (!m_longRecordingSession.isActive()
             || m_longRecordingSession.isFinalizing()) {
             return;
@@ -736,9 +1307,12 @@ private:
 
         m_recordingLifecycle.stop();
         setProcessing(true);
+        if (m_flow.active) {
+            m_flow.processing = true;
+        }
         m_longRecordingSession.beginFinalizing();
         setWaveformVisible(false);
-        if (m_runSession) {
+        if (!m_flow.active && m_runSession) {
             m_runSession->setActionHadRecording(true);
         }
         captureCurrentLongRecordingSegment();
@@ -764,6 +1338,9 @@ private:
 
     VoiceSpeechRecognitionHandlers speechRecognitionHandlers() const
     {
+        if (m_access.speechRecognition.recognizeProvider) {
+            return m_access.speechRecognition;
+        }
         VoiceSpeechRecognitionHandlers handlers;
         handlers.recognizeProvider = [](
             const SpeechRecognitionProviderTaskRequest &request
@@ -777,9 +1354,17 @@ private:
     {
         VoiceLongRecordingRecognitionConfig config;
         config.modeId = m_modeId;
-        config.provider = m_settings.speechProvider;
-        config.useSystemProxy = m_settings.useSystemProxy;
-        config.networkPolicy = QStringLiteral("inherit");
+        if (m_flow.active) {
+            config.provider = m_flow.provider;
+            config.networkPolicy = m_flow.networkPolicy;
+            config.useSystemProxy =
+                m_flow.networkPolicy == QStringLiteral("systemProxy");
+            config.cancellation = m_flow.cancellation;
+        } else {
+            config.provider = m_settings.speechProvider;
+            config.useSystemProxy = m_settings.useSystemProxy;
+            config.networkPolicy = QStringLiteral("inherit");
+        }
         m_longRecognitionCoordinator.schedule(
             m_longRecordingSession,
             config,
@@ -789,6 +1374,9 @@ private:
 
     void finishLongRecordingRecognition()
     {
+        if (cancelFlowIfRequested()) {
+            return;
+        }
         if (!m_longRecordingSession.isFinalizing()) {
             return;
         }
@@ -826,6 +1414,50 @@ private:
                 request,
                 handlers
             );
+        if (m_flow.active) {
+            QVector<RecordingSegment> segments =
+                result.build.segments;
+            const bool normalEmptyRecognition =
+                m_flow.longRecognitionSawResult
+                && m_flow.longRecognitionOnlyEmpty
+                && result.build.successfulSegmentCount <= 0;
+            if (normalEmptyRecognition) {
+                for (RecordingSegment &segment : segments) {
+                    segment.error.clear();
+                }
+            }
+            const QSharedPointer<const FunctionFlowVoicePayload>
+                payload = flowPayload(
+                    result.audioPath,
+                    segments,
+                    m_flow.speechElapsedMs,
+                    true
+                );
+            FunctionFlowNodeResult flowResult;
+            if (result.ok || normalEmptyRecognition) {
+                flowResult.state =
+                    FunctionFlowNodeState::Succeeded;
+                flowResult.values.append(flowValue(
+                    normalEmptyRecognition
+                        ? QString()
+                        : result.build.mergedText,
+                    payload
+                ));
+            } else {
+                flowResult.state = FunctionFlowNodeState::Failed;
+                flowResult.error = flowVoiceError(
+                    QStringLiteral("flow_voice_failed"),
+                    result.error
+                );
+                appendFlowObservation(payload, &flowResult);
+            }
+            finishFlow(
+                flowResult,
+                m_flow.generation,
+                m_flow.runId
+            );
+            return;
+        }
         if (m_runSession) {
             m_runSession->setRecordingAudioPath(result.audioPath);
             m_runSession->setRecordingSegments(
@@ -868,6 +1500,154 @@ private:
         );
         processRecognizedSpeech(m_modeId, mergedText);
         setProcessing(false);
+    }
+
+    bool flowMatches(
+        quint64 generation,
+        const ExecutionId &runId
+    ) const
+    {
+        return m_flow.active
+            && m_flow.generation == generation
+            && m_flow.runId == runId;
+    }
+
+    QSharedPointer<const FunctionFlowVoicePayload> flowPayload(
+        const QString &sourceAudioPath,
+        const QVector<RecordingSegment> &segments,
+        qint64 speechElapsedMs,
+        bool longRecording
+    ) const
+    {
+        FunctionFlowVoicePayload *payload =
+            new FunctionFlowVoicePayload;
+        payload->sourceAudioPath = sourceAudioPath;
+        payload->segments = segments;
+        payload->speechElapsedMs = speechElapsedMs;
+        payload->recordingTriggerMode =
+            m_flow.effectiveTriggerMode;
+        payload->longRecording = longRecording;
+        return QSharedPointer<const FunctionFlowVoicePayload>(
+            payload
+        );
+    }
+
+    FunctionFlowValue flowValue(
+        const QString &text,
+        const QSharedPointer<const FunctionFlowVoicePayload> &payload
+    ) const
+    {
+        FunctionFlowValue value;
+        value.text = text;
+        value.sourceNodeId = m_flow.nodeId;
+        value.voice = payload;
+        return value;
+    }
+
+    bool payloadHasControlledRecording(
+        const QSharedPointer<const FunctionFlowVoicePayload> &payload
+    ) const
+    {
+        return !payload.isNull()
+            && (!payload->sourceAudioPath.trimmed().isEmpty()
+                || !payload->segments.isEmpty());
+    }
+
+    void appendFlowObservation(
+        const QSharedPointer<const FunctionFlowVoicePayload> &payload,
+        FunctionFlowNodeResult *result
+    ) const
+    {
+        if (!result || !payloadHasControlledRecording(payload)) {
+            return;
+        }
+        result->historyObservations.append(
+            flowValue(QString(), payload)
+        );
+    }
+
+    QSharedPointer<const FunctionFlowVoicePayload>
+    currentFlowPayload() const
+    {
+        if (m_flow.recording.longRecordingEnabled) {
+            return flowPayload(
+                QString(),
+                m_longRecordingSession
+                    .recognitionState()
+                    .segments(),
+                m_flow.speechElapsedMs,
+                true
+            );
+        }
+        return flowPayload(
+            m_flow.normalRecording.wavPath,
+            QVector<RecordingSegment>(),
+            m_flow.speechElapsedMs,
+            false
+        );
+    }
+
+    bool cancelFlowIfRequested()
+    {
+        if (!m_flow.active
+            || !m_flow.cancellation.isCancellationRequested()) {
+            return false;
+        }
+        cancelActiveFlow();
+        return true;
+    }
+
+    void cancelActiveFlow()
+    {
+        if (!m_flow.active) {
+            return;
+        }
+        const quint64 generation = m_flow.generation;
+        const ExecutionId runId = m_flow.runId;
+        m_recordingCoordinator.cancelPreparation();
+        if (m_recordingLifecycle.isRecording()) {
+            if (m_longRecordingSession.isActive()) {
+                m_recordingLifecycle.stop();
+                captureCurrentLongRecordingSegment();
+            } else {
+                m_flow.normalRecording =
+                    m_recordingCoordinator.stopNormal();
+            }
+        }
+        setWaveformVisible(false);
+
+        FunctionFlowNodeResult result;
+        result.state = FunctionFlowNodeState::Cancelled;
+        appendFlowObservation(currentFlowPayload(), &result);
+        finishFlow(result, generation, runId);
+    }
+
+    void finishFlow(
+        const FunctionFlowNodeResult &result,
+        quint64 generation,
+        const ExecutionId &runId
+    )
+    {
+        if (!flowMatches(generation, runId)) {
+            return;
+        }
+        const bool wasProcessing = m_flow.processing;
+        const FunctionFlowNodeCompletion completion =
+            m_flow.completion;
+        m_flowCancellationTimer.stop();
+        m_recordingCoordinator.cancelPreparation();
+        m_longRecognitionCoordinator.cancel();
+        m_longRecordingSession.complete();
+        setWaveformVisible(false);
+        m_flow = FlowState();
+        m_modeId.clear();
+        m_coordinatorModeId.clear();
+        if (wasProcessing) {
+            setProcessing(false);
+        }
+        if (completion) {
+            completion(result);
+        }
     }
 
     qint64 elapsedMs() const
@@ -938,6 +1718,9 @@ private:
 
     void setProcessing(bool processing)
     {
+        if (m_flow.active && processing) {
+            m_flow.processing = true;
+        }
         if (m_access.processingChanged) {
             m_access.processingChanged(processing);
         }
@@ -982,7 +1765,13 @@ private:
         m_longRecognitionCoordinator;
     VoiceLongRecordingSession &m_longRecordingSession;
     QSet<QString> m_activeHoldFunctions;
+    FlowState m_flow;
+    QTimer m_flowCancellationTimer;
+    quint64 m_operationGeneration = 0;
+    bool m_classicRecognitionRunning = false;
     QString m_modeId;
+    QString m_coordinatorModeId;
+    QString m_classicEffectiveTriggerMode;
 };
 
 VoiceRecordingWorkflowController::VoiceRecordingWorkflowController(
@@ -1023,11 +1812,33 @@ bool VoiceRecordingWorkflowController::begin(
     return d->begin(functionId);
 }
 
+bool VoiceRecordingWorkflowController::beginForFlow(
+    const FunctionFlowRunContext &run,
+    const FunctionFlowCompiledNode &node,
+    const FunctionFlowNodeCompletion &completion
+)
+{
+    return d->beginForFlow(run, node, completion);
+}
+
 bool VoiceRecordingWorkflowController::handleHotkey(
     const QString &functionId
 )
 {
     return d->handleHotkey(functionId);
+}
+
+bool VoiceRecordingWorkflowController::ownsPress(
+    const QString &functionId) const
+{
+    return d->ownsPress(functionId);
+}
+
+bool VoiceRecordingWorkflowController::handleFlowHotkeyReleased(
+    const QString &functionId
+)
+{
+    return d->handleFlowHotkeyReleased(functionId);
 }
 
 bool VoiceRecordingWorkflowController::handleHotkeyReleased(

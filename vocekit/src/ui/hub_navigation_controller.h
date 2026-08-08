@@ -14,6 +14,7 @@ struct HubNavigationControllerAccess
     std::function<QString()> currentFunctionId;
     std::function<bool(const QString &)> setCurrentFunctionId;
     std::function<void()> clearCurrentFunction;
+    std::function<bool()> canLeaveFunctionPage;
     std::function<bool()> addFunction;
 };
 
@@ -37,6 +38,7 @@ public:
 
 private:
     QString currentFunctionId() const;
+    bool canLeaveCurrentFunctionPage(const QString &targetPageId) const;
     void clearCurrentFunction();
     void synchronizeShell(const QString &pageId);
 

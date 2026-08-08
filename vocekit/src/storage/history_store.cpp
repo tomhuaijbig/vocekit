@@ -581,6 +581,54 @@ HistoryEntry HistoryStore::entryFromJsonObject(const QJsonObject &item, const QS
     entry.favorite = item.value(QStringLiteral("favorite")).toBool(false);
     entry.favoriteFolder = item.value(QStringLiteral("favoriteFolder")).toString();
     entry.draft = item.value(QStringLiteral("draft")).toBool(false);
+    entry.flowRunId =
+        item.value(QStringLiteral("flowRunId")).toString();
+    entry.flowPublishedRevision = item.value(
+        QStringLiteral("flowPublishedRevision")
+    ).toInt(0);
+    entry.flowPublishedHash = item.value(
+        QStringLiteral("flowPublishedHash")
+    ).toString();
+    entry.flowTrigger =
+        item.value(QStringLiteral("flowTrigger")).toString();
+    entry.flowFailedNodeId = item.value(
+        QStringLiteral("flowFailedNodeId")
+    ).toString();
+    entry.flowFailedNodeType = item.value(
+        QStringLiteral("flowFailedNodeType")
+    ).toString();
+    entry.flowCancelled = item.value(
+        QStringLiteral("flowCancelled")
+    ).toBool(false);
+    const QJsonArray flowTraces = item.value(
+        QStringLiteral("flowNodeTraces")
+    ).toArray();
+    for (const QJsonValue &value : flowTraces) {
+        if (!value.isObject()) {
+            continue;
+        }
+        const QJsonObject traceItem = value.toObject();
+        HistoryFlowNodeTrace trace;
+        trace.nodeId =
+            traceItem.value(QStringLiteral("nodeId")).toString();
+        trace.nodeType =
+            traceItem.value(QStringLiteral("nodeType")).toString();
+        trace.state =
+            traceItem.value(QStringLiteral("state")).toString();
+        trace.elapsedMs = jsonInt64(
+            traceItem,
+            QStringLiteral("elapsedMs")
+        );
+        trace.errorCode = traceItem.value(
+            QStringLiteral("errorCode")
+        ).toString();
+        trace.modelId =
+            traceItem.value(QStringLiteral("modelId")).toString();
+        trace.promptVersion = traceItem.value(
+            QStringLiteral("promptVersion")
+        ).toString();
+        entry.flowNodeTraces.append(trace);
+    }
     entry.filePath = filePath;
     return entry;
 }
@@ -630,6 +678,68 @@ QJsonObject HistoryStore::entryToIndexObject(const HistoryEntry &entry)
     item.insert(QStringLiteral("favorite"), entry.favorite);
     item.insert(QStringLiteral("favoriteFolder"), entry.favoriteFolder);
     item.insert(QStringLiteral("draft"), entry.draft);
+    if (!entry.flowRunId.trimmed().isEmpty()) {
+        item.insert(QStringLiteral("flowRunId"), entry.flowRunId);
+        item.insert(
+            QStringLiteral("flowPublishedRevision"),
+            entry.flowPublishedRevision
+        );
+        item.insert(
+            QStringLiteral("flowPublishedHash"),
+            entry.flowPublishedHash
+        );
+        item.insert(
+            QStringLiteral("flowTrigger"),
+            entry.flowTrigger
+        );
+        item.insert(
+            QStringLiteral("flowFailedNodeId"),
+            entry.flowFailedNodeId
+        );
+        item.insert(
+            QStringLiteral("flowFailedNodeType"),
+            entry.flowFailedNodeType
+        );
+        item.insert(
+            QStringLiteral("flowCancelled"),
+            entry.flowCancelled
+        );
+        QJsonArray traces;
+        for (const HistoryFlowNodeTrace &trace :
+             entry.flowNodeTraces) {
+            QJsonObject traceItem;
+            traceItem.insert(
+                QStringLiteral("nodeId"),
+                trace.nodeId
+            );
+            traceItem.insert(
+                QStringLiteral("nodeType"),
+                trace.nodeType
+            );
+            traceItem.insert(
+                QStringLiteral("state"),
+                trace.state
+            );
+            traceItem.insert(
+                QStringLiteral("elapsedMs"),
+                static_cast<double>(trace.elapsedMs)
+            );
+            traceItem.insert(
+                QStringLiteral("errorCode"),
+                trace.errorCode
+            );
+            traceItem.insert(
+                QStringLiteral("modelId"),
+                trace.modelId
+            );
+            traceItem.insert(
+                QStringLiteral("promptVersion"),
+                trace.promptVersion
+            );
+            traces.append(traceItem);
+        }
+        item.insert(QStringLiteral("flowNodeTraces"), traces);
+    }
     item.insert(QStringLiteral("sourceFile"), entry.filePath);
     return item;
 }
@@ -670,6 +780,21 @@ QString HistoryStore::textFromJsonObject(const QJsonObject &item)
         + (item.value(QStringLiteral("promptVersion")).toString().trimmed().isEmpty()
             ? hsTr8("未记录")
             : item.value(QStringLiteral("promptVersion")).toString());
+    if (!item.value(QStringLiteral("flowRunId"))
+             .toString().trimmed().isEmpty()) {
+        parts << hsTr8("流程运行：")
+            + item.value(QStringLiteral("flowRunId")).toString();
+        parts << hsTr8("发布版本：")
+            + QString::number(item.value(
+                QStringLiteral("flowPublishedRevision")
+            ).toInt());
+        parts << hsTr8("发布哈希：")
+            + item.value(
+                QStringLiteral("flowPublishedHash")
+            ).toString();
+        parts << hsTr8("触发入口：")
+            + item.value(QStringLiteral("flowTrigger")).toString();
+    }
     parts << hsTr8("录音：")
         + (item.value(QStringLiteral("audio")).toString().trimmed().isEmpty()
             ? hsTr8("本次没有录音")

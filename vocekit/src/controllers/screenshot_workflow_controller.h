@@ -1,6 +1,8 @@
 #ifndef VOCEKIT_SCREENSHOT_WORKFLOW_CONTROLLER_H
 #define VOCEKIT_SCREENSHOT_WORKFLOW_CONTROLLER_H
 
+#include "../domain/function_flow_compiler.h"
+
 #include <QObject>
 #include <QString>
 #include <QtGlobal>
@@ -13,6 +15,21 @@ struct AppSettingsData;
 struct SecretConfig;
 struct VoiceRunContext;
 
+using ScreenshotWorkflowCapturedCallback =
+    std::function<void(const QImage &, const QRect &)>;
+using ScreenshotWorkflowCancelledCallback = std::function<void()>;
+using ScreenshotWorkflowOcrFinishedCallback =
+    std::function<void(const OcrResult &)>;
+
+// 冻结一次流程截图 OCR 所需的运行参数，供真实 Provider 或测试替身消费。
+struct ScreenshotWorkflowFlowOcrRequest
+{
+    OcrRequest request;
+    int timeoutMs = 45000;
+    QString effectiveNetworkPolicy;
+    CancellationToken cancellation;
+};
+
 // 截图工作流只通过这些回调接入外层任务，不依赖 VoiceController 的实现细节。
 struct ScreenshotWorkflowAccess
 {
@@ -22,6 +39,23 @@ struct ScreenshotWorkflowAccess
     std::function<void(bool)> processingChanged;
     std::function<void(const QString &)> showFailure;
     std::function<void(const QString &, const QString &)> processText;
+    std::function<void(const QString &)> cancelled;
+
+    // 流程入口的可替换边界。未提供时继续使用真实截图层和 OcrManager。
+    std::function<bool(
+        const ScreenshotWorkflowCapturedCallback &,
+        const ScreenshotWorkflowCancelledCallback &,
+        QString *
+    )> beginFlowCapture;
+    std::function<void()> cancelFlowCapture;
+    std::function<void(
+        const ScreenshotWorkflowFlowOcrRequest &,
+        const ScreenshotWorkflowOcrFinishedCallback &
+    )> recognizeForFlow;
+    std::function<void()> cancelFlowOcr;
+    std::function<bool(OcrEngine)> authorizeFlowOcrUpload;
+    std::function<QString()> flowTemporaryDirectory;
+    std::function<void(const QString &, const QString &)> flowLog;
 };
 
 struct ScreenshotWorkflowStartRequest
@@ -47,6 +81,11 @@ public:
         const SecretConfig &secrets
     );
     bool start(const ScreenshotWorkflowStartRequest &request);
+    bool beginForFlow(
+        const FunctionFlowRunContext &run,
+        const FunctionFlowCompiledNode &node,
+        const FunctionFlowNodeCompletion &completion
+    );
     void reset(bool keepPendingContext = false);
 
     bool isActive() const;

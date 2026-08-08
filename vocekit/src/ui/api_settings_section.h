@@ -79,7 +79,9 @@ private:
 
     QLineEdit *m_deepseekKeyEdit = nullptr;
     QLineEdit *m_openaiKeyEdit = nullptr;
+    QLineEdit *m_openaiBaseUrlEdit = nullptr;
     QLineEdit *m_anthropicKeyEdit = nullptr;
+    QLineEdit *m_anthropicBaseUrlEdit = nullptr;
     QLineEdit *m_baiduApiKeyEdit = nullptr;
     QLineEdit *m_baiduSecretKeyEdit = nullptr;
     QLineEdit *m_baiduAppIdEdit = nullptr;
@@ -109,6 +111,8 @@ private:
     QWidget *m_customOcrUrlRow = nullptr;
     QWidget *m_customOcrApiKeyRow = nullptr;
     QWidget *m_customOcrModelRow = nullptr;
+    QWidget *m_openaiBaseUrlRow = nullptr;
+    QWidget *m_anthropicBaseUrlRow = nullptr;
 };
 
 #endif // VOCEKIT_API_SETTINGS_SECTION_H

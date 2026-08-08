@@ -20,7 +20,6 @@ SOURCES += \
     ../../src/providers/model_catalog.cpp \
     ../../src/result_flow_config.cpp \
     ../../src/ui/function_editor_coordinator.cpp \
-    ../../src/ui/function_editor_dialog_access_factory.cpp \
     ../../src/ui/function_summary_formatter.cpp \
     ../../src/ui/hub_settings_state.cpp \
     ../../src/ui/shortcut_display.cpp
@@ -31,8 +30,6 @@ HEADERS += \
     ../../src/domain/function_settings.h \
     ../../src/domain/prompt_runtime_library.h \
     ../../src/ui/function_editor_coordinator.h \
-    ../../src/ui/function_editor_dialog.h \
-    ../../src/ui/function_editor_dialog_access_factory.h \
     ../../src/ui/function_summary_formatter.h \
     ../../src/ui/hub_settings_state.h \
     ../../src/ui/prompt_settings_adapter.h

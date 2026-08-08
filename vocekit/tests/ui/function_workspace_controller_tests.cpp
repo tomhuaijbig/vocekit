@@ -20,15 +20,57 @@ QString FunctionCommandPage::functionId() const
     return m_functionId;
 }
 
-void FunctionCommandPage::setFunctionId(const QString &id)
+bool FunctionCommandPage::setFunctionId(const QString &id)
 {
     m_functionId = id.trimmed();
     refresh();
+    return true;
 }
 
 void FunctionCommandPage::refresh()
 {
     setProperty("refreshCount", property("refreshCount").toInt() + 1);
+}
+
+void FunctionCommandPage::refreshCanvasState()
+{
+    setProperty(
+        "canvasRefreshCount",
+        property("canvasRefreshCount").toInt() + 1
+    );
+}
+
+bool FunctionCommandPage::flushPendingFlowDraft()
+{
+    setProperty(
+        "flushCount",
+        property("flushCount").toInt() + 1
+    );
+    return !property("flushBlocked").toBool();
+}
+
+void FunctionCommandPage::discardPendingFlowDraft()
+{
+    setProperty("discarded", true);
+}
+
+bool FunctionCommandPage::applyFunctionFlowRuntimeEvent(
+    const FunctionFlowNodeExecutionEvent &event)
+{
+    setProperty("runtimeEventFunctionId", event.functionId);
+    return true;
+}
+
+bool FunctionCommandPage::applyFunctionFlowRunEvent(
+    const FunctionFlowRunExecutionEvent &event)
+{
+    setProperty("runEventFunctionId", event.functionId);
+    return true;
+}
+
+FunctionCanvasEditor *FunctionCommandPage::canvasEditor() const
+{
+    return nullptr;
 }
 
 FunctionManagementPage::FunctionManagementPage(
@@ -62,18 +104,19 @@ FunctionSettings builtInFunction()
     return function;
 }
 
-HubSettingsState createSettings(const AppSettingsData &data = AppSettingsData())
+HubSettingsState createSettings(AppSettingsData *data)
 {
     HubWindowAccess access;
-    access.settingsSnapshotProvider = [data]() { return data; };
+    access.settingsSnapshotProvider = [data]() {
+        return data ? *data : AppSettingsData();
+    };
     return HubSettingsState(access);
 }
 
 FunctionWorkspaceControllerAccess createAccess(
     HubSettingsState *settings,
     QStringList *actions,
-    FunctionEditorDialogRequest *request,
-    bool dialogResult
+    AppSettingsData *persisted
 )
 {
     FunctionWorkspaceControllerAccess access;
@@ -86,17 +129,19 @@ FunctionWorkspaceControllerAccess createAccess(
             actions->append(QStringLiteral("save"));
         }
     };
-    access.openEditorDialog = [request, dialogResult](
-        const FunctionEditorDialogRequest &dialogRequest,
-        const FunctionEditorDialogAccess &dialogAccess
+    access.flows.addCustomFunction = [actions, persisted](
+        const FunctionSettings &function,
+        OperationError *
     ) {
-        if (request) {
-            *request = dialogRequest;
+        if (!persisted) {
+            return false;
         }
-        if (dialogResult) {
-            dialogAccess.saveSettings();
+        persisted->functions.append(function);
+        persisted->functionOrder.append(function.id);
+        if (actions) {
+            actions->append(QStringLiteral("add"));
         }
-        return dialogResult;
+        return true;
     };
     return access;
 }
@@ -109,8 +154,9 @@ class FunctionWorkspaceControllerTests : public QObject
 
 private slots:
     void ownsPagesAndCurrentFunction();
-    void editsThroughOneWorkspaceInterface();
-    void rollsBackCancelledCustomFunction();
+    void editsBySelectingInlineFunctionPage();
+    void createsAndSelectsCustomFunction();
+    void failedFlushPreventsSwitchingFunctions();
     void handlesMissingDependencies();
     void hubWindowDelegatesFunctionWorkspace();
 };
@@ -118,10 +164,11 @@ private slots:
 void FunctionWorkspaceControllerTests::ownsPagesAndCurrentFunction()
 {
     QWidget parent;
-    HubSettingsState settings = createSettings();
+    AppSettingsData data;
+    HubSettingsState settings = createSettings(&data);
     FunctionWorkspaceController controller(
         &parent,
-        createAccess(&settings, nullptr, nullptr, true)
+        createAccess(&settings, nullptr, &data)
     );
 
     QVERIFY(controller.setCurrentFunctionId(QStringLiteral(" translate ")));
@@ -141,17 +188,16 @@ void FunctionWorkspaceControllerTests::ownsPagesAndCurrentFunction()
     QVERIFY(command->functionId().isEmpty());
 }
 
-void FunctionWorkspaceControllerTests::editsThroughOneWorkspaceInterface()
+void FunctionWorkspaceControllerTests::editsBySelectingInlineFunctionPage()
 {
     QWidget parent;
     AppSettingsData data;
     data.functions.append(builtInFunction());
-    HubSettingsState settings = createSettings(data);
+    HubSettingsState settings = createSettings(&data);
     QStringList actions;
-    FunctionEditorDialogRequest request;
     FunctionWorkspaceController controller(
         &parent,
-        createAccess(&settings, &actions, &request, true)
+        createAccess(&settings, &actions, &data)
     );
     FunctionManagementPage *management = controller.managementPageWidget();
     const int refreshBefore = management->property("refreshCount").toInt();
@@ -163,33 +209,54 @@ void FunctionWorkspaceControllerTests::editsThroughOneWorkspaceInterface()
         CustomFunctionDef()
     ));
 
-    QCOMPARE(request.id, QStringLiteral("dictate"));
-    QVERIFY(request.summaryText.contains(QString::fromUtf8("输入：语音")));
-    QCOMPARE(actions, QStringList() << QStringLiteral("save"));
+    QCOMPARE(controller.currentFunctionId(), QStringLiteral("dictate"));
+    QVERIFY(actions.isEmpty());
     QCOMPARE(
         management->property("refreshCount").toInt(),
         refreshBefore
     );
 }
 
-void FunctionWorkspaceControllerTests::rollsBackCancelledCustomFunction()
+void FunctionWorkspaceControllerTests::createsAndSelectsCustomFunction()
 {
     QWidget parent;
-    HubSettingsState settings = createSettings();
+    AppSettingsData data;
+    HubSettingsState settings = createSettings(&data);
     QStringList actions;
-    FunctionEditorDialogRequest request;
     FunctionWorkspaceController controller(
         &parent,
-        createAccess(&settings, &actions, &request, false)
+        createAccess(&settings, &actions, &data)
     );
 
-    QVERIFY(!controller.addCustomFunction());
-    QVERIFY(settings.customFunctions().isEmpty());
-    QCOMPARE(request.id, QStringLiteral("custom_1"));
-    QCOMPARE(actions.count(QStringLiteral("save")), 2);
-    QCOMPARE(actions.count(QStringLiteral("modes")), 0);
-    QCOMPARE(actions.count(QStringLiteral("prompts")), 0);
-    QCOMPARE(actions.count(QStringLiteral("navigation")), 0);
+    QVERIFY(controller.addCustomFunction());
+    QCOMPARE(settings.customFunctions().size(), 1);
+    QCOMPARE(settings.customFunctions().first().id, QStringLiteral("custom_1"));
+    QCOMPARE(controller.currentFunctionId(), QStringLiteral("custom_1"));
+    QCOMPARE(actions, QStringList() << QStringLiteral("add"));
+}
+
+void FunctionWorkspaceControllerTests::
+failedFlushPreventsSwitchingFunctions()
+{
+    QWidget parent;
+    AppSettingsData data;
+    HubSettingsState settings = createSettings(&data);
+    FunctionWorkspaceController controller(
+        &parent,
+        createAccess(&settings, nullptr, &data)
+    );
+    QVERIFY(controller.setCurrentFunctionId(QStringLiteral("custom_1")));
+    FunctionCommandPage *page = controller.commandPageWidget();
+    page->setProperty("flushBlocked", true);
+    QVERIFY(!controller.setCurrentFunctionId(
+        QStringLiteral("custom_2")
+    ));
+    QCOMPARE(
+        controller.currentFunctionId(),
+        QStringLiteral("custom_1")
+    );
+    QCOMPARE(page->functionId(), QStringLiteral("custom_1"));
+    QCOMPARE(page->property("flushCount").toInt(), 1);
 }
 
 void FunctionWorkspaceControllerTests::handlesMissingDependencies()
@@ -203,7 +270,7 @@ void FunctionWorkspaceControllerTests::handlesMissingDependencies()
     QVERIFY(controller.commandPage());
     QVERIFY(controller.managementPage());
     QVERIFY(!controller.addCustomFunction());
-    QVERIFY(!controller.editFunction(
+    QVERIFY(controller.editFunction(
         QStringLiteral("dictate"),
         QString::fromUtf8("听写"),
         false,
@@ -231,6 +298,7 @@ void FunctionWorkspaceControllerTests::hubWindowDelegatesFunctionWorkspace()
     QVERIFY(!contents.contains("FunctionEditorCoordinatorActions"));
     QVERIFY(!contents.contains("runFunctionEditorCoordinator("));
     QVERIFY(!contents.contains("createAndEditCustomFunction("));
+    QVERIFY(!contents.contains("FunctionEditorDialog"));
 }
 
 QTEST_MAIN(FunctionWorkspaceControllerTests)

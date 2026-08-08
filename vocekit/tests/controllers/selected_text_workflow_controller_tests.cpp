@@ -11,6 +11,7 @@ class SelectedTextWorkflowControllerTests : public QObject
 private slots:
     void returnsCorrectedSelectedText();
     void blocksTextOnlyFunctionWhenSelectionIsMissing();
+    void flowCanSuppressMissingSelectionPrompt();
     void allowsVoiceFunctionWhenSelectionIsMissing();
     void voiceControllerNoLongerOwnsSelectionReading();
 };
@@ -67,6 +68,44 @@ void SelectedTextWorkflowControllerTests::returnsCorrectedSelectedText()
     QCOMPARE(statusTitle, QString::fromUtf8("正在读取选中文字"));
     QCOMPARE(result.text, QStringLiteral("DeepSeek"));
     QVERIFY(!result.blocked);
+}
+
+void SelectedTextWorkflowControllerTests::
+flowCanSuppressMissingSelectionPrompt()
+{
+    int hideCount = 0;
+    int informationCount = 0;
+    SelectedTextNativeWindowHandle observedTarget = nullptr;
+    SelectedTextNativeWindowHandle expectedTarget =
+        reinterpret_cast<SelectedTextNativeWindowHandle>(quintptr(42));
+
+    SelectedTextWorkflowAccess access;
+    access.readSelectedText = [&](
+        const SelectedTextReadRequest &request,
+        const VocabularyPreCorrectionCallback &) {
+        observedTarget = request.targetWindow;
+        return SelectedTextReadResult();
+    };
+    access.hideStatusLater = [&]() {
+        ++hideCount;
+    };
+    access.showInformation = [&](const QString &, const QString &) {
+        ++informationCount;
+    };
+
+    SelectedTextWorkflowController controller(access);
+    SelectedTextWorkflowRequest request;
+    request.modeId = QStringLiteral("translate");
+    request.targetWindow = expectedTarget;
+    request.suppressMissingPrompt = true;
+
+    const SelectedTextWorkflowResult result = controller.execute(request);
+
+    QCOMPARE(observedTarget, expectedTarget);
+    QVERIFY(result.text.isEmpty());
+    QVERIFY(!result.blocked);
+    QCOMPARE(hideCount, 0);
+    QCOMPARE(informationCount, 0);
 }
 
 void SelectedTextWorkflowControllerTests::

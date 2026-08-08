@@ -15,6 +15,7 @@ struct VoiceLongRecordingRecognitionConfig
     QString provider;
     QString networkPolicy = QStringLiteral("inherit");
     bool useSystemProxy = false;
+    CancellationToken cancellation;
 };
 
 struct VoiceLongRecordingRecognitionCallbacks
@@ -62,6 +63,7 @@ private:
     VoiceLongRecordingRecognitionCallbacks m_callbacks;
     QFutureWatcher<VoiceLongRecordingSegmentResult> m_watcher;
     CancellationSource m_cancellation;
+    CancellationToken m_effectiveCancellation;
     bool m_completionNotified = false;
 };
 

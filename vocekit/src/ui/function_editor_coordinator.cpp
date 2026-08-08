@@ -1,6 +1,5 @@
 #include "function_editor_coordinator.h"
 
-#include "function_editor_dialog_access_factory.h"
 #include "function_summary_formatter.h"
 #include "hub_settings_state.h"
 #include "shortcut_display.h"
@@ -67,37 +66,4 @@ QString functionEditorSummaryText(
         return QString();
     }
     return functionSummaryText(summaryData(id, shortcut, actions));
-}
-
-bool runFunctionEditorCoordinator(
-    const QString &id,
-    const QString &title,
-    bool custom,
-    const CustomFunctionDef &function,
-    const FunctionEditorCoordinatorActions &actions
-)
-{
-    if (!actions.settings || !actions.openDialog) {
-        return false;
-    }
-
-    FunctionEditorDialogRequest request;
-    request.id = id;
-    request.title = title;
-    request.custom = custom;
-    request.function = function;
-    request.summaryText = functionEditorSummaryText(
-        id,
-        custom ? function.shortcut : actions.settings->hotkey(id),
-        actions
-    );
-
-    FunctionEditorDialogAccessFactoryDependencies dependencies;
-    dependencies.settings = actions.settings;
-    dependencies.prompts = actions.prompts;
-    dependencies.saveSettings = actions.saveSettings;
-    return actions.openDialog(
-        request,
-        createFunctionEditorDialogAccess(dependencies)
-    );
 }

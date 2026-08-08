@@ -62,6 +62,7 @@ struct AppSettingsData
 
     // 迁移期间保留尚未建模的新字段，防止旧版本设置被重写丢失。
     QJsonObject retainedRootValues;
+    QJsonObject retainedOrphanFunctionFlows;
 
     int functionIndex(const QString &id) const
     {

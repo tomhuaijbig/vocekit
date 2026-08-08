@@ -7,6 +7,7 @@
 #include <QtTest>
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -22,6 +23,22 @@ QString tr8(const char *text)
 bool pathIsDirectory(const QString &path)
 {
     return QFileInfo(path).isDir();
+}
+
+QByteArray readFileBytes(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return QByteArray();
+    }
+    return file.readAll();
+}
+
+ExecutionId executionId(const QString &value)
+{
+    ExecutionId result;
+    result.value = value;
+    return result;
 }
 
 QJsonObject makeHistoryJson(
@@ -87,7 +104,38 @@ private slots:
     void recordServiceUpdatesFavoriteAndIndex();
     void recordServiceRemovesEntriesAndRebuildsIndex();
     void recordServiceRejectsEntryOutsideRoot();
+    void recordServiceUpdatesFlowEditedTextEverywhere();
+    void recordServiceAllowsLegacyEmptyFlowReferences();
+    void recordServiceRejectsFlowEditOutsideRoot();
+    void recordServiceRejectsMissingFlowDetail();
+    void recordServiceRejectsFlowEditForWrongRun();
+    void recordServiceRejectsUnsafeFlowEditReference_data();
+    void recordServiceRejectsUnsafeFlowEditReference();
+    void recordServiceRejectsMissingFlowEditReference();
+    void recordServiceRejectsMismatchedFlowMirror();
+    void flowMetadataPreservesFullHashAndSafeTrace();
+
+private:
+    HistoryAppendResult appendFlowRecord(
+        const QString &recordDirectory,
+        const QString &runId
+    );
 };
+
+HistoryAppendResult HistoryStoreTests::appendFlowRecord(
+    const QString &recordDirectory,
+    const QString &runId
+)
+{
+    HistoryAppendRequest request;
+    request.modeId = QStringLiteral("custom_flow");
+    request.modeTitle = QStringLiteral("Flow");
+    request.item.insert(QStringLiteral("input"), QStringLiteral("canonical input"));
+    request.item.insert(QStringLiteral("output"), QStringLiteral("original output"));
+    request.item.insert(QStringLiteral("error"), QString());
+    request.item.insert(QStringLiteral("flowRunId"), runId);
+    return HistoryStore(recordDirectory).appendRecord(request);
+}
 
 void HistoryStoreTests::createsStructuredDirectories()
 {
@@ -631,6 +679,321 @@ void HistoryStoreTests::recordServiceRejectsEntryOutsideRoot()
     QCOMPARE(removed.removedCount, 0);
     QCOMPARE(removed.failedPaths, QStringList() << detailPath);
     QVERIFY(QFileInfo::exists(detailPath));
+}
+
+void HistoryStoreTests::recordServiceUpdatesFlowEditedTextEverywhere()
+{
+    QTemporaryDir records;
+    QVERIFY(records.isValid());
+
+    const HistoryAppendResult saved =
+        appendFlowRecord(records.path(), QStringLiteral("run-42"));
+    QVERIFY(saved.ok);
+
+    OperationError error;
+    QVERIFY(HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("run-42")),
+        saved.modeDetailPath,
+        QStringLiteral("edited result"),
+        &error
+    ));
+    QVERIFY(error.isEmpty());
+
+    QJsonObject modeDetail;
+    QJsonObject allDetail;
+    QVERIFY(readJsonObjectFile(saved.modeDetailPath, &modeDetail));
+    QVERIFY(readJsonObjectFile(saved.allDetailPath, &allDetail));
+    QCOMPARE(
+        modeDetail.value(QStringLiteral("input")).toString(),
+        QStringLiteral("canonical input")
+    );
+    QCOMPARE(
+        modeDetail.value(QStringLiteral("output")).toString(),
+        QStringLiteral("edited result")
+    );
+    QCOMPARE(modeDetail, allDetail);
+    QVERIFY(readTextFile(saved.modeTextPath).contains(QStringLiteral("edited result")));
+    QVERIFY(readTextFile(saved.allTextPath).contains(QStringLiteral("edited result")));
+    QVERIFY(!readTextFile(saved.modeTextPath).contains(QStringLiteral("original output")));
+    QVERIFY(!readTextFile(saved.allTextPath).contains(QStringLiteral("original output")));
+
+    QVector<HistoryEntry> indexed;
+    QVERIFY(HistoryStore(records.path()).readIndex(&indexed));
+    QCOMPARE(indexed.size(), 1);
+    QCOMPARE(indexed.first().filePath, saved.modeDetailPath);
+    QCOMPARE(indexed.first().output, QStringLiteral("edited result"));
+}
+
+void HistoryStoreTests::recordServiceAllowsLegacyEmptyFlowReferences()
+{
+    QTemporaryDir records;
+    QVERIFY(records.isValid());
+
+    const HistoryAppendResult saved =
+        appendFlowRecord(records.path(), QStringLiteral("legacy-run"));
+    QVERIFY(saved.ok);
+
+    QJsonObject detail;
+    QVERIFY(readJsonObjectFile(saved.modeDetailPath, &detail));
+    detail.insert(QStringLiteral("allDetailFile"), QString());
+    detail.insert(QStringLiteral("textFile"), QString());
+    detail.insert(QStringLiteral("allTextFile"), QString());
+    QVERIFY(writeBytesAtomically(
+        saved.modeDetailPath,
+        QJsonDocument(detail).toJson(QJsonDocument::Indented)
+    ));
+
+    OperationError error;
+    QVERIFY(HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("legacy-run")),
+        saved.modeDetailPath,
+        QStringLiteral("legacy edit"),
+        &error
+    ));
+
+    QJsonObject updated;
+    QVERIFY(readJsonObjectFile(saved.modeDetailPath, &updated));
+    QCOMPARE(
+        updated.value(QStringLiteral("output")).toString(),
+        QStringLiteral("legacy edit")
+    );
+
+    QVector<HistoryEntry> indexed;
+    QVERIFY(HistoryStore(records.path()).readIndex(&indexed));
+    QCOMPARE(indexed.size(), 1);
+    QCOMPARE(indexed.first().output, QStringLiteral("legacy edit"));
+}
+
+void HistoryStoreTests::recordServiceRejectsFlowEditOutsideRoot()
+{
+    QTemporaryDir records;
+    QTemporaryDir outside;
+    QVERIFY(records.isValid());
+    QVERIFY(outside.isValid());
+
+    QJsonObject detail;
+    detail.insert(QStringLiteral("flowRunId"), QStringLiteral("outside-run"));
+    detail.insert(QStringLiteral("output"), QStringLiteral("sentinel"));
+    const QString outsidePath =
+        QDir(outside.path()).filePath(QStringLiteral("outside.json"));
+    QVERIFY(writeBytesAtomically(
+        outsidePath,
+        QJsonDocument(detail).toJson(QJsonDocument::Indented)
+    ));
+    const QByteArray before = readFileBytes(outsidePath);
+
+    OperationError error;
+    QVERIFY(!HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("outside-run")),
+        outsidePath,
+        QStringLiteral("must not write"),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("flow_history_save_failed"));
+    QCOMPARE(readFileBytes(outsidePath), before);
+    QVERIFY(!QFileInfo::exists(HistoryStore(records.path()).indexPath()));
+}
+
+void HistoryStoreTests::recordServiceRejectsMissingFlowDetail()
+{
+    QTemporaryDir records;
+    QVERIFY(records.isValid());
+
+    const QString missingPath =
+        QDir(records.path()).filePath(QStringLiteral("missing.json"));
+    OperationError error;
+    QVERIFY(!HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("missing-run")),
+        missingPath,
+        QStringLiteral("must not create"),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("flow_history_save_failed"));
+    QVERIFY(!QFileInfo::exists(missingPath));
+    QVERIFY(!QFileInfo::exists(HistoryStore(records.path()).indexPath()));
+}
+
+void HistoryStoreTests::recordServiceRejectsFlowEditForWrongRun()
+{
+    QTemporaryDir records;
+    QVERIFY(records.isValid());
+
+    const HistoryAppendResult saved =
+        appendFlowRecord(records.path(), QStringLiteral("actual-run"));
+    QVERIFY(saved.ok);
+    const QByteArray modeBefore = readFileBytes(saved.modeDetailPath);
+    const QByteArray mirrorBefore = readFileBytes(saved.allDetailPath);
+    const QByteArray textBefore = readFileBytes(saved.modeTextPath);
+
+    OperationError error;
+    QVERIFY(!HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("different-run")),
+        saved.modeDetailPath,
+        QStringLiteral("must not write"),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("flow_history_save_failed"));
+    QCOMPARE(readFileBytes(saved.modeDetailPath), modeBefore);
+    QCOMPARE(readFileBytes(saved.allDetailPath), mirrorBefore);
+    QCOMPARE(readFileBytes(saved.modeTextPath), textBefore);
+}
+
+void HistoryStoreTests::recordServiceRejectsUnsafeFlowEditReference_data()
+{
+    QTest::addColumn<QString>("field");
+    QTest::addColumn<QString>("fileName");
+
+    QTest::newRow("all detail") << QStringLiteral("allDetailFile")
+                                << QStringLiteral("sentinel.json");
+    QTest::newRow("mode text") << QStringLiteral("textFile")
+                              << QStringLiteral("sentinel.txt");
+    QTest::newRow("all text") << QStringLiteral("allTextFile")
+                             << QStringLiteral("sentinel.txt");
+}
+
+void HistoryStoreTests::recordServiceRejectsUnsafeFlowEditReference()
+{
+    QFETCH(QString, field);
+    QFETCH(QString, fileName);
+
+    QTemporaryDir records;
+    QTemporaryDir outside;
+    QVERIFY(records.isValid());
+    QVERIFY(outside.isValid());
+
+    const HistoryAppendResult saved =
+        appendFlowRecord(records.path(), QStringLiteral("run-ref"));
+    QVERIFY(saved.ok);
+
+    const QString outsidePath = QDir(outside.path()).filePath(fileName);
+    QVERIFY(writeBytesAtomically(outsidePath, QByteArray("outside sentinel")));
+    const QByteArray outsideBefore = readFileBytes(outsidePath);
+
+    QJsonObject detail;
+    QVERIFY(readJsonObjectFile(saved.modeDetailPath, &detail));
+    detail.insert(field, outsidePath);
+    QVERIFY(writeBytesAtomically(
+        saved.modeDetailPath,
+        QJsonDocument(detail).toJson(QJsonDocument::Indented)
+    ));
+    const QByteArray modeBefore = readFileBytes(saved.modeDetailPath);
+    const QByteArray mirrorBefore = readFileBytes(saved.allDetailPath);
+
+    OperationError error;
+    QVERIFY(!HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("run-ref")),
+        saved.modeDetailPath,
+        QStringLiteral("must not write"),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("flow_history_save_failed"));
+    QCOMPARE(readFileBytes(outsidePath), outsideBefore);
+    QCOMPARE(readFileBytes(saved.modeDetailPath), modeBefore);
+    QCOMPARE(readFileBytes(saved.allDetailPath), mirrorBefore);
+}
+
+void HistoryStoreTests::recordServiceRejectsMissingFlowEditReference()
+{
+    QTemporaryDir records;
+    QVERIFY(records.isValid());
+
+    const HistoryAppendResult saved =
+        appendFlowRecord(records.path(), QStringLiteral("run-missing-ref"));
+    QVERIFY(saved.ok);
+
+    QJsonObject detail;
+    QVERIFY(readJsonObjectFile(saved.modeDetailPath, &detail));
+    detail.insert(
+        QStringLiteral("textFile"),
+        QDir(records.path()).filePath(QStringLiteral("missing.txt"))
+    );
+    QVERIFY(writeBytesAtomically(
+        saved.modeDetailPath,
+        QJsonDocument(detail).toJson(QJsonDocument::Indented)
+    ));
+    const QByteArray modeBefore = readFileBytes(saved.modeDetailPath);
+
+    OperationError error;
+    QVERIFY(!HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("run-missing-ref")),
+        saved.modeDetailPath,
+        QStringLiteral("must not write"),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("flow_history_save_failed"));
+    QCOMPARE(readFileBytes(saved.modeDetailPath), modeBefore);
+}
+
+void HistoryStoreTests::recordServiceRejectsMismatchedFlowMirror()
+{
+    QTemporaryDir records;
+    QVERIFY(records.isValid());
+
+    const HistoryAppendResult saved =
+        appendFlowRecord(records.path(), QStringLiteral("run-main"));
+    QVERIFY(saved.ok);
+
+    QJsonObject mirror;
+    QVERIFY(readJsonObjectFile(saved.allDetailPath, &mirror));
+    mirror.insert(QStringLiteral("flowRunId"), QStringLiteral("another-run"));
+    QVERIFY(writeBytesAtomically(
+        saved.allDetailPath,
+        QJsonDocument(mirror).toJson(QJsonDocument::Indented)
+    ));
+    const QByteArray mainBefore = readFileBytes(saved.modeDetailPath);
+    const QByteArray mirrorBefore = readFileBytes(saved.allDetailPath);
+
+    OperationError error;
+    QVERIFY(!HistoryRecordService(records.path()).updateFlowEditedText(
+        executionId(QStringLiteral("run-main")),
+        saved.modeDetailPath,
+        QStringLiteral("must not write"),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("flow_history_save_failed"));
+    QCOMPARE(readFileBytes(saved.modeDetailPath), mainBefore);
+    QCOMPARE(readFileBytes(saved.allDetailPath), mirrorBefore);
+}
+
+void HistoryStoreTests::flowMetadataPreservesFullHashAndSafeTrace()
+{
+    HistoryRecordMetadataRequest request;
+    request.input = QStringLiteral("canonical input");
+    request.output = QStringLiteral("final output");
+    request.flowRunId = QStringLiteral("run-64");
+    request.flowPublishedRevision = 3;
+    request.flowPublishedHash = QString(64, QLatin1Char('a'));
+    request.flowTrigger = QStringLiteral("mainHotkey");
+    HistoryFlowNodeTrace trace;
+    trace.nodeId = QStringLiteral("model");
+    trace.nodeType = QStringLiteral("model");
+    trace.state = QStringLiteral("succeeded");
+    trace.elapsedMs = 18;
+    trace.modelId = QStringLiteral("model-a");
+    trace.promptVersion = QStringLiteral("prompt-v1");
+    request.flowNodeTraces << trace;
+
+    const QJsonObject item =
+        HistoryRecordBuilder::buildMetadata(request);
+    QCOMPARE(
+        item.value(QStringLiteral("flowPublishedRevision"))
+            .toInt(),
+        3
+    );
+    QCOMPARE(
+        item.value(QStringLiteral("flowPublishedHash"))
+            .toString(),
+        QString(64, QLatin1Char('a'))
+    );
+    QCOMPARE(
+        item.value(QStringLiteral("flowNodeTraces"))
+            .toArray().size(),
+        1
+    );
+    const QByteArray serialized =
+        QJsonDocument(item).toJson(QJsonDocument::Compact);
+    QVERIFY(!serialized.contains("data:image"));
+    QVERIFY(!serialized.contains("screenshot"));
 }
 
 QTEST_MAIN(HistoryStoreTests)

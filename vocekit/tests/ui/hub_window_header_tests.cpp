@@ -16,6 +16,8 @@ private slots:
     void bootstrapIsAThinCompatibilityEntry();
     void applicationRuntimeDoesNotDefineHubWindowImplementation();
     void applicationRuntimeUsesSettingsStoreAsThePersistenceBoundary();
+    void everyApplicationExitUsesTheDraftFlushGate();
+    void staleOrdinarySettingsAreReloadedWithoutAutomaticReplay();
     void doesNotEmbedPageMethodFragments();
     void doesNotKeepLegacySettingsRows();
 };
@@ -71,10 +73,63 @@ void HubWindowHeaderTests::applicationRuntimeUsesSettingsStoreAsThePersistenceBo
     QVERIFY(contents.contains("AppSettingsStore settingsStore"));
     QVERIFY(contents.contains("settingsStore.loadOrCreateDefaults"));
     QVERIFY(contents.contains("settingsStore.replaceAndSave"));
+    QCOMPARE(contents.count("settingsStore.replaceAndSave"), 1);
+    QVERIFY(contents.contains("publicationAccess.replaceAndSave"));
+    QVERIFY(contents.contains("replaceNonFlowSettingsAndSave"));
+    QVERIFY(!contents.contains("hubAccess.applyAndSave"));
+    QVERIFY(contents.contains("FunctionFlowPublicationService"));
+    QVERIFY(contents.contains("hubAccess.functionFlows = functionFlows"));
+    QVERIFY(contents.contains("promptRuntimeTargets"));
+    QVERIFY(contents.contains("supportedSpeechProviderIds"));
+    QVERIFY(contents.contains("supportedOcrEngineIds"));
+    QVERIFY(
+        contents.indexOf("ApplicationEvents events")
+        < contents.indexOf("FunctionFlowPublicationService publicationService")
+    );
+    QVERIFY(
+        contents.indexOf("FunctionFlowPublicationService publicationService")
+        < contents.indexOf("HubWindowAccess hubAccess")
+    );
     QVERIFY(!contents.contains("app_settings_json.h"));
     QVERIFY(!contents.contains("settingsStore.replaceSnapshot"));
     QVERIFY(!contents.contains("settingsStore.save("));
     QVERIFY(!contents.contains("legacy_app_settings"));
+}
+
+void HubWindowHeaderTests::everyApplicationExitUsesTheDraftFlushGate()
+{
+    QVERIFY(std::is_member_function_pointer<
+        decltype(&HubWindow::requestApplicationQuit)
+    >::value);
+
+    const QString sourcePath = QFINDTESTDATA("../../src/ui/hub_window.cpp");
+    QVERIFY2(!sourcePath.isEmpty(), "Cannot find HubWindow source");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray contents = source.readAll();
+
+    QVERIFY(contents.contains("bool requestApplicationQuit() override"));
+    QVERIFY(contents.contains("flushAllPendingFlowDrafts"));
+    QVERIFY(contents.contains("discardAllPendingFlowDrafts"));
+    QVERIFY(contents.contains("requestApplicationQuit();"));
+    QVERIFY(contents.contains("tr8(\"重试\")"));
+    QVERIFY(contents.contains("tr8(\"取消退出\")"));
+    QVERIFY(contents.contains("tr8(\"丢弃草稿并退出\")"));
+    QCOMPARE(contents.count("qApp->quit()"), 1);
+}
+
+void HubWindowHeaderTests::staleOrdinarySettingsAreReloadedWithoutAutomaticReplay()
+{
+    const QString sourcePath = QFINDTESTDATA("../../src/ui/hub_window.cpp");
+    QVERIFY2(!sourcePath.isEmpty(), "Cannot find HubWindow source");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray contents = source.readAll();
+
+    QVERIFY(contents.contains("settings_function_set_stale"));
+    QVERIFY(contents.contains("m_settings->load();"));
+    QVERIFY(contents.contains("tr8(\"设置已更新\")"));
+    QVERIFY(contents.contains("tr8(\"请检查最新设置后重新操作。\")"));
 }
 
 void HubWindowHeaderTests::doesNotEmbedPageMethodFragments()

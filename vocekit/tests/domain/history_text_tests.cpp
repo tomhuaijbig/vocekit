@@ -27,6 +27,7 @@ private slots:
     void formatsIsoTime();
     void formatsElapsedDurations();
     void previewPrefersOutputThenInputThenError();
+    void legacyBuiltInTitlesDisplayInChineseWithoutChangingStoredValue();
     void titleIncludesFavoriteDraftAndError();
     void extractsRecognizedText();
     void buildsDetailPlainText();
@@ -69,6 +70,23 @@ void HistoryTextTests::previewPrefersOutputThenInputThenError()
 
     entry.error.clear();
     QCOMPARE(historyEntryPreviewText(entry), QStringLiteral("无文本内容"));
+}
+
+void HistoryTextTests::
+legacyBuiltInTitlesDisplayInChineseWithoutChangingStoredValue()
+{
+    HistoryEntry entry = sampleEntry();
+    entry.modeId = QStringLiteral("dictate");
+    entry.mode = QString::fromUtf8("听写（Dictate）");
+    const QString storedMode = entry.mode;
+
+    QVERIFY(!historyEntryTitleText(entry).contains(
+        QStringLiteral("Dictate")
+    ));
+    QVERIFY(historyEntryDetailPlainText(entry).contains(
+        QString::fromUtf8("功能：听写")
+    ));
+    QCOMPARE(entry.mode, storedMode);
 }
 
 void HistoryTextTests::titleIncludesFavoriteDraftAndError()

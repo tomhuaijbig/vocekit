@@ -52,6 +52,47 @@ private slots:
         QVERIFY(loaded.hasCustomModel());
     }
 
+    void savesAndLoadsProviderBaseUrls()
+    {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString path = QDir(temp.path()).filePath(QStringLiteral("config/secrets.json"));
+        SecretStore store(path);
+
+        SecretConfig secrets;
+        secrets.openaiBaseUrl = QString::fromUtf8("https://\xE4\xBE\x8B\xE5\xAD\x90.example/openai");
+        secrets.anthropicBaseUrl = QStringLiteral("https://gateway.example.test/v1");
+        QVERIFY(store.save(secrets));
+
+        const SecretConfig loaded = store.load();
+        QCOMPARE(loaded.openaiBaseUrl, secrets.openaiBaseUrl);
+        QCOMPARE(loaded.anthropicBaseUrl, secrets.anthropicBaseUrl);
+
+        QJsonObject root;
+        QVERIFY(readJsonObjectFile(path, &root));
+        QCOMPARE(root.value(QStringLiteral("openai_base_url")).toString(), secrets.openaiBaseUrl);
+        QCOMPARE(root.value(QStringLiteral("anthropic_base_url")).toString(), secrets.anthropicBaseUrl);
+    }
+
+    void loadsLegacySecretsWithoutProviderBaseUrls()
+    {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString path = QDir(temp.path()).filePath(QStringLiteral("config/secrets.json"));
+        SecretStore store(path);
+
+        QJsonObject root;
+        root.insert(QStringLiteral("openai_api_key"), QStringLiteral("legacy-openai-key"));
+        root.insert(QStringLiteral("anthropic_api_key"), QStringLiteral("legacy-anthropic-key"));
+        QVERIFY(writeBytesAtomically(path, QJsonDocument(root).toJson(QJsonDocument::Indented)));
+
+        const SecretConfig loaded = store.load();
+        QCOMPARE(loaded.openaiApiKey, QStringLiteral("legacy-openai-key"));
+        QCOMPARE(loaded.anthropicApiKey, QStringLiteral("legacy-anthropic-key"));
+        QVERIFY(loaded.openaiBaseUrl.isEmpty());
+        QVERIFY(loaded.anthropicBaseUrl.isEmpty());
+    }
+
     void loadsLegacySingleCustomModelFields()
     {
         QTemporaryDir temp;

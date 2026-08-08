@@ -18,11 +18,18 @@ SOURCES += \
     src/config/app_settings_store.cpp \
     src/config/app_paths.cpp \
     src/config/baidu_sample_parser.cpp \
+    src/config/function_flow_json.cpp \
     src/config/prompt_save_route.cpp \
     src/config/secret_config.cpp \
     src/config/secret_store.cpp \
     src/controllers/function_command_adapters.cpp \
     src/controllers/function_command_controller.cpp \
+    src/controllers/function_flow_execution_controller.cpp \
+    src/controllers/function_flow_editor_controller.cpp \
+    src/controllers/function_flow_plan_cache.cpp \
+    src/controllers/function_flow_publication_service.cpp \
+    src/controllers/function_flow_result_controller.cpp \
+    src/controllers/function_flow_runtime_adapters.cpp \
     src/controllers/selected_text_workflow_adapters.cpp \
     src/controllers/selected_text_workflow_controller.cpp \
     src/controllers/screenshot_workflow_controller.cpp \
@@ -35,6 +42,14 @@ SOURCES += \
     src/controllers/voice_result_presentation_controller.cpp \
     src/controllers/voice_recording_workflow_controller.cpp \
     src/domain/function_catalog.cpp \
+    src/domain/function_flow_compiler.cpp \
+    src/domain/function_flow_errors.cpp \
+    src/domain/function_flow_graph.cpp \
+    src/domain/function_flow_model_message.cpp \
+    src/domain/function_flow_ports.cpp \
+    src/domain/function_flow_runtime_types.cpp \
+    src/domain/function_flow_scheduler.cpp \
+    src/domain/function_flow_validation.cpp \
     src/domain/function_settings.cpp \
     src/domain/history_filter.cpp \
     src/domain/history_modes.cpp \
@@ -65,6 +80,7 @@ SOURCES += \
     src/faq_paging.cpp \
     src/input/hotkey_definitions.cpp \
     src/input/hotkey_parser.cpp \
+    src/input/hotkey_refresh_coordinator.cpp \
     src/input/hotkey_settings_snapshot.cpp \
     src/input/hold_to_talk.cpp \
     src/input/selected_text_reader.cpp \
@@ -105,6 +121,7 @@ SOURCES += \
     src/result_flow_config.cpp \
     src/runtime_crash_handler.cpp \
     src/runtime_log.cpp \
+    src/runtime/function_flow_runtime_log.cpp \
     src/storage/history_archive.cpp \
     src/storage/history_paths.cpp \
     src/storage/history_export.cpp \
@@ -116,6 +133,7 @@ SOURCES += \
     src/tasks/cancellation_token.cpp \
     src/tasks/diagnostic_task_runner.cpp \
     src/tasks/diagnostic_helpers.cpp \
+    src/tasks/function_flow_model_task_runner.cpp \
     src/tasks/history_segment_retry_task.cpp \
     src/tasks/interface_self_check_task.cpp \
     src/tasks/microphone_diagnostic_task.cpp \
@@ -154,11 +172,17 @@ SOURCES += \
     src/ui/diagnostics_settings_snapshot.cpp \
     src/ui/faq_panel.cpp \
     src/ui/floating_bar_test_card.cpp \
+    src/ui/function_canvas_visual_style.cpp \
+    src/ui/function_canvas_view.cpp \
+    src/ui/function_canvas_edge_item.cpp \
+    src/ui/function_canvas_editor.cpp \
+    src/ui/function_canvas_inspector.cpp \
+    src/ui/function_canvas_node_item.cpp \
+    src/ui/function_canvas_palette.cpp \
+    src/ui/function_canvas_scene.cpp \
     src/ui/function_command_page.cpp \
     src/ui/function_command_page_access_factory.cpp \
     src/ui/function_editor_coordinator.cpp \
-    src/ui/function_editor_dialog.cpp \
-    src/ui/function_editor_dialog_access_factory.cpp \
     src/ui/function_management_page.cpp \
     src/ui/function_management_page_access_factory.cpp \
     src/ui/function_pages_access_factory.cpp \
@@ -177,6 +201,7 @@ SOURCES += \
     src/ui/history_page_access_factory.cpp \
     src/ui/history_page_controller.cpp \
     src/ui/api_settings_section.cpp \
+    src/ui/custom_model_dialog_support.cpp \
     src/ui/history_settings_section.cpp \
     src/ui/shortcut_settings_section.cpp \
     src/ui/history_transfer_controller.cpp \
@@ -212,6 +237,7 @@ SOURCES += \
     src/ui/prompts_panel.cpp \
     src/ui/prompt_settings_adapter.cpp \
     src/ui/recent_history_panel.cpp \
+    src/ui/reorderable_card_column.cpp \
     src/ui/result_choice_popup.cpp \
     src/ui/result_popup_test_card.cpp \
     src/ui/selection_input_test_card.cpp \
@@ -246,10 +272,17 @@ HEADERS += \
     src/config/app_settings_store.h \
     src/config/app_paths.h \
     src/config/baidu_sample_parser.h \
+    src/config/function_flow_json.h \
     src/config/prompt_save_route.h \
     src/config/secret_config.h \
     src/config/secret_store.h \
     src/controllers/function_command_controller.h \
+    src/controllers/function_flow_execution_controller.h \
+    src/controllers/function_flow_editor_controller.h \
+    src/controllers/function_flow_plan_cache.h \
+    src/controllers/function_flow_publication_service.h \
+    src/controllers/function_flow_result_controller.h \
+    src/controllers/function_flow_runtime_adapters.h \
     src/controllers/selected_text_workflow_controller.h \
     src/controllers/screenshot_workflow_controller.h \
     src/controllers/tray_controller.h \
@@ -262,6 +295,15 @@ HEADERS += \
     src/domain/app_legacy_types.h \
     src/domain/execution_types.h \
     src/domain/function_catalog.h \
+    src/domain/function_flow_compiler.h \
+    src/domain/function_flow_errors.h \
+    src/domain/function_flow_graph.h \
+    src/domain/function_flow_model_message.h \
+    src/domain/function_flow_ports.h \
+    src/domain/function_flow_publication_types.h \
+    src/domain/function_flow_runtime_types.h \
+    src/domain/function_flow_scheduler.h \
+    src/domain/function_flow_validation.h \
     src/domain/function_settings.h \
     src/domain/history_filter.h \
     src/domain/history_modes.h \
@@ -293,6 +335,7 @@ HEADERS += \
     src/input/global_hotkeys.h \
     src/input/hotkey_definitions.h \
     src/input/hotkey_parser.h \
+    src/input/hotkey_refresh_coordinator.h \
     src/input/hotkey_settings_snapshot.h \
     src/input/hold_to_talk.h \
     src/input/selected_text_reader.h \
@@ -337,6 +380,7 @@ HEADERS += \
     src/result_flow_config.h \
     src/runtime_crash_handler.h \
     src/runtime_log.h \
+    src/runtime/function_flow_runtime_log.h \
     src/storage/history_archive.h \
     src/storage/history_paths.h \
     src/storage/history_export.h \
@@ -348,6 +392,7 @@ HEADERS += \
     src/tasks/cancellation_token.h \
     src/tasks/diagnostic_task_runner.h \
     src/tasks/diagnostic_helpers.h \
+    src/tasks/function_flow_model_task_runner.h \
     src/tasks/history_segment_retry_task.h \
     src/tasks/interface_self_check_task.h \
     src/tasks/microphone_diagnostic_task.h \
@@ -385,11 +430,18 @@ HEADERS += \
     src/ui/diagnostics_settings_snapshot.h \
     src/ui/faq_panel.h \
     src/ui/floating_bar_test_card.h \
+    src/ui/function_canvas_visual_style.h \
+    src/ui/function_canvas_view.h \
+    src/ui/function_canvas_edge_item.h \
+    src/ui/function_canvas_editor.h \
+    src/ui/function_canvas_inspector.h \
+    src/ui/function_canvas_node_item.h \
+    src/ui/function_canvas_palette.h \
+    src/ui/function_canvas_scene.h \
+    src/ui/function_flow_settings_access.h \
     src/ui/function_command_page.h \
     src/ui/function_command_page_access_factory.h \
     src/ui/function_editor_coordinator.h \
-    src/ui/function_editor_dialog.h \
-    src/ui/function_editor_dialog_access_factory.h \
     src/ui/function_management_page.h \
     src/ui/function_management_page_access_factory.h \
     src/ui/function_pages_access_factory.h \
@@ -411,6 +463,7 @@ HEADERS += \
     src/ui/history_page_access_factory.h \
     src/ui/history_page_controller.h \
     src/ui/api_settings_section.h \
+    src/ui/custom_model_dialog_support.h \
     src/ui/history_settings_section.h \
     src/ui/shortcut_settings_section.h \
     src/ui/history_transfer_controller.h \
@@ -447,6 +500,7 @@ HEADERS += \
     src/ui/prompt_settings_adapter.h \
     src/ui/result_choice_popup.h \
     src/ui/recent_history_panel.h \
+    src/ui/reorderable_card_column.h \
     src/ui/result_popup_test_card.h \
     src/ui/selection_input_test_card.h \
     src/ui/screen_position.h \

@@ -1,10 +1,12 @@
 #include "screenshot_result_window.h"
 
+#include "../providers/model_catalog.h"
 #include "screenshot_types.h"
 
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDesktopWidget>
 #include <QFontMetrics>
@@ -215,6 +217,18 @@ ScreenshotResultWindow::ScreenshotResultWindow(
     m_writeButton = actionButton(QStringLiteral("写入"), true);
     m_replaceButton = actionButton(QStringLiteral("替换选中"), false);
     auto *closeButton = actionButton(QStringLiteral("关闭"), false);
+    m_copyButton->setObjectName(
+        QStringLiteral("screenshotAction_copy")
+    );
+    m_writeButton->setObjectName(
+        QStringLiteral("screenshotAction_write")
+    );
+    m_replaceButton->setObjectName(
+        QStringLiteral("screenshotAction_replace")
+    );
+    closeButton->setObjectName(
+        QStringLiteral("screenshotAction_close")
+    );
     actions->addWidget(m_copyButton);
     actions->addWidget(m_writeButton);
     actions->addWidget(m_replaceButton);
@@ -247,12 +261,52 @@ ScreenshotResultWindow::ScreenshotResultWindow(
         m_statusLabel->setText(QStringLiteral("已复制"));
     });
     connect(m_writeButton, &QPushButton::clicked, this, [this]() {
+        if (m_checkedWrite) {
+            const ClipboardWriteResult result = m_checkedWrite(
+                QStringLiteral("write"),
+                this->resultText()
+            );
+            if (!result.ok) {
+                setBusy(false);
+                m_statusLabel->setText(
+                    QStringLiteral("写入失败")
+                    + (result.errorCode.trimmed().isEmpty()
+                        ? QString()
+                        : QStringLiteral("（")
+                            + result.errorCode
+                            + QStringLiteral("）"))
+                );
+                return;
+            }
+            close();
+            return;
+        }
         if (m_onWrite) {
             m_onWrite(this->resultText());
             close();
         }
     });
     connect(m_replaceButton, &QPushButton::clicked, this, [this]() {
+        if (m_checkedWrite) {
+            const ClipboardWriteResult result = m_checkedWrite(
+                QStringLiteral("replace"),
+                this->resultText()
+            );
+            if (!result.ok) {
+                setBusy(false);
+                m_statusLabel->setText(
+                    QStringLiteral("替换失败")
+                    + (result.errorCode.trimmed().isEmpty()
+                        ? QString()
+                        : QStringLiteral("（")
+                            + result.errorCode
+                            + QStringLiteral("）"))
+                );
+                return;
+            }
+            close();
+            return;
+        }
         if (m_onReplace) {
             m_onReplace(this->resultText());
             close();
@@ -379,6 +433,16 @@ void ScreenshotResultWindow::setActionCallbacks(
     updateActionState();
 }
 
+void ScreenshotResultWindow::setCheckedWriteCallback(
+    const std::function<ClipboardWriteResult(
+        const QString &,
+        const QString &
+    )> &callback)
+{
+    m_checkedWrite = callback;
+    updateActionState();
+}
+
 void ScreenshotResultWindow::setDraftCallback(
     const std::function<void(const QString &)> &onDraft)
 {
@@ -483,8 +547,16 @@ void ScreenshotResultWindow::updateActionState()
 {
     const bool hasResult = !resultText().trimmed().isEmpty();
     m_copyButton->setEnabled(!m_busy && hasResult);
-    m_writeButton->setEnabled(!m_busy && hasResult && bool(m_onWrite));
-    m_replaceButton->setEnabled(!m_busy && hasResult && bool(m_onReplace));
+    m_writeButton->setEnabled(
+        !m_busy
+        && hasResult
+        && (bool(m_checkedWrite) || bool(m_onWrite))
+    );
+    m_replaceButton->setEnabled(
+        !m_busy
+        && hasResult
+        && (bool(m_checkedWrite) || bool(m_onReplace))
+    );
     m_regenerateButton->setEnabled(!m_busy && bool(m_onRegenerate));
     m_retryModelButton->setEnabled(
         !m_busy && bool(m_onRetryModel) && !m_modelOptions.isEmpty()
@@ -499,27 +571,32 @@ void ScreenshotResultWindow::chooseModelAndRetry()
     }
     QStringList titles;
     int currentIndex = 0;
+    const QString displayedModelId = normalizeModelId(
+        m_currentModel,
+        m_currentModel
+    );
     for (int index = 0; index < m_modelOptions.size(); ++index) {
         titles.append(m_modelOptions.at(index).second);
-        if (m_modelOptions.at(index).first == m_currentModel) {
+        if (m_modelOptions.at(index).first == displayedModelId) {
             currentIndex = index;
         }
     }
-    bool accepted = false;
-    const QString title = QInputDialog::getItem(
-        this,
-        QStringLiteral("换模型重试"),
-        QStringLiteral("模型"),
-        titles,
-        currentIndex,
-        false,
-        &accepted
-    );
-    if (!accepted) {
+    QInputDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("换模型重试"));
+    dialog.setLabelText(QStringLiteral("模型"));
+    dialog.setComboBoxItems(titles);
+    dialog.setComboBoxEditable(false);
+    QComboBox *models = dialog.findChild<QComboBox *>();
+    if (!models) {
         return;
     }
-    const int selectedIndex = titles.indexOf(title);
-    if (selectedIndex >= 0) {
+    models->setCurrentIndex(currentIndex);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const int selectedIndex = models->currentIndex();
+    if (selectedIndex >= 0
+        && selectedIndex < m_modelOptions.size()) {
         m_onRetryModel(m_modelOptions.at(selectedIndex).first);
     }
 }

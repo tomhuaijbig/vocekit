@@ -3,6 +3,7 @@
 
 #include "../config/app_settings_data.h"
 #include "../domain/app_legacy_types.h"
+#include "function_flow_settings_access.h"
 
 #include <QRect>
 #include <QStringList>
@@ -16,8 +17,21 @@ struct HubWindowAccess
     std::function<AppSettingsData()> settingsSnapshotProvider;
     std::function<QVector<PromptLibraryItem>()> promptLibraryProvider;
     std::function<bool(const AppSettingsData &)> applyAndSave;
+    std::function<bool(
+        const AppSettingsData &,
+        OperationError *
+    )> applyNonFlowAndSave;
     std::function<bool(const QVector<PromptLibraryItem> &)> savePromptLibrary;
+    FunctionFlowSettingsAccess functionFlows;
+    std::function<void(const QStringList &)>
+        refreshFunctionFlowRuntime;
+    std::function<void(const QStringList &)>
+        refreshFunctionFlowHotkeys;
 };
+
+FunctionSettings functionSettingsFromCustomFunction(
+    const CustomFunctionDef &source
+);
 
 // 主窗口编辑中的配置副本。所有修改先落在类型化数据中，再统一提交给存储层。
 class HubSettingsState
@@ -27,8 +41,16 @@ public:
 
     explicit operator bool() const;
     void load();
-    bool save() const;
-    bool replaceAndSave(const AppSettingsData &data);
+    bool save(OperationError *error = nullptr) const;
+    bool replaceAndSave(
+        const AppSettingsData &data,
+        OperationError *error = nullptr
+    );
+    void replaceFunctionFlowState(
+        const QString &functionId,
+        const FunctionFlowState &state
+    );
+    bool reloadFunctionFlowState(const QString &functionId);
     // 调用方需要独立快照，不能持有可随界面编辑变化的内部引用。
     // cppcheck-suppress returnByReference
     AppSettingsData toData() const;
@@ -58,6 +80,8 @@ public:
     void setModelFor(const QString &id, const QString &model);
     QString outputModeFor(const QString &id) const;
     void setOutputModeFor(const QString &id, const QString &mode);
+    QStringList outputOrderFor(const QString &id) const;
+    void setOutputOrderFor(const QString &id, const QStringList &order);
     QString resultTemplateFor(const QString &id) const;
     void setResultTemplateFor(const QString &id, const QString &value);
     QStringList resultActionsFor(const QString &id) const;
@@ -71,6 +95,8 @@ public:
     void setUseVoiceFor(const QString &id, bool enabled);
     bool useScreenshotFor(const QString &id) const;
     void setUseScreenshotFor(const QString &id, bool enabled);
+    QStringList inputOrderFor(const QString &id) const;
+    void setInputOrderFor(const QString &id, const QStringList &order);
     QString screenshotTriggerModeFor(const QString &id) const;
     void setScreenshotTriggerModeFor(const QString &id, const QString &mode);
     QString screenshotShortcutFor(const QString &id) const;

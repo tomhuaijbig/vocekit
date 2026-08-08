@@ -16,6 +16,11 @@ HubRefreshCoordinatorBundleActions createHubRefreshCoordinatorActions(
     actions.settings.refreshOcr = ui.refreshOcr;
     actions.settings.historyCacheValid = data.historyCacheValid;
     actions.settings.refreshRecentHistory = ui.refreshRecentHistory;
+    actions.reloadFunctionFlows = data.reloadFunctionFlows;
+    actions.refreshActiveFunction = ui.refreshActiveFunction;
+    actions.refreshActiveCanvas = ui.refreshActiveCanvas;
+    actions.refreshRuntime = ui.refreshRuntime;
+    actions.refreshHotkeys = ui.refreshHotkeys;
 
     if (data.settingsSnapshot && ui.updateLogPagination) {
         const std::function<AppSettingsData()> settingsSnapshot =

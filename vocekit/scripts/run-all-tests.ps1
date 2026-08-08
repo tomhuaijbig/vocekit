@@ -19,21 +19,54 @@ foreach ($tool in @($qmake, $make)) {
     }
 }
 
-$env:PATH = "$QtBin;$MingwBin;$OpenSslBin;$env:PATH"
-$env:QT_QPA_PLATFORM = "offscreen"
-
-# Windows -Filter *.pro can also match generated Makefiles.
-$projects = Get-ChildItem -LiteralPath $testsRoot -Recurse -File |
-    Where-Object { $_.Extension -eq ".pro" } |
-    Sort-Object FullName
-
-$qtPrograms = 0
-$standalonePrograms = 0
-$passed = 0
-$failed = 0
-$skipped = 0
-$failures = New-Object System.Collections.Generic.List[string]
+$hadPath = Test-Path Env:PATH
+$hadQpaPlatform = Test-Path Env:QT_QPA_PLATFORM
+$hadQpaFontDir = Test-Path Env:QT_QPA_FONTDIR
+$originalPath = $env:PATH
+$originalQpaPlatform = $env:QT_QPA_PLATFORM
+$originalQpaFontDir = $env:QT_QPA_FONTDIR
+$temporaryFontDir = $null
 $generatedFiles = New-Object System.Collections.Generic.List[string]
+
+try {
+    $env:PATH = "$QtBin;$MingwBin;$OpenSslBin;$env:PATH"
+    $env:QT_QPA_PLATFORM = "offscreen"
+    if ([string]::IsNullOrWhiteSpace($env:QT_QPA_FONTDIR)) {
+        $windowsFonts = Join-Path $env:WINDIR "Fonts"
+        $fontNames = @(
+            "msyh.ttc",
+            "msyhbd.ttc",
+            "simhei.ttf",
+            "simsun.ttc",
+            "Deng.ttf",
+            "arial.ttf"
+        )
+        $testFont = $fontNames |
+            ForEach-Object { Join-Path $windowsFonts $_ } |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+            Select-Object -First 1
+        if (-not $testFont) {
+            throw "No stable Windows test font was found in $windowsFonts"
+        }
+        $temporaryFontDir = Join-Path (
+            [IO.Path]::GetTempPath()
+        ) ("vocekit-qt-fonts-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $temporaryFontDir | Out-Null
+        Copy-Item -LiteralPath $testFont -Destination $temporaryFontDir
+        $env:QT_QPA_FONTDIR = $temporaryFontDir
+    }
+
+    # Windows -Filter *.pro can also match generated Makefiles.
+    $projects = Get-ChildItem -LiteralPath $testsRoot -Recurse -File |
+        Where-Object { $_.Extension -eq ".pro" } |
+        Sort-Object FullName
+
+    $qtPrograms = 0
+    $standalonePrograms = 0
+    $passed = 0
+    $failed = 0
+    $skipped = 0
+    $failures = New-Object System.Collections.Generic.List[string]
 
 function Invoke-CapturedCommand {
     param(
@@ -48,7 +81,6 @@ function Invoke-CapturedCommand {
     }
 }
 
-try {
     for ($index = 0; $index -lt $projects.Count; ++$index) {
         $project = $projects[$index]
         $targetMatch = Select-String `
@@ -152,19 +184,46 @@ try {
         }
     }
 } finally {
-    $generatedFiles |
-        Sort-Object -Unique |
-        Where-Object {
-            $_.StartsWith(
-                $testsRoot + [IO.Path]::DirectorySeparatorChar,
-                [StringComparison]::OrdinalIgnoreCase
-            )
-        } |
-        ForEach-Object {
-            if (Test-Path -LiteralPath $_) {
-                Remove-Item -LiteralPath $_ -Force
+    try {
+        try {
+            $generatedFiles |
+                Sort-Object -Unique |
+                Where-Object {
+                    $_.StartsWith(
+                        $testsRoot + [IO.Path]::DirectorySeparatorChar,
+                        [StringComparison]::OrdinalIgnoreCase
+                    )
+                } |
+                ForEach-Object {
+                    if (Test-Path -LiteralPath $_) {
+                        Remove-Item -LiteralPath $_ -Force
+                    }
+                }
+        } finally {
+            if ($temporaryFontDir -and
+                (Test-Path -LiteralPath $temporaryFontDir -PathType Container)) {
+                Get-ChildItem -LiteralPath $temporaryFontDir -File |
+                    Remove-Item -Force
+                Remove-Item -LiteralPath $temporaryFontDir -Force
             }
         }
+    } finally {
+        if ($hadPath) {
+            $env:PATH = $originalPath
+        } else {
+            Remove-Item Env:PATH -ErrorAction SilentlyContinue
+        }
+        if ($hadQpaPlatform) {
+            $env:QT_QPA_PLATFORM = $originalQpaPlatform
+        } else {
+            Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+        }
+        if ($hadQpaFontDir) {
+            $env:QT_QPA_FONTDIR = $originalQpaFontDir
+        } else {
+            Remove-Item Env:QT_QPA_FONTDIR -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 [PSCustomObject]@{

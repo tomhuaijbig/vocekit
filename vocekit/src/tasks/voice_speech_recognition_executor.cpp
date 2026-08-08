@@ -21,6 +21,13 @@ QString missingHandlerError()
     );
 }
 
+QString cancelledError()
+{
+    return textUtf8(
+        "\xE8\xAF\xAD\xE9\x9F\xB3\xE8\xAF\x86\xE5\x88\xAB\xE5\xB7\xB2\xE5\x8F\x96\xE6\xB6\x88\xE3\x80\x82"
+    );
+}
+
 QString failureLogDetail(const QString &modeId, const QString &error)
 {
     return textUtf8("\xE9\x98\xB6\xE6\xAE\xB5=\xE8\xAF\xAD\xE9\x9F\xB3\xE8\xAF\x86\xE5\x88\xAB\xEF\xBC\x8C\xE5\x8A\x9F\xE8\x83\xBD=")
@@ -47,6 +54,15 @@ VoiceSpeechRecognitionResult VoiceSpeechRecognitionExecutor::run(
     VoiceSpeechRecognitionResult result;
     result.index = request.index;
 
+    if (request.cancellation.isCancellationRequested()) {
+        result.cancelled = true;
+        result.error = cancelledError();
+        result.logCategory = textUtf8("\xE5\x8A\x9F\xE8\x83\xBD");
+        result.logAction = textUtf8("\xE5\xA4\xB1\xE8\xB4\xA5");
+        result.logDetail = failureLogDetail(request.modeId, result.error);
+        return result;
+    }
+
     if (!handlers.recognizeProvider) {
         result.error = missingHandlerError();
         result.logCategory = textUtf8("\xE5\x8A\x9F\xE8\x83\xBD");
@@ -63,6 +79,7 @@ VoiceSpeechRecognitionResult VoiceSpeechRecognitionExecutor::run(
     speechRequest.provider = request.provider;
     speechRequest.useSystemProxy = request.useSystemProxy;
     speechRequest.networkPolicy = request.networkPolicy;
+    speechRequest.cancellation = request.cancellation;
 
     const SpeechRecognitionTaskResult speechResult =
         handlers.recognizeProvider(speechRequest);
@@ -71,8 +88,18 @@ VoiceSpeechRecognitionResult VoiceSpeechRecognitionExecutor::run(
     result.error = speechResult.error;
     result.elapsedMs = speechResult.elapsedMs;
 
+    if (request.cancellation.isCancellationRequested()) {
+        result.cancelled = true;
+        result.error = cancelledError();
+        result.logCategory = textUtf8("\xE5\x8A\x9F\xE8\x83\xBD");
+        result.logAction = textUtf8("\xE5\xA4\xB1\xE8\xB4\xA5");
+        result.logDetail = failureLogDetail(request.modeId, result.error);
+        return result;
+    }
+
     if (result.text.trimmed().isEmpty()) {
         if (result.error.trimmed().isEmpty()) {
+            result.emptyRecognition = true;
             result.error = defaultNoSpeechError();
         }
         result.logCategory = textUtf8("\xE5\x8A\x9F\xE8\x83\xBD");

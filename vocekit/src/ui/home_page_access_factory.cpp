@@ -10,7 +10,7 @@ HomePageAccess createHomePageAccess(
 {
     HomePageAccess access;
     access.functionModes = createFunctionModeGridAccess(dependencies.settings);
-    access.editFunction = dependencies.editFunction;
+    access.openFunction = dependencies.openFunction;
     access.settingsChanged = dependencies.settingsChanged;
     access.showWarning = dependencies.showWarning;
 

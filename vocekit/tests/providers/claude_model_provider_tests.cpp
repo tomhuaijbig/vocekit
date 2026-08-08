@@ -100,7 +100,7 @@ private slots:
         CancellationSource cancellation;
         ModelRequest request;
         request.executionId = cancellation.executionId();
-        request.modelId = QStringLiteral("claude:claude-opus-4-8");
+        request.modelId = QString();
         request.systemPrompt = QStringLiteral("system");
         request.userPrompt = QStringLiteral("user");
         request.stream = false;
@@ -114,7 +114,11 @@ private slots:
         );
 
         QCOMPARE(result.text, QStringLiteral("first\nsecond"));
-        QVERIFY(result.error.isEmpty());
+        QVERIFY2(
+            result.error.isEmpty(),
+            qPrintable(result.error.code + QStringLiteral(": ")
+                       + result.error.message)
+        );
         QCOMPARE(result.executionId, request.executionId);
         QCOMPARE(result.durationMs, qint64(17));
         QCOMPARE(transport->postJsonCount, 1);
@@ -143,7 +147,7 @@ private slots:
             QJsonDocument::fromJson(transport->lastBody).object();
         QCOMPARE(
             body.value(QStringLiteral("model")).toString(),
-            QStringLiteral("claude-opus-4-8")
+            QStringLiteral("claude-sonnet-5")
         );
         QCOMPARE(
             body.value(QStringLiteral("system")).toString(),
@@ -159,6 +163,110 @@ private slots:
             QStringLiteral("user")
         );
         QVERIFY(!body.value(QStringLiteral("stream")).toBool());
+    }
+
+    void officialProviderUsesConfiguredBaseUrl_data()
+    {
+        QTest::addColumn<QString>("baseUrl");
+        QTest::addColumn<QString>("expectedUrl");
+
+        QTest::newRow("root")
+            << QStringLiteral("https://gateway.example.test")
+            << QStringLiteral(
+                "https://gateway.example.test/v1/messages"
+            );
+        QTest::newRow("v1")
+            << QStringLiteral("https://gateway.example.test/v1")
+            << QStringLiteral(
+                "https://gateway.example.test/v1/messages"
+            );
+        QTest::newRow("full-endpoint")
+            << QStringLiteral(
+                "https://gateway.example.test/proxy/v1/messages"
+            )
+            << QStringLiteral(
+                "https://gateway.example.test/proxy/v1/messages"
+            );
+        QTest::newRow("service-prefix")
+            << QStringLiteral("https://gateway.example.test/anthropic")
+            << QStringLiteral(
+                "https://gateway.example.test/anthropic/v1/messages"
+            );
+    }
+
+    void officialProviderUsesConfiguredBaseUrl()
+    {
+        QFETCH(QString, baseUrl);
+        QFETCH(QString, expectedUrl);
+
+        const QSharedPointer<FakeClaudeTransport> transport =
+            fakeTransport();
+        transport->jsonResponse.statusCode = 200;
+        transport->jsonResponse.body = QByteArrayLiteral(
+            "{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}]}"
+        );
+        SecretConfig secrets = claudeSecrets();
+        secrets.anthropicBaseUrl = baseUrl;
+        ClaudeModelProvider provider(
+            transport,
+            [secrets]() { return secrets; }
+        );
+        CancellationSource cancellation;
+        ModelRequest request;
+        request.stream = false;
+
+        const ModelResult result = provider.complete(
+            request,
+            ModelDeltaCallback(),
+            cancellation.token()
+        );
+
+        QVERIFY2(
+            result.error.isEmpty(),
+            qPrintable(result.error.code + QStringLiteral(": ")
+                       + result.error.message)
+        );
+        QCOMPARE(transport->postJsonCount, 1);
+        QCOMPARE(transport->postStreamCount, 0);
+        QCOMPARE(transport->lastRequest.url(), QUrl(expectedUrl));
+        const QJsonObject body =
+            QJsonDocument::fromJson(transport->lastBody).object();
+        QCOMPARE(
+            body.value(QStringLiteral("model")).toString(),
+            QStringLiteral("claude-sonnet-5")
+        );
+    }
+
+    void invalidOfficialBaseUrlDoesNotReachNetwork()
+    {
+        const QSharedPointer<FakeClaudeTransport> transport =
+            fakeTransport();
+        SecretConfig secrets = claudeSecrets();
+        secrets.anthropicBaseUrl = QStringLiteral("not a host");
+        ClaudeModelProvider provider(
+            transport,
+            [secrets]() { return secrets; }
+        );
+        CancellationSource cancellation;
+        ModelRequest request;
+
+        const ModelResult result = provider.complete(
+            request,
+            ModelDeltaCallback(),
+            cancellation.token()
+        );
+
+        QCOMPARE(
+            result.error.code,
+            QStringLiteral("provider.configuration")
+        );
+        QVERIFY(
+            result.error.message.contains(
+                QStringLiteral("Anthropic Base URL")
+            )
+        );
+        QCOMPARE(transport->postJsonCount, 0);
+        QCOMPARE(transport->postStreamCount, 0);
     }
 
     void parsesSplitStreamingEvents()
@@ -323,7 +431,7 @@ private slots:
             QJsonDocument::fromJson(transport->lastBody).object();
         QCOMPARE(
             body.value(QStringLiteral("model")).toString(),
-            QStringLiteral("claude-opus-4-8")
+            QStringLiteral("claude-sonnet-5")
         );
     }
 

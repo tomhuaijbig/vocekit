@@ -147,6 +147,125 @@ private slots:
         QVERIFY(provider->lastCancellationWasRequested);
         QVERIFY(result.cancelled);
     }
+
+    void normalizesLegacyModelBeforeProviderRequest()
+    {
+        QSharedPointer<FakeTaskModelProvider> provider(
+            new FakeTaskModelProvider
+        );
+        ModelRequestTaskRequest request;
+        request.modelId = QStringLiteral("gpt-5.4");
+        request.systemPrompt = QStringLiteral("system");
+        request.userPrompt = QStringLiteral("user");
+
+        const ModelRequestTaskResult result =
+            runModelRequestTask(request, provider);
+
+        QCOMPARE(result.text, QStringLiteral("completed"));
+        QCOMPARE(
+            provider->lastRequest.modelId,
+            QStringLiteral("openai:gpt-5.6-terra")
+        );
+        QCOMPARE(request.modelId, QStringLiteral("gpt-5.4"));
+    }
+
+    void appliesDefaultFallbackBeforeProviderRequest_data()
+    {
+        QTest::addColumn<QString>("configuredModelId");
+
+        QTest::newRow("empty") << QString();
+        QTest::newRow("unknown")
+            << QStringLiteral("unknown-model");
+    }
+
+    void appliesDefaultFallbackBeforeProviderRequest()
+    {
+        QFETCH(QString, configuredModelId);
+        QSharedPointer<FakeTaskModelProvider> provider(
+            new FakeTaskModelProvider
+        );
+        ModelRequestTaskRequest request;
+        request.modelId = configuredModelId;
+
+        runModelRequestTask(request, provider);
+
+        QCOMPARE(
+            provider->lastRequest.modelId,
+            QStringLiteral("deepseek-v4-flash")
+        );
+    }
+
+    void providerTaskNormalizesBeforeSelectingProvider_data()
+    {
+        QTest::addColumn<QString>("legacyModelId");
+        QTest::addColumn<QString>("expectedProviderKey");
+        QTest::addColumn<QString>("expectedCanonicalModelId");
+
+        QTest::newRow("unprefixed legacy GPT")
+            << QStringLiteral("gpt-5.4")
+            << QStringLiteral("openai")
+            << QStringLiteral("openai:gpt-5.6-terra");
+        QTest::newRow("unprefixed legacy Claude")
+            << QStringLiteral("claude-sonnet-4-6")
+            << QStringLiteral("claude")
+            << QStringLiteral("claude:claude-sonnet-5");
+    }
+
+    void providerTaskNormalizesBeforeSelectingProvider()
+    {
+        QFETCH(QString, legacyModelId);
+        QFETCH(QString, expectedProviderKey);
+        QFETCH(QString, expectedCanonicalModelId);
+        QString capturedProviderKey;
+        bool capturedUseSystemProxy = true;
+        QSharedPointer<FakeTaskModelProvider> provider(
+            new FakeTaskModelProvider
+        );
+        ModelProviderRequestTaskDependencies dependencies;
+        dependencies.createProvider = [&](
+            const QString &providerKey,
+            bool useSystemProxy) {
+            capturedProviderKey = providerKey;
+            capturedUseSystemProxy = useSystemProxy;
+            return provider;
+        };
+        ModelRequestTaskRequest request;
+        request.modelId = legacyModelId;
+        request.systemPrompt = QStringLiteral("system");
+        request.userPrompt = QStringLiteral("user");
+
+        const ModelRequestTaskResult result =
+            runModelProviderRequestTask(request, dependencies);
+
+        QCOMPARE(result.text, QStringLiteral("completed"));
+        QCOMPARE(capturedProviderKey, expectedProviderKey);
+        QVERIFY(!capturedUseSystemProxy);
+        QCOMPARE(
+            provider->lastRequest.modelId,
+            expectedCanonicalModelId
+        );
+        QCOMPARE(request.modelId, legacyModelId);
+    }
+
+    void availabilityCheckNormalizesLegacyProviderBeforeLookup()
+    {
+        QString capturedModelId;
+        ModelProviderRequestTaskDependencies dependencies;
+        dependencies.isProviderConfigured = [&](
+            const QString &modelId) {
+            capturedModelId = modelId;
+            return true;
+        };
+
+        QVERIFY(isModelProviderAvailableForTask(
+            QStringLiteral("gpt-5.4"),
+            dependencies
+        ));
+        QCOMPARE(
+            capturedModelId,
+            QStringLiteral("openai:gpt-5.6-terra")
+        );
+    }
 };
 
 QTEST_MAIN(ModelRequestTaskTests)

@@ -21,7 +21,8 @@ public:
     BaiduSpeechProvider(
         const QSharedPointer<IProviderNetworkTransport> &transport,
         const SecretLoader &secretLoader,
-        bool useSystemProxy = false
+        bool useSystemProxy = false,
+        bool shareAccessTokenCache = false
     );
 
     QString id() const override;
@@ -52,6 +53,7 @@ private:
     SecretLoader m_secretLoader;
     SecretConfig m_secrets;
     bool m_useSystemProxy = false;
+    bool m_shareAccessTokenCache = false;
     mutable QString m_accessToken;
     mutable QDateTime m_tokenExpiry;
 };

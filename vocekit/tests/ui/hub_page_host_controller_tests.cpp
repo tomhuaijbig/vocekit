@@ -58,9 +58,13 @@ void HubPageHostControllerTests::createsAndRetainsOnePageRouter()
     QVERIFY(router);
     QCOMPARE(router->parentWidget(), &parent);
     QCOMPARE(router->count(), 10);
-    QCOMPARE(factoryCalls, 10);
+    QCOMPARE(factoryCalls, 1);
+    QVERIFY(router->selectPage(QStringLiteral("history")));
+    QCOMPARE(factoryCalls, 2);
+    QVERIFY(router->selectPage(QStringLiteral("history")));
+    QCOMPARE(factoryCalls, 2);
     QCOMPARE(controller.router(), router);
-    QCOMPARE(factoryCalls, 10);
+    QCOMPARE(factoryCalls, 2);
 }
 
 void HubPageHostControllerTests::ownsActivationRefreshAssembly()
@@ -109,10 +113,13 @@ void HubPageHostControllerTests::tracksRouterLifetimeWithoutRecreatingPages()
         );
         router = controller.router();
         QVERIFY(router);
+        QVERIFY(router->selectPage(QStringLiteral("faq")));
+        QVERIFY(router->selectPage(QStringLiteral("faq")));
+        QCOMPARE(factoryCalls, 2);
     }
 
     QVERIFY(router.isNull());
-    QCOMPARE(factoryCalls, 10);
+    QCOMPARE(factoryCalls, 2);
 }
 
 void HubPageHostControllerTests::hubWindowDelegatesPageHosting()

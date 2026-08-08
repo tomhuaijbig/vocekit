@@ -82,6 +82,9 @@ private:
     static SecretConfig customSecrets(bool includeApiKey = true)
     {
         SecretConfig secrets;
+        secrets.openaiBaseUrl = QStringLiteral(
+            "https://official-proxy.example.test/openai"
+        );
         CustomModelProfile profile;
         profile.id = QStringLiteral("office");
         profile.name = QStringLiteral("办公模型");
@@ -111,7 +114,7 @@ private slots:
         CancellationSource cancellation;
         ModelRequest request;
         request.executionId = cancellation.executionId();
-        request.modelId = QStringLiteral("openai:gpt-5.5");
+        request.modelId = QString();
         request.systemPrompt = QStringLiteral("system");
         request.userPrompt = QStringLiteral("user");
         request.stream = false;
@@ -125,7 +128,11 @@ private slots:
         );
 
         QCOMPARE(result.text, QStringLiteral("完成"));
-        QVERIFY(result.error.isEmpty());
+        QVERIFY2(
+            result.error.isEmpty(),
+            qPrintable(result.error.code + QStringLiteral(": ")
+                       + result.error.message)
+        );
         QCOMPARE(result.executionId, request.executionId);
         QCOMPARE(transport->postJsonCount, 1);
         QCOMPARE(transport->postStreamCount, 0);
@@ -149,9 +156,115 @@ private slots:
             QJsonDocument::fromJson(transport->lastBody).object();
         QCOMPARE(
             body.value(QStringLiteral("model")).toString(),
-            QStringLiteral("gpt-5.5")
+            QStringLiteral("gpt-5.6-terra")
         );
         QVERIFY(!body.value(QStringLiteral("stream")).toBool());
+    }
+
+    void officialProviderUsesConfiguredBaseUrl_data()
+    {
+        QTest::addColumn<QString>("baseUrl");
+        QTest::addColumn<QString>("expectedUrl");
+
+        QTest::newRow("root")
+            << QStringLiteral("https://gateway.example.test")
+            << QStringLiteral(
+                "https://gateway.example.test/v1/chat/completions"
+            );
+        QTest::newRow("v1")
+            << QStringLiteral("https://gateway.example.test/v1")
+            << QStringLiteral(
+                "https://gateway.example.test/v1/chat/completions"
+            );
+        QTest::newRow("full-endpoint")
+            << QStringLiteral(
+                "https://gateway.example.test/proxy/v1/chat/completions"
+            )
+            << QStringLiteral(
+                "https://gateway.example.test/proxy/v1/chat/completions"
+            );
+        QTest::newRow("service-prefix")
+            << QStringLiteral("https://gateway.example.test/openai")
+            << QStringLiteral(
+                "https://gateway.example.test/openai/v1/chat/completions"
+            );
+    }
+
+    void officialProviderUsesConfiguredBaseUrl()
+    {
+        QFETCH(QString, baseUrl);
+        QFETCH(QString, expectedUrl);
+
+        const QSharedPointer<FakeOpenAiTransport> transport =
+            fakeTransport();
+        transport->jsonResponse.statusCode = 200;
+        transport->jsonResponse.body = QByteArrayLiteral(
+            "{\"choices\":[{\"message\":{\"content\":\"OK\"}}]}"
+        );
+        SecretConfig secrets = openAiSecrets();
+        secrets.openaiBaseUrl = baseUrl;
+        OpenAiCompatibleModelProvider provider(
+            QStringLiteral("openai"),
+            transport,
+            [secrets]() { return secrets; }
+        );
+        CancellationSource cancellation;
+        ModelRequest request;
+        request.stream = false;
+
+        const ModelResult result = provider.complete(
+            request,
+            ModelDeltaCallback(),
+            cancellation.token()
+        );
+
+        QVERIFY2(
+            result.error.isEmpty(),
+            qPrintable(result.error.code + QStringLiteral(": ")
+                       + result.error.message)
+        );
+        QCOMPARE(transport->postJsonCount, 1);
+        QCOMPARE(transport->postStreamCount, 0);
+        QCOMPARE(transport->lastRequest.url(), QUrl(expectedUrl));
+        const QJsonObject body =
+            QJsonDocument::fromJson(transport->lastBody).object();
+        QCOMPARE(
+            body.value(QStringLiteral("model")).toString(),
+            QStringLiteral("gpt-5.6-terra")
+        );
+    }
+
+    void invalidOfficialBaseUrlDoesNotReachNetwork()
+    {
+        const QSharedPointer<FakeOpenAiTransport> transport =
+            fakeTransport();
+        SecretConfig secrets = openAiSecrets();
+        secrets.openaiBaseUrl = QStringLiteral("not a host");
+        OpenAiCompatibleModelProvider provider(
+            QStringLiteral("openai"),
+            transport,
+            [secrets]() { return secrets; }
+        );
+        CancellationSource cancellation;
+        ModelRequest request;
+
+        const ModelResult result = provider.complete(
+            request,
+            ModelDeltaCallback(),
+            cancellation.token()
+        );
+
+        QCOMPARE(
+            result.error.code,
+            QStringLiteral("provider.configuration")
+        );
+        QVERIFY(
+            result.error.message.contains(
+                QStringLiteral("OpenAI Base URL")
+            )
+        );
+        QCOMPARE(transport->postJsonCount, 0);
+        QCOMPARE(transport->postStreamCount, 0);
     }
 
     void customProviderUsesProfileEndpointAndModel()
@@ -301,7 +414,7 @@ private slots:
             QJsonDocument::fromJson(transport->lastBody).object();
         QCOMPARE(
             body.value(QStringLiteral("model")).toString(),
-            QStringLiteral("gpt-5.5")
+            QStringLiteral("gpt-5.6-terra")
         );
     }
 

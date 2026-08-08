@@ -10,6 +10,7 @@
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QPushButton;
 class QVBoxLayout;
 
 class FaqPanel : public QWidget
@@ -28,15 +29,23 @@ private:
     QString faqDiagnosticKeyword(const QString &category, const QString &title) const;
     void openDiagnosticForFaq(const QString &category, const QString &title);
     void applyFaqSearch();
+    void ensureFaqCardMaterialized(QWidget *card);
     void addLatestFeatureFaqItems(QVBoxLayout *items);
     void addRecentWorkflowFaqItems(QVBoxLayout *items);
-    QWidget *faqCard(const QString &title, const QString &cause, const QStringList &solutions);
+    QWidget *faqCard(
+        const QString &title,
+        const QString &cause,
+        const QStringList &solutions,
+        const QString &explicitFaqId = QString()
+    );
 
     std::function<void(const QString &)> m_openDiagnostic;
     QLineEdit *m_faqSearchEdit = nullptr;
     QComboBox *m_faqCategoryBox = nullptr;
     QVBoxLayout *m_faqItemsLayout = nullptr;
     QLabel *m_faqEmptyLabel = nullptr;
+    QPushButton *m_faqLoadMoreButton = nullptr;
+    int m_faqRenderLimit = 8;
 };
 
 #endif // VOCEKIT_FAQ_PANEL_H

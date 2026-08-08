@@ -1,6 +1,8 @@
 #ifndef VOCEKIT_SPEECH_RECOGNITION_TASK_H
 #define VOCEKIT_SPEECH_RECOGNITION_TASK_H
 
+#include "cancellation_token.h"
+
 #include <QByteArray>
 #include <QString>
 
@@ -35,6 +37,7 @@ struct SpeechRecognitionProviderTaskRequest
     QString provider;
     QString networkPolicy = QStringLiteral("inherit");
     bool useSystemProxy = false;
+    CancellationToken cancellation;
 };
 
 // 后台语音识别任务：集中处理接口调用、错误和耗时统计。

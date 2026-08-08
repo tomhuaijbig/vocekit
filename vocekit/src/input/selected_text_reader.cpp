@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QList>
+#include <QMap>
 #include <QMimeData>
 #include <QThread>
 #include <QUrl>
@@ -178,7 +179,8 @@ static QString selectedTextFromAutomationElement(IUIAutomationElement *element)
     return result;
 }
 
-static QString selectedTextViaUiAutomation()
+static QString selectedTextViaUiAutomation(
+    SelectedTextNativeWindowHandle targetWindow = nullptr)
 {
     const HRESULT initResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     const bool shouldUninitialize = SUCCEEDED(initResult);
@@ -203,12 +205,17 @@ static QString selectedTextViaUiAutomation()
 
     QString result;
     IUIAutomationElement *focused = nullptr;
-    if (SUCCEEDED(automation->GetFocusedElement(&focused)) && focused) {
+    if ((!targetWindow
+         || GetForegroundWindow()
+            == static_cast<HWND>(targetWindow))
+        && SUCCEEDED(
+            automation->GetFocusedElement(&focused))
+        && focused) {
         result = selectedTextFromAutomationElement(focused);
     }
     releaseComObject(focused);
 
-    if (result.trimmed().isEmpty()) {
+    if (!targetWindow && result.trimmed().isEmpty()) {
         POINT cursorPoint;
         if (GetCursorPos(&cursorPoint)) {
             IUIAutomationElement *element = nullptr;
@@ -245,6 +252,7 @@ static QString selectedTextViaUiAutomation()
 
 struct ClipboardSnapshot
 {
+    QMap<QString, QByteArray> formats;
     QString text;
     QString html;
     QList<QUrl> urls;
@@ -260,6 +268,9 @@ static ClipboardSnapshot captureClipboardSnapshot(const QMimeData *source)
     ClipboardSnapshot snapshot;
     if (!source) {
         return snapshot;
+    }
+    for (const QString &format : source->formats()) {
+        snapshot.formats.insert(format, source->data(format));
     }
     snapshot.hasText = source->hasText();
     if (snapshot.hasText) {
@@ -283,6 +294,11 @@ static ClipboardSnapshot captureClipboardSnapshot(const QMimeData *source)
 static QMimeData *mimeDataFromClipboardSnapshot(const ClipboardSnapshot &snapshot)
 {
     auto *data = new QMimeData;
+    for (auto it = snapshot.formats.constBegin();
+         it != snapshot.formats.constEnd();
+         ++it) {
+        data->setData(it.key(), it.value());
+    }
     if (snapshot.hasText) {
         data->setText(snapshot.text);
     }
@@ -300,10 +316,18 @@ static QMimeData *mimeDataFromClipboardSnapshot(const ClipboardSnapshot &snapsho
 
 static QString selectedTextViaClipboardCopy(SelectedTextNativeWindowHandle window)
 {
-    if (window) {
-        SetForegroundWindow(static_cast<HWND>(window));
+    if (!window || !IsWindow(static_cast<HWND>(window))) {
+        return QString();
+    }
+    if (GetForegroundWindow() != static_cast<HWND>(window)) {
+        if (!SetForegroundWindow(static_cast<HWND>(window))) {
+            return QString();
+        }
         QThread::msleep(90);
         QApplication::processEvents();
+    }
+    if (GetForegroundWindow() != static_cast<HWND>(window)) {
+        return QString();
     }
 
     QClipboard *clipboard = QApplication::clipboard();
@@ -339,14 +363,62 @@ QString SelectedTextReader::read(
 )
 {
 #ifdef Q_OS_WIN
-    const QString normalResult = selectedTextViaUiAutomation();
+    if (window) {
+        const HWND target = static_cast<HWND>(window);
+        if (!IsWindow(target)) {
+            return QString();
+        }
+        if (GetForegroundWindow() != target) {
+            if (!SetForegroundWindow(target)) {
+                return QString();
+            }
+            QThread::msleep(90);
+            QApplication::processEvents();
+        }
+        if (GetForegroundWindow() != target) {
+            return QString();
+        }
+    }
+    const QString normalResult =
+        selectedTextViaUiAutomation(window);
     if (!normalResult.trimmed().isEmpty() || !strongSelectionEnabled) {
         return normalResult;
+    }
+    if (!window) {
+        return QString();
     }
     return selectedTextViaClipboardCopy(window);
 #else
     Q_UNUSED(strongSelectionEnabled);
     Q_UNUSED(window);
     return QString();
+#endif
+}
+
+bool SelectedTextReader::hasSelectionInWindow(
+    SelectedTextNativeWindowHandle window)
+{
+    if (!window) {
+        return false;
+    }
+#ifdef Q_OS_WIN
+    const HWND target = static_cast<HWND>(window);
+    if (!IsWindow(target)) {
+        return false;
+    }
+    if (GetForegroundWindow() != target) {
+        if (!SetForegroundWindow(target)) {
+            return false;
+        }
+        QThread::msleep(90);
+        QApplication::processEvents();
+    }
+    if (GetForegroundWindow() != target) {
+        return false;
+    }
+    return !selectedTextViaUiAutomation(window).trimmed().isEmpty();
+#else
+    Q_UNUSED(window);
+    return false;
 #endif
 }

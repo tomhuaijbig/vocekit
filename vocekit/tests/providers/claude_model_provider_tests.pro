@@ -8,6 +8,7 @@ INCLUDEPATH += ../..
 
 SOURCES += \
     claude_model_provider_tests.cpp \
+    ../../src/api/api_client_utils.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
     ../../src/file_utils.cpp \
@@ -19,6 +20,7 @@ SOURCES += \
     ../../src/tasks/cancellation_token.cpp
 
 HEADERS += \
+    ../../src/api/api_client_utils.h \
     ../../src/config/secret_config.h \
     ../../src/config/secret_store.h \
     ../../src/domain/execution_types.h \

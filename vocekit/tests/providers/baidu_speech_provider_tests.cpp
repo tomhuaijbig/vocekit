@@ -245,6 +245,52 @@ private slots:
         QCOMPARE(transport->postJsonCount, 2);
     }
 
+    void reusesSharedAccessTokenAcrossProviderInstances()
+    {
+        const QSharedPointer<FakeBaiduSpeechTransport> firstTransport =
+            fakeTransport();
+        firstTransport->getResponses
+            << tokenResponse(QByteArrayLiteral("shared-token"));
+        firstTransport->postResponses
+            << recognitionResponse(QStringLiteral("first"));
+        BaiduSpeechProvider firstProvider(
+            firstTransport,
+            []() { return baiduSecrets(); },
+            false,
+            true
+        );
+
+        CancellationSource firstCancellation;
+        QCOMPARE(
+            firstProvider.recognize(
+                recognitionRequest(firstCancellation),
+                firstCancellation.token()
+            ).text,
+            QStringLiteral("first")
+        );
+
+        const QSharedPointer<FakeBaiduSpeechTransport> secondTransport =
+            fakeTransport();
+        secondTransport->postResponses
+            << recognitionResponse(QStringLiteral("second"));
+        BaiduSpeechProvider secondProvider(
+            secondTransport,
+            []() { return baiduSecrets(); },
+            false,
+            true
+        );
+        CancellationSource secondCancellation;
+        const SpeechRecognitionResult second = secondProvider.recognize(
+            recognitionRequest(secondCancellation),
+            secondCancellation.token()
+        );
+
+        QCOMPARE(second.text, QStringLiteral("second"));
+        QCOMPARE(secondTransport->getCount, 0);
+        QCOMPARE(secondTransport->postJsonCount, 1);
+        QCOMPARE(second.durationMs, qint64(13));
+    }
+
     void refreshConfigurationClearsCachedAccessToken()
     {
         const QSharedPointer<FakeBaiduSpeechTransport> transport =

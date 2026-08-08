@@ -7,11 +7,21 @@ struct PageSpec
     const char *id;
     HubPageFactory factory;
     HubPageActivation activated;
+    bool eager;
 };
 
 void registerPage(HubPageRouter *router, const PageSpec &spec)
 {
     if (!router || !spec.id || !spec.factory) {
+        return;
+    }
+
+    if (!spec.eager) {
+        router->registerDeferredPage(
+            QString::fromLatin1(spec.id),
+            spec.factory,
+            spec.activated
+        );
         return;
     }
 
@@ -37,16 +47,16 @@ HubPageRouter *HubPageComposition::create(
 {
     auto *router = new HubPageRouter(parent);
     const QVector<PageSpec> pages = {
-        {"home", access.homePage, access.homeActivated},
-        {"function", access.functionPage, access.functionActivated},
-        {"history", access.historyPage, access.historyActivated},
-        {"vocabulary", access.vocabularyPage, access.vocabularyActivated},
-        {"ocr", access.ocrPage, access.ocrActivated},
-        {"prompts", access.promptsPage, access.promptsActivated},
-        {"diagnostics", access.diagnosticsPage, access.diagnosticsActivated},
-        {"logs", access.logsPage, access.logsActivated},
-        {"settings", access.settingsPage, access.settingsActivated},
-        {"faq", access.faqPage, access.faqActivated}
+        {"home", access.homePage, access.homeActivated, true},
+        {"function", access.functionPage, access.functionActivated, false},
+        {"history", access.historyPage, access.historyActivated, false},
+        {"vocabulary", access.vocabularyPage, access.vocabularyActivated, false},
+        {"ocr", access.ocrPage, access.ocrActivated, false},
+        {"prompts", access.promptsPage, access.promptsActivated, false},
+        {"diagnostics", access.diagnosticsPage, access.diagnosticsActivated, false},
+        {"logs", access.logsPage, access.logsActivated, false},
+        {"settings", access.settingsPage, access.settingsActivated, false},
+        {"faq", access.faqPage, access.faqActivated, false}
     };
     for (const PageSpec &page : pages) {
         registerPage(router, page);

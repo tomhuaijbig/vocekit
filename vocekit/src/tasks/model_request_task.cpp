@@ -1,5 +1,7 @@
 #include "model_request_task.h"
 
+#include "../config/app_settings_defaults.h"
+#include "../providers/model_catalog.h"
 #include "cancellation_token.h"
 
 #include <QCryptographicHash>
@@ -27,6 +29,7 @@ ModelRequestTaskResult runModelRequestTask(
 {
     ModelRequestTaskResult taskResult;
     taskResult.promptVersion = promptVersionFor(taskRequest.systemPrompt);
+    taskResult.executionId = taskRequest.cancellation.executionId();
 
     if (provider.isNull()) {
         taskResult.errorMessage = QStringLiteral("大模型接口不可用。");
@@ -42,7 +45,10 @@ ModelRequestTaskResult runModelRequestTask(
             ? taskRequest.cancellation
             : ownedCancellation.token();
     ModelRequest request;
-    request.modelId = taskRequest.modelId;
+    request.modelId = normalizeModelId(
+        taskRequest.modelId,
+        defaultModelForFunction(QString())
+    );
     request.systemPrompt = taskRequest.systemPrompt;
     request.userPrompt = taskRequest.userPrompt;
     request.stream = taskRequest.stream;

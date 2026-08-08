@@ -29,6 +29,16 @@ private slots:
         settings.network.speech = QStringLiteral("unexpected");
         settings.network.ocr = QStringLiteral("direct");
         settings.network.model = QStringLiteral("systemProxy");
+        settings.input.order = QStringList()
+            << QStringLiteral("selection")
+            << QStringLiteral("voice")
+            << QStringLiteral("selection")
+            << QStringLiteral("unknown");
+        settings.output.order = QStringList()
+            << QStringLiteral("resultPopup")
+            << QStringLiteral("ai")
+            << QStringLiteral("resultPopup")
+            << QStringLiteral("unknown");
 
         const FunctionSettings normalized =
             normalizeFunctionSettings(settings);
@@ -43,6 +53,21 @@ private slots:
         QCOMPARE(normalized.network.speech, QStringLiteral("inherit"));
         QCOMPARE(normalized.network.ocr, QStringLiteral("direct"));
         QCOMPARE(normalized.network.model, QStringLiteral("systemProxy"));
+        QCOMPARE(
+            normalized.input.order,
+            QStringList()
+                << QStringLiteral("selection")
+                << QStringLiteral("voice")
+                << QStringLiteral("screenshot")
+        );
+        QCOMPARE(
+            normalized.output.order,
+            QStringList()
+                << QStringLiteral("resultPopup")
+                << QStringLiteral("ai")
+                << QStringLiteral("autoWrite")
+                << QStringLiteral("screenshotPanel")
+        );
     }
 
     void usesSafeFunctionDefaults()
@@ -52,6 +77,13 @@ private slots:
         QCOMPARE(settings.input.useSelection, false);
         QCOMPARE(settings.input.useVoice, false);
         QCOMPARE(settings.input.useScreenshot, false);
+        QCOMPARE(
+            settings.input.order,
+            QStringList()
+                << QStringLiteral("voice")
+                << QStringLiteral("selection")
+                << QStringLiteral("screenshot")
+        );
         QCOMPARE(
             settings.recording.triggerMode,
             QStringLiteral("toggle")
@@ -65,6 +97,14 @@ private slots:
         QCOMPARE(
             settings.output.resultTemplate,
             QStringLiteral("simple")
+        );
+        QCOMPARE(
+            settings.output.order,
+            QStringList()
+                << QStringLiteral("ai")
+                << QStringLiteral("autoWrite")
+                << QStringLiteral("resultPopup")
+                << QStringLiteral("screenshotPanel")
         );
     }
 

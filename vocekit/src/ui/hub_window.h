@@ -3,6 +3,7 @@
 
 #include "../controllers/voice_controller_host.h"
 #include "../domain/app_legacy_types.h"
+#include "../domain/function_flow_runtime_types.h"
 
 #include <QMainWindow>
 
@@ -21,6 +22,13 @@ public:
     virtual void showSettingsPage(int initialTab = 0) = 0;
     virtual void setApplicationEvents(ApplicationEvents *events) = 0;
     virtual void openFaqById(const QString &faqId) = 0;
+    virtual bool requestApplicationQuit() = 0;
+    virtual bool applyFunctionFlowRuntimeEvent(
+        const FunctionFlowNodeExecutionEvent &event
+    ) = 0;
+    virtual bool applyFunctionFlowRunEvent(
+        const FunctionFlowRunExecutionEvent &event
+    ) = 0;
 
 protected:
     explicit HubWindow(QWidget *parent = nullptr);

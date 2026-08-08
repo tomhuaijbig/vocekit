@@ -24,6 +24,31 @@ private slots:
         QCOMPARE(normalizeOcrEngine(QStringLiteral("bad")), ocrEngineAutomatic());
     }
 
+    void exposesStableProviderAndOcrCatalogs()
+    {
+        const QStringList speech = supportedSpeechProviderIds();
+        QCOMPARE(
+            speech,
+            QStringList()
+                << QStringLiteral("baidu")
+                << QStringLiteral("xfyun")
+                << QStringLiteral("custom")
+        );
+        QCOMPARE(speech.size(), speech.toSet().size());
+
+        const QStringList ocr = supportedOcrEngineIds();
+        QCOMPARE(
+            ocr,
+            QStringList()
+                << QStringLiteral("automatic")
+                << QStringLiteral("rapid")
+                << QStringLiteral("windows")
+                << QStringLiteral("customCloud")
+                << QStringLiteral("vision")
+        );
+        QCOMPARE(ocr.size(), ocr.toSet().size());
+    }
+
     void keepsBuiltInFunctionDefaults()
     {
         QCOMPARE(defaultModelForFunction(QStringLiteral("ask")), QStringLiteral("deepseek-v4-pro"));

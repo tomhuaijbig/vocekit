@@ -55,6 +55,37 @@ private slots:
             );
         QVERIFY(emittedVocabulary.resetRequired);
     }
+
+    void exposesStableFunctionFlowSettingKeys()
+    {
+        QCOMPARE(
+            functionDefinitionsSettingsKey(),
+            QStringLiteral("functionDefinitions")
+        );
+        QCOMPARE(
+            functionFlowDraftSettingsKey(),
+            QStringLiteral("functionFlowDraft")
+        );
+        QCOMPARE(
+            functionFlowEditorStateSettingsKey(),
+            QStringLiteral("functionFlowEditorState")
+        );
+        QCOMPARE(
+            functionFlowPublishedSettingsKey(),
+            QStringLiteral("functionFlowPublished")
+        );
+        QCOMPARE(
+            functionExecutionModeSettingsKey(),
+            QStringLiteral("function.executionMode")
+        );
+        const QStringList keys = QStringList()
+            << functionDefinitionsSettingsKey()
+            << functionFlowDraftSettingsKey()
+            << functionFlowEditorStateSettingsKey()
+            << functionFlowPublishedSettingsKey()
+            << functionExecutionModeSettingsKey();
+        QCOMPARE(keys.size(), keys.toSet().size());
+    }
 };
 
 QTEST_MAIN(ApplicationEventsTests)

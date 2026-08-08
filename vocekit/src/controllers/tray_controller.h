@@ -23,6 +23,7 @@ public:
         std::function<void(bool)> setFloatingBarEnabled;
         std::function<void()> showFloatingBarTest;
         std::function<void()> openSettings;
+        std::function<void()> requestApplicationQuit;
     };
 
     TrayController(

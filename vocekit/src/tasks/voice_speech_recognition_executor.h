@@ -15,6 +15,7 @@ struct VoiceSpeechRecognitionRequest
     bool useSystemProxy = false;
     QString audioFormat = QStringLiteral("pcm");
     int sampleRate = 16000;
+    CancellationToken cancellation;
 };
 
 struct VoiceSpeechRecognitionHandlers
@@ -28,6 +29,8 @@ struct VoiceSpeechRecognitionResult
 {
     int index = 0;
     bool ok = false;
+    bool emptyRecognition = false;
+    bool cancelled = false;
     QString text;
     QString error;
     qint64 elapsedMs = -1;

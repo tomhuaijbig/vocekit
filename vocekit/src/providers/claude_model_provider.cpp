@@ -1,5 +1,6 @@
 #include "claude_model_provider.h"
 
+#include "../api/api_client_utils.h"
 #include "../runtime_log.h"
 
 #include <QElapsedTimer>
@@ -45,7 +46,7 @@ QString requestModelName(const ModelRequest &request)
         model = model.mid(QStringLiteral("claude:").size());
     }
     return model.isEmpty()
-        ? QStringLiteral("claude-opus-4-8")
+        ? QStringLiteral("claude-sonnet-5")
         : model;
 }
 
@@ -215,7 +216,7 @@ ProviderCheckResult ClaudeModelProvider::checkConfiguration(
 
     ModelRequest request;
     request.executionId = effectiveCancellation.executionId();
-    request.modelId = QStringLiteral("claude:claude-opus-4-8");
+    request.modelId = QStringLiteral("claude:claude-sonnet-5");
     request.systemPrompt = tr8("你是接口自检助手。只回复 OK。");
     request.userPrompt = tr8("请只回复 OK，用于确认接口可用。");
     request.stream = false;
@@ -275,9 +276,24 @@ ModelResult ClaudeModelProvider::execute(
         return result;
     }
 
-    QNetworkRequest networkRequest(
-        QUrl(QStringLiteral("https://api.anthropic.com/v1/messages"))
-    );
+    QUrl endpoint(QStringLiteral("https://api.anthropic.com/v1/messages"));
+    const QString configuredBaseUrl =
+        m_secrets.anthropicBaseUrl.trimmed();
+    if (!configuredBaseUrl.isEmpty()) {
+        endpoint = anthropicMessagesUrl(configuredBaseUrl);
+        if (!endpoint.isValid() || endpoint.host().isEmpty()) {
+            result.error = operationError(
+                QStringLiteral("provider.configuration"),
+                tr8(
+                    "Anthropic Base URL 无效。"
+                    "请填写根地址、/v1 地址或完整的 /v1/messages 地址。"
+                )
+            );
+            return result;
+        }
+    }
+
+    QNetworkRequest networkRequest(endpoint);
     networkRequest.setHeader(
         QNetworkRequest::ContentTypeHeader,
         QStringLiteral("application/json")

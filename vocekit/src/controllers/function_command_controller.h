@@ -3,7 +3,9 @@
 
 #include "selected_text_workflow_controller.h"
 #include "../config/app_settings_data.h"
+#include "../domain/function_flow_runtime_types.h"
 
+#include <QMap>
 #include <QObject>
 
 #include <functional>
@@ -23,7 +25,12 @@ enum class FunctionCommandOutcome
     SelectionBlocked,
     TextSubmitted,
     ConfigurationFailed,
-    RecordingStarted
+    RecordingStarted,
+    FlowStarted,
+    FlowCancelled,
+    FlowBusy,
+    FlowTargetUnavailable,
+    FlowConfigurationFailed
 };
 
 // 命令控制器通过访问接口调用窗口、录音、截图和文本处理能力。
@@ -37,6 +44,7 @@ struct FunctionCommandAccess
     std::function<void()> showHub;
     std::function<bool()> screenshotActive;
     std::function<bool()> processing;
+    std::function<bool()> classicProcessing;
     std::function<void(const QString &, const QString &)> setStatus;
     std::function<void(const QString &, const QString &)> setTimedStatus;
     std::function<void(const QString &, const QString &)> showInformation;
@@ -45,6 +53,12 @@ struct FunctionCommandAccess
     std::function<void()> restartTimer;
     std::function<qint64()> elapsedMs;
     std::function<FunctionCommandWindowHandle()> captureTargetWindow;
+    std::function<FunctionFlowStartOutcome(
+        const FunctionFlowTriggerRequest &
+    )> startPublishedFlow;
+    std::function<bool(const QString &functionId)>
+        releasePublishedFlowHold;
+    std::function<bool(const QString &)> recordingOwnsPress;
     std::function<bool(const QString &)> recordingConsumesPress;
     std::function<bool(const QString &)> recordingConsumesRelease;
     std::function<bool()> recordingBusy;
@@ -52,7 +66,7 @@ struct FunctionCommandAccess
         FunctionCommandWindowHandle,
         bool recordingBusy
     )> addVocabulary;
-    std::function<void(
+    std::function<bool(
         const QString &functionId,
         bool targetAlreadyRemembered,
         bool externalBusy
@@ -61,6 +75,7 @@ struct FunctionCommandAccess
         const SelectedTextWorkflowRequest &
     )> readSelectedText;
     std::function<void(const QString &, const QString &)> processText;
+    std::function<void(const QString &, const QString &)> processVoice;
     std::function<QString(const QString &speechProvider)>
         speechConfigurationError;
     std::function<void(const QString &functionId)> beginRecording;
@@ -80,9 +95,14 @@ public:
     void updateConfiguration(const AppSettingsData &settings);
 
     FunctionCommandOutcome handleHotkey(const QString &id);
+    void handleHotkeyPressed(const QString &id);
     FunctionCommandOutcome handleHotkeyReleased(const QString &id);
     FunctionCommandOutcome handleScreenshotTrigger(
         const QString &functionId
+    );
+    FunctionCommandOutcome handleScreenshotLauncherTrigger(
+        const QString &functionId,
+        FunctionCommandWindowHandle rememberedTargetWindow
     );
 
     void prepareScreenshotRun(bool targetAlreadyRemembered);
@@ -90,6 +110,11 @@ public:
         const QString &functionId,
         const QString &text
     );
+    void processRecognizedVoice(
+        const QString &functionId,
+        const QString &text
+    );
+    void cancelInputSequence(const QString &functionId = QString());
 
     const QString &selectedText() const;
     FunctionCommandWindowHandle targetWindow() const;
@@ -101,7 +126,15 @@ private:
         const QString &detail = QString(),
         qint64 elapsedMs = -1
     ) const;
-    void startScreenshot(
+    FunctionCommandOutcome continueInputSequence();
+    FunctionCommandOutcome completeInputSequence();
+    FunctionCommandOutcome tryStartPublishedFlow(
+        const QString &functionId,
+        FunctionFlowTrigger trigger
+    ) const;
+    bool classicWorkflowBusy() const;
+    void clearInputSequence();
+    bool startScreenshot(
         const QString &functionId,
         bool targetAlreadyRemembered
     );
@@ -113,6 +146,12 @@ private:
     FunctionCommandAccess m_access;
     AppSettingsData m_settings;
     QString m_selectedText;
+    QString m_activeSequenceFunctionId;
+    QStringList m_pendingInputIds;
+    QString m_sequenceVoiceText;
+    QString m_sequenceScreenshotText;
+    QMap<QString, FunctionExecutionMode> m_holdRunOwners;
+    bool m_sequenceVoiceCompleted = false;
     FunctionCommandWindowHandle m_targetWindow = nullptr;
 };
 

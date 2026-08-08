@@ -12,6 +12,7 @@ struct VoiceRecordingCompletionRequest
     QString provider;
     QString networkPolicy = QStringLiteral("inherit");
     bool useSystemProxy = false;
+    CancellationToken cancellation;
 };
 
 struct VoiceRecordingCompletionHandlers

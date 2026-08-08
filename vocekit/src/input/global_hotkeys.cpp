@@ -20,16 +20,12 @@ QString textUtf8(const char *text)
 
 bool shouldUseHoldToTalk(const GlobalHotkeyFunction &function)
 {
-    return function.recordingTriggerMode == QStringLiteral("hold")
-        && function.useVoice
-        && !(function.useScreenshot
-            && screenshotTriggerUsesPrimary(function.screenshotTriggerMode));
+    return function.useHoldToTalk;
 }
 
 bool shouldRegisterScreenshotHotkey(const GlobalHotkeyFunction &function)
 {
-    return function.useScreenshot
-        && screenshotTriggerUsesSeparate(function.screenshotTriggerMode);
+    return function.registerScreenshotHotkey;
 }
 
 } // namespace
@@ -54,6 +50,11 @@ void GlobalHotkeys::setHoldCallback(
 QSet<QString> GlobalHotkeys::activeHoldFunctions() const
 {
     return m_activeHoldFunctions;
+}
+
+bool GlobalHotkeys::hasPressedHold() const
+{
+    return m_holdHook.hasPressedHold();
 }
 
 QStringList GlobalHotkeys::registerFromSnapshot(

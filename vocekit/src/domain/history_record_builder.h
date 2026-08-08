@@ -1,6 +1,7 @@
 #ifndef VOCEKIT_HISTORY_RECORD_BUILDER_H
 #define VOCEKIT_HISTORY_RECORD_BUILDER_H
 
+#include "history_types.h"
 #include "voice_run_context.h"
 
 #include "../recording/segmented_recording.h"
@@ -25,6 +26,14 @@ struct HistoryRecordMetadataRequest
     QString recordingTriggerMode;
     bool longRecording = false;
     QVector<RecordingSegment> recordingSegments;
+    QString flowRunId;
+    int flowPublishedRevision = 0;
+    QString flowPublishedHash;
+    QString flowTrigger;
+    QVector<HistoryFlowNodeTrace> flowNodeTraces;
+    QString flowFailedNodeId;
+    QString flowFailedNodeType;
+    bool flowCancelled = false;
 };
 
 struct OcrPageHistoryMetadataRequest

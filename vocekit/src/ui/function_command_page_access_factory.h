@@ -8,12 +8,9 @@ struct FunctionCommandPageAccessDependencies
 {
     HubSettingsState *settings = nullptr;
     PromptSettingsAccess prompts;
+    FunctionFlowSettingsAccess flows;
     std::function<void()> saveSettings;
-    std::function<void(
-        const QString &,
-        const QString &,
-        const CustomFunctionDef &
-    )> editCustomFunction;
+    std::function<void(const OperationError &)> operationFailed;
 };
 
 FunctionCommandPageAccess createFunctionCommandPageAccess(

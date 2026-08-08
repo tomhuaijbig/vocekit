@@ -91,7 +91,9 @@ SecretConfig SecretStore::load() const
     if (readJsonObjectFile(m_path, &root)) {
         secrets.deepseekApiKey = root.value(QStringLiteral("deepseek_api_key")).toString();
         secrets.openaiApiKey = root.value(QStringLiteral("openai_api_key")).toString();
+        secrets.openaiBaseUrl = root.value(QStringLiteral("openai_base_url")).toString();
         secrets.anthropicApiKey = root.value(QStringLiteral("anthropic_api_key")).toString();
+        secrets.anthropicBaseUrl = root.value(QStringLiteral("anthropic_base_url")).toString();
         secrets.baiduApiKey = root.value(QStringLiteral("baidu_api_key")).toString();
         secrets.baiduSecretKey = root.value(QStringLiteral("baidu_secret_key")).toString();
         secrets.baiduAppId = root.value(QStringLiteral("baidu_app_id")).toString();
@@ -122,7 +124,9 @@ bool SecretStore::save(const SecretConfig &secrets) const
     QJsonObject root;
     root.insert(QStringLiteral("deepseek_api_key"), secrets.deepseekApiKey.trimmed());
     root.insert(QStringLiteral("openai_api_key"), secrets.openaiApiKey.trimmed());
+    root.insert(QStringLiteral("openai_base_url"), secrets.openaiBaseUrl.trimmed());
     root.insert(QStringLiteral("anthropic_api_key"), secrets.anthropicApiKey.trimmed());
+    root.insert(QStringLiteral("anthropic_base_url"), secrets.anthropicBaseUrl.trimmed());
     root.insert(QStringLiteral("baidu_api_key"), secrets.baiduApiKey.trimmed());
     root.insert(QStringLiteral("baidu_secret_key"), secrets.baiduSecretKey.trimmed());
     root.insert(QStringLiteral("baidu_app_id"), secrets.baiduAppId.trimmed());

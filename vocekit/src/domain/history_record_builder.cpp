@@ -95,6 +95,72 @@ QJsonObject HistoryRecordBuilder::buildMetadata(
     item.insert(QStringLiteral("failedSegmentCount"), failedSegmentCount);
     item.insert(QStringLiteral("failedSegments"), failedSegments);
     item.insert(QStringLiteral("segments"), segmentItems);
+
+    if (!request.flowRunId.trimmed().isEmpty()) {
+        item.insert(
+            QStringLiteral("flowRunId"),
+            request.flowRunId
+        );
+        item.insert(
+            QStringLiteral("flowPublishedRevision"),
+            request.flowPublishedRevision
+        );
+        item.insert(
+            QStringLiteral("flowPublishedHash"),
+            request.flowPublishedHash
+        );
+        item.insert(
+            QStringLiteral("flowTrigger"),
+            request.flowTrigger
+        );
+        item.insert(
+            QStringLiteral("flowFailedNodeId"),
+            request.flowFailedNodeId
+        );
+        item.insert(
+            QStringLiteral("flowFailedNodeType"),
+            request.flowFailedNodeType
+        );
+        item.insert(
+            QStringLiteral("flowCancelled"),
+            request.flowCancelled
+        );
+        QJsonArray traces;
+        for (const HistoryFlowNodeTrace &trace :
+             request.flowNodeTraces) {
+            QJsonObject traceItem;
+            traceItem.insert(
+                QStringLiteral("nodeId"),
+                trace.nodeId
+            );
+            traceItem.insert(
+                QStringLiteral("nodeType"),
+                trace.nodeType
+            );
+            traceItem.insert(
+                QStringLiteral("state"),
+                trace.state
+            );
+            traceItem.insert(
+                QStringLiteral("elapsedMs"),
+                static_cast<double>(trace.elapsedMs)
+            );
+            traceItem.insert(
+                QStringLiteral("errorCode"),
+                trace.errorCode
+            );
+            traceItem.insert(
+                QStringLiteral("modelId"),
+                trace.modelId
+            );
+            traceItem.insert(
+                QStringLiteral("promptVersion"),
+                trace.promptVersion
+            );
+            traces.append(traceItem);
+        }
+        item.insert(QStringLiteral("flowNodeTraces"), traces);
+    }
     return item;
 }
 

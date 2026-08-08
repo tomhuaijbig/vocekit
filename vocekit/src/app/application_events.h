@@ -29,6 +29,12 @@ Q_DECLARE_METATYPE(SettingsChangeSet)
 Q_DECLARE_METATYPE(HistoryChangeSet)
 Q_DECLARE_METATYPE(VocabularyChangeSet)
 
+QString functionDefinitionsSettingsKey();
+QString functionFlowDraftSettingsKey();
+QString functionFlowEditorStateSettingsKey();
+QString functionFlowPublishedSettingsKey();
+QString functionExecutionModeSettingsKey();
+
 // 应用事件中心：负责在业务服务和页面之间传递明确的状态变化。
 class ApplicationEvents : public QObject
 {

@@ -2,6 +2,7 @@
 #define VOCEKIT_FUNCTION_MANAGEMENT_PAGE_ACCESS_FACTORY_H
 
 #include "function_management_page.h"
+#include "function_flow_settings_access.h"
 
 class HubSettingsState;
 
@@ -17,7 +18,8 @@ struct FunctionManagementPageAccessDependencies
         bool,
         const CustomFunctionDef &
     )> editFunction;
-    std::function<void()> saveSettings;
+    FunctionFlowSettingsAccess flows;
+    std::function<void(const OperationError &)> operationFailed;
 };
 
 FunctionManagementPageAccess createFunctionManagementPageAccess(

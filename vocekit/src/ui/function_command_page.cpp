@@ -2,14 +2,17 @@
 
 #include "attention_message.h"
 #include "command_center_shell.h"
+#include "function_canvas_editor.h"
 #include "history_row_frame.h"
 #include "hub_settings_state.h"
+#include "reorderable_card_column.h"
 #include "shortcut_display.h"
 #include "ui_style.h"
 
 #include "../capture/screenshot_types.h"
 #include "../config/app_settings_defaults.h"
 #include "../domain/function_catalog.h"
+#include "../domain/prompt_runtime_library.h"
 #include "../providers/model_catalog.h"
 #include "../result_flow_config.h"
 
@@ -20,6 +23,26 @@ namespace
 
 QString text8(const char *text) { return QString::fromUtf8(text); }
 
+QString ocrEngineTitleForCanvas(const QString &id)
+{
+    if (id == ocrEngineAutomatic()) {
+        return text8("自动选择");
+    }
+    if (id == ocrEngineRapid()) {
+        return text8("Rapid OCR");
+    }
+    if (id == ocrEngineWindows()) {
+        return text8("Windows OCR");
+    }
+    if (id == ocrEngineCustomCloud()) {
+        return text8("自定义云 OCR");
+    }
+    if (id == ocrEngineVision()) {
+        return text8("视觉模型");
+    }
+    return id;
+}
+
 } // namespace
 
 FunctionCommandPage::FunctionCommandPage(const FunctionCommandPageAccess &access, QWidget *parent)
@@ -29,7 +52,8 @@ FunctionCommandPage::FunctionCommandPage(const FunctionCommandPageAccess &access
     pageLayout->setContentsMargins(0, 0, 0, 0);
     pageLayout->setSpacing(0);
 
-    m_scroll = new QScrollArea;
+    m_pageStack = new QStackedWidget(this);
+    m_scroll = new QScrollArea(m_pageStack);
     m_scroll->setWidgetResizable(true);
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -40,25 +64,79 @@ FunctionCommandPage::FunctionCommandPage(const FunctionCommandPageAccess &access
                        "QScrollArea > QWidget > QWidget { background: #eef1f5; }"));
 
     auto *holder = new QWidget;
-    m_contentLayout = new QVBoxLayout(holder);
-    m_contentLayout->setContentsMargins(24, 20, 24, 28);
-    m_contentLayout->setSpacing(14);
+    m_settingsLayout = new QVBoxLayout(holder);
+    m_settingsLayout->setContentsMargins(24, 20, 24, 28);
+    m_settingsLayout->setSpacing(14);
     m_scroll->setWidget(holder);
-    pageLayout->addWidget(m_scroll);
+
+    m_canvasHost = new QWidget(m_pageStack);
+    m_canvasHost->setObjectName(QStringLiteral("functionCanvasPageHost"));
+    m_canvasLayout = new QVBoxLayout(m_canvasHost);
+    m_canvasLayout->setContentsMargins(24, 12, 24, 12);
+    m_canvasLayout->setSpacing(8);
+
+    m_pageStack->addWidget(m_scroll);
+    m_pageStack->addWidget(m_canvasHost);
+    m_pageStack->setCurrentWidget(m_scroll);
+    m_contentLayout = m_settingsLayout;
+    pageLayout->addWidget(m_pageStack);
 }
 
 QString FunctionCommandPage::functionId() const { return m_functionId; }
 
-void FunctionCommandPage::setFunctionId(const QString &id)
+bool FunctionCommandPage::setFunctionId(const QString &id)
 {
     const QString normalized = id.trimmed();
     if (m_functionId == normalized)
     {
         refresh();
-        return;
+        return true;
+    }
+    if (m_canvasEditor
+        && !m_canvasEditor->setFunctionId(
+            normalized,
+            flowPlacementDefaults(normalized)
+        )) {
+        return false;
     }
     m_functionId = normalized;
+    m_canvasMode = false;
     refresh();
+    return true;
+}
+
+bool FunctionCommandPage::flushPendingFlowDraft()
+{
+    return !m_canvasEditor
+        || m_canvasEditor->flushAllPendingSaves();
+}
+
+void FunctionCommandPage::discardPendingFlowDraft()
+{
+    if (m_canvasEditor) {
+        m_canvasEditor->discardPendingSaves();
+    }
+}
+
+bool FunctionCommandPage::applyFunctionFlowRuntimeEvent(
+    const FunctionFlowNodeExecutionEvent &event)
+{
+    return m_canvasEditor
+        && m_functionId == event.functionId
+        && m_canvasEditor->applyRuntimeEvent(event);
+}
+
+bool FunctionCommandPage::applyFunctionFlowRunEvent(
+    const FunctionFlowRunExecutionEvent &event)
+{
+    return m_canvasEditor
+        && m_functionId == event.functionId
+        && m_canvasEditor->applyRunEvent(event);
+}
+
+FunctionCanvasEditor *FunctionCommandPage::canvasEditor() const
+{
+    return m_canvasEditor;
 }
 
 QString FunctionCommandPage::functionTitle(const QString &id) const
@@ -203,6 +281,7 @@ QWidget *FunctionCommandPage::commandAccordionCard(const QString &title, const Q
     layout->setSpacing(0);
 
     auto *header = new HistoryRowFrame;
+    header->setObjectName(QStringLiteral("commandMethodHeader"));
     header->setCursor(Qt::PointingHandCursor);
     auto *headerLayout = new QHBoxLayout(header);
     headerLayout->setContentsMargins(14, 12, 14, 12);
@@ -269,7 +348,11 @@ QWidget *FunctionCommandPage::commandAccordionCard(const QString &title, const Q
 }
 
 QWidget *FunctionCommandPage::commandControlSection(const QString &title, const QString &hint,
-                                                    const QList<QWidget *> &rows)
+                                                    const QList<QWidget *> &rows,
+                                                    const QStringList &rowIds,
+                                                    const std::function<void(
+                                                        const QStringList &
+                                                    )> &onOrderChanged)
 {
     auto *section = new QFrame;
     section->setObjectName(QStringLiteral("commandSection"));
@@ -290,56 +373,473 @@ QWidget *FunctionCommandPage::commandControlSection(const QString &title, const 
     headerLayout->addStretch();
     headerLayout->addWidget(description);
     layout->addWidget(header);
-    for (QWidget *row : rows)
+    if (rowIds.size() == rows.size() && !rowIds.isEmpty())
     {
-        layout->addWidget(row);
+        auto *column = new ReorderableCardColumn;
+        column->setOrderChangedCallback(onOrderChanged);
+        for (int index = 0; index < rows.size(); ++index)
+        {
+            QWidget *row = rows.at(index);
+            QWidget *dragSurface =
+                row->findChild<QWidget *>(
+                    QStringLiteral("commandMethodHeader")
+                );
+            column->addCard(rowIds.at(index), row, dragSurface);
+        }
+        layout->addWidget(column);
+    }
+    else
+    {
+        for (QWidget *row : rows)
+        {
+            layout->addWidget(row);
+        }
     }
     return section;
 }
 
+FunctionCanvasEditor *FunctionCommandPage::ensureCanvasEditor()
+{
+    if (m_canvasEditor) {
+        if (m_canvasEditor->functionId() != m_functionId) {
+            if (!m_canvasEditor->setFunctionId(
+                m_functionId,
+                flowPlacementDefaults(m_functionId)
+            )) {
+                return nullptr;
+            }
+        }
+        return m_canvasEditor;
+    }
+
+    FunctionCanvasEditorAccess access;
+    access.flows = m_access.flows;
+    for (const ModelOption &option : modelOptions()) {
+        access.inspectorOptions.models.append(
+            qMakePair(option.id, option.title)
+        );
+    }
+    const PromptRuntimeSnapshot snapshot =
+        m_access.prompts.snapshotProvider
+            ? m_access.prompts.snapshotProvider()
+            : PromptRuntimeSnapshot();
+    for (const PromptTargetInfo &target :
+         promptRuntimeTargets(snapshot)) {
+        access.inspectorOptions.prompts.append(
+            qMakePair(target.id, target.title)
+        );
+    }
+    for (const QString &id : supportedSpeechProviderIds()) {
+        access.inspectorOptions.speechProviders.append(
+            qMakePair(id, speechProviderTitle(id))
+        );
+    }
+    for (const QString &id : supportedOcrEngineIds()) {
+        access.inspectorOptions.ocrEngines.append(
+            qMakePair(id, ocrEngineTitleForCanvas(id))
+        );
+    }
+    access.showWarning = [this](
+        const QString &title,
+        const QString &message
+    ) {
+        if (m_access.operationFailed) {
+            OperationError error;
+            error.code = QStringLiteral("flow_canvas_operation_failed");
+            error.message = title;
+            error.detail = message;
+            m_access.operationFailed(error);
+            return;
+        }
+        showAttentionWarning(this, title, message);
+    };
+    access.executionModeProvider = [this](
+        const QString &functionId
+    ) {
+        if (!m_access.settings) {
+            return FunctionExecutionMode::Classic;
+        }
+        const AppSettingsData data = m_access.settings->toData();
+        const int index = data.functionIndex(functionId);
+        return index >= 0
+            ? data.functions.at(index).executionMode
+            : FunctionExecutionMode::Classic;
+    };
+    access.showInformation = [this](
+        const QString &title,
+        const QString &message
+    ) {
+        showAttentionInformation(this, title, message);
+    };
+    m_canvasEditor = new FunctionCanvasEditor(access, this);
+    if (!m_canvasEditor->setFunctionId(
+        m_functionId,
+        flowPlacementDefaults(m_functionId)
+    )) {
+        return nullptr;
+    }
+    return m_canvasEditor;
+}
+
+bool FunctionCommandPage::setCanvasMode(bool enabled)
+{
+    if (enabled == m_canvasMode) {
+        return true;
+    }
+    if (!enabled && m_canvasEditor
+        && !m_canvasEditor->flushAllPendingSaves()) {
+        reportFlowFailure(m_canvasEditor->controller()->lastError());
+        return false;
+    }
+    if (enabled && !ensureCanvasEditor()) {
+        return false;
+    }
+    m_canvasMode = enabled;
+    refresh();
+    return true;
+}
+
+bool FunctionCommandPage::changeExecutionMode(
+    FunctionExecutionMode mode)
+{
+    if (m_access.settings) {
+        const AppSettingsData latest =
+            m_access.settings->toData();
+        const int index =
+            latest.functionIndex(m_functionId);
+        if (index >= 0
+            && latest.functions.at(index).executionMode == mode) {
+            return true;
+        }
+    }
+
+    OperationError error;
+    const bool changed =
+        m_access.flows.setExecutionMode
+        && m_access.flows.setExecutionMode(
+            m_functionId,
+            mode,
+            &error
+        );
+    if (!changed) {
+        if (error.isEmpty()) {
+            error.code =
+                QStringLiteral("flow_mode_change_failed");
+            error.message =
+                text8("执行模式切换失败，请重试。");
+        }
+        reportFlowFailure(error);
+        refresh();
+        return false;
+    }
+    m_access.settings->reloadFunctionFlowState(m_functionId);
+    refresh();
+    return true;
+}
+
+void FunctionCommandPage::reportFlowFailure(
+    const OperationError &error)
+{
+    if (m_access.operationFailed) {
+        m_access.operationFailed(error);
+        return;
+    }
+    QString message = error.message.trimmed();
+    if (message.isEmpty()) {
+        message = error.code.trimmed().isEmpty()
+            ? text8("流程未能保存，请重试。")
+            : error.code;
+    }
+    showAttentionWarning(
+        this,
+        text8("流程保存失败"),
+        message
+    );
+}
+
+FunctionFlowPlacementDefaults
+FunctionCommandPage::flowPlacementDefaults(
+    const QString &functionId) const
+{
+    FunctionFlowPlacementDefaults defaults;
+    if (!m_access.settings) {
+        return defaults;
+    }
+    const AppSettingsData data = m_access.settings->toData();
+    const int index = data.functionIndex(functionId);
+    if (index >= 0) {
+        defaults.function = data.functions.at(index);
+    } else {
+        defaults.function.id = functionId;
+        defaults.function.modelId =
+            m_access.settings->modelFor(functionId);
+        defaults.function.promptId =
+            m_access.settings->promptIdFor(functionId);
+    }
+    defaults.speechProviderId =
+        m_access.settings->speechProvider();
+    defaults.ocrEngineId = m_access.settings->ocrEngine();
+    defaults.resultPopupOpacity =
+        data.resultPopupOpacity;
+    return defaults;
+}
+
+void FunctionCommandPage::refreshCanvasState()
+{
+    if (!m_access.settings || !m_canvasEditor
+        || m_canvasEditor->functionId() != m_functionId) {
+        return;
+    }
+    const AppSettingsData data = m_access.settings->toData();
+    const int functionIndex = data.functionIndex(m_functionId);
+    if (functionIndex < 0) {
+        return;
+    }
+    m_canvasEditor->observeRemoteState(
+        data.functions.at(functionIndex).flow
+    );
+}
+
 void FunctionCommandPage::refresh()
 {
-    if (!m_access.settings || !m_contentLayout || m_functionId.trimmed().isEmpty())
+    if (!m_access.settings || !m_settingsLayout || !m_canvasLayout)
     {
         return;
     }
-    clearLayout(m_contentLayout);
+    if (m_canvasEditor) {
+        m_settingsLayout->removeWidget(m_canvasEditor);
+        m_canvasLayout->removeWidget(m_canvasEditor);
+        m_canvasEditor->setParent(this);
+        m_canvasEditor->hide();
+    }
+    clearLayout(m_settingsLayout);
+    clearLayout(m_canvasLayout);
+    m_contentLayout = m_canvasMode
+        ? m_canvasLayout
+        : m_settingsLayout;
+    if (m_canvasMode) {
+        m_pageStack->setCurrentWidget(m_canvasHost);
+    } else {
+        m_pageStack->setCurrentWidget(m_scroll);
+    }
+    if (m_functionId.trimmed().isEmpty()) {
+        return;
+    }
     const QString id = m_functionId;
     const QString title = functionTitle(id);
     bool custom = false;
     const CustomFunctionDef customFunctionData = customFunction(id, &custom);
     const QString shortcut = custom ? customFunctionData.shortcut : m_access.settings->hotkey(id);
+    const AppSettingsData currentData =
+        m_access.settings->toData();
+    const int currentFunctionIndex =
+        currentData.functionIndex(id);
+    const FunctionExecutionMode executionMode =
+        currentFunctionIndex >= 0
+            ? currentData.functions.at(currentFunctionIndex)
+                  .executionMode
+            : FunctionExecutionMode::Classic;
 
     auto *header = new QWidget;
-    auto *headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(0, 0, 0, 2);
-    headerLayout->setSpacing(12);
+    auto *headerLayout = new QVBoxLayout(header);
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+    headerLayout->setSpacing(6);
+    auto *titleLayout = new QHBoxLayout;
+    titleLayout->setContentsMargins(0, 0, 0, 0);
+    titleLayout->setSpacing(12);
+    auto *actionLayout = new QHBoxLayout;
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->setSpacing(12);
+    const int titleWrapWidth = 480;
+    const int shortcutWrapWidth = 140;
     auto *name = new QLabel(title);
+    name->setObjectName(
+        QStringLiteral("functionCommandTitleLabel")
+    );
     name->setFont(appFont(22, QFont::DemiBold));
+    name->setWordWrap(true);
+    name->setMinimumWidth(titleWrapWidth);
+    name->setFixedHeight(
+        name->fontMetrics().boundingRect(
+            QRect(0, 0, titleWrapWidth, 10000),
+            Qt::TextWordWrap,
+            title
+        ).height()
+    );
+    QSizePolicy nameSizePolicy(
+        QSizePolicy::Expanding,
+        QSizePolicy::Fixed
+    );
+    nameSizePolicy.setHeightForWidth(false);
+    name->setSizePolicy(nameSizePolicy);
     auto *shortcutBadge = new QLabel(displayShortcut(shortcut));
-    shortcutBadge->setObjectName(QStringLiteral("commandStateOn"));
+    shortcutBadge->setObjectName(
+        QStringLiteral("functionCommandShortcutLabel")
+    );
     shortcutBadge->setAlignment(Qt::AlignCenter);
     shortcutBadge->setFont(appFont(10, QFont::DemiBold));
-    headerLayout->addWidget(name);
-    headerLayout->addWidget(shortcutBadge);
-    headerLayout->addStretch();
-    if (custom)
-    {
-        auto *manage = new QPushButton(text8("管理功能"));
-        manage->setMinimumSize(92, 38);
-        manage->setStyleSheet(buttonStyle(QStringLiteral("#ffffff"), QStringLiteral("#111827")));
-        connect(manage, &QPushButton::clicked, header,
-                [this, id, title, customFunctionData]()
-                {
-                    if (m_access.manageCustomFunction)
-                    {
-                        m_access.manageCustomFunction(id, title, customFunctionData);
-                    }
-                    refresh();
-                });
-        headerLayout->addWidget(manage);
+    shortcutBadge->setWordWrap(true);
+    shortcutBadge->setMinimumWidth(shortcutWrapWidth);
+    shortcutBadge->setMaximumWidth(240);
+    shortcutBadge->setFixedHeight(
+        shortcutBadge->fontMetrics().boundingRect(
+            QRect(0, 0, shortcutWrapWidth, 10000),
+            Qt::TextWordWrap,
+            shortcutBadge->text()
+        ).height() + 10
+    );
+    QSizePolicy shortcutSizePolicy(
+        QSizePolicy::Preferred,
+        QSizePolicy::Fixed
+    );
+    shortcutSizePolicy.setHeightForWidth(false);
+    shortcutBadge->setSizePolicy(shortcutSizePolicy);
+    shortcutBadge->setStyleSheet(QStringLiteral(
+        "QLabel#functionCommandShortcutLabel {"
+        " color:#174793; background:#edf3ff;"
+        " border:1px solid #b8cbee; border-radius:4px;"
+        " padding:3px 7px; font-weight:600; }"
+    ));
+    titleLayout->addWidget(name);
+    titleLayout->addWidget(shortcutBadge);
+    headerLayout->addLayout(titleLayout);
+
+    auto *modeSelector = new QWidget(header);
+    modeSelector->setObjectName(
+        QStringLiteral("functionExecutionModeSelector")
+    );
+    auto *modeLayout = new QHBoxLayout(modeSelector);
+    modeLayout->setContentsMargins(8, 2, 8, 2);
+    modeLayout->setSpacing(4);
+    auto *modeLabel = new QLabel(text8("当前执行"), modeSelector);
+    modeLabel->setMinimumWidth(64);
+    modeLabel->setAlignment(Qt::AlignCenter);
+    auto *classicMode = new QPushButton(
+        text8("普通模式"),
+        modeSelector
+    );
+    classicMode->setObjectName(
+        QStringLiteral("functionClassicModeButton")
+    );
+    auto *canvasMode = new QPushButton(
+        text8("画布模式"),
+        modeSelector
+    );
+    canvasMode->setObjectName(
+        QStringLiteral("functionCanvasModeButton")
+    );
+    const QList<QPushButton *> modeButtons =
+        QList<QPushButton *>() << classicMode << canvasMode;
+    for (QPushButton *button : modeButtons) {
+        button->setCheckable(true);
+        button->setMinimumSize(96, 34);
+        button->setCursor(Qt::PointingHandCursor);
     }
+    auto *modeGroup = new QButtonGroup(modeSelector);
+    modeGroup->setExclusive(true);
+    modeGroup->addButton(classicMode);
+    modeGroup->addButton(canvasMode);
+    classicMode->setChecked(
+        executionMode == FunctionExecutionMode::Classic
+    );
+    canvasMode->setChecked(
+        executionMode == FunctionExecutionMode::Canvas
+    );
+    modeSelector->setStyleSheet(QStringLiteral(
+        "QWidget#functionExecutionModeSelector {"
+        " background:#e2e8f0; border-radius:8px; }"
+        "QPushButton { background:transparent; color:#475569;"
+        " border:1px solid transparent; border-radius:6px;"
+        " padding:4px 10px; }"
+        "QPushButton:checked { background:#2563eb; color:#ffffff;"
+        " border-color:#2563eb; }"
+    ));
+    connect(
+        classicMode,
+        &QPushButton::clicked,
+        header,
+        [this]() {
+            changeExecutionMode(FunctionExecutionMode::Classic);
+        }
+    );
+    connect(
+        canvasMode,
+        &QPushButton::clicked,
+        header,
+        [this]() {
+            changeExecutionMode(FunctionExecutionMode::Canvas);
+        }
+    );
+    modeLayout->addWidget(modeLabel);
+    modeLayout->addWidget(classicMode);
+    modeLayout->addWidget(canvasMode);
+    actionLayout->addStretch();
+    actionLayout->addWidget(modeSelector);
+
+    auto *canvas = new QPushButton(
+        m_canvasMode ? text8("返回设置") : text8("编辑画布")
+    );
+    canvas->setObjectName(QStringLiteral("functionCanvasButton"));
+    canvas->setCheckable(true);
+    canvas->setChecked(m_canvasMode);
+    canvas->setMinimumSize(100, 38);
+    canvas->setCursor(Qt::PointingHandCursor);
+    canvas->setToolTip(m_canvasMode ? text8("返回当前功能设置")
+                                    : text8("打开当前功能的流程画布"));
+    canvas->setStyleSheet(
+        buttonStyle(QStringLiteral("#ffffff"), QStringLiteral("#111827"))
+        + QStringLiteral(
+            "QPushButton#functionCanvasButton:checked {"
+            " background: #2563eb; color: #ffffff; border-color: #2563eb;"
+            "}"
+        )
+    );
+    connect(canvas, &QPushButton::toggled, header,
+            [this, canvas](bool enabled)
+            {
+                if (!setCanvasMode(enabled)) {
+                    QSignalBlocker blocker(canvas);
+                    canvas->setChecked(m_canvasMode);
+                }
+    });
+    actionLayout->addWidget(canvas);
+    headerLayout->addLayout(actionLayout);
+    const int titleRowHeight =
+        qMax(name->maximumHeight(), shortcutBadge->maximumHeight());
+    const int actionRowHeight =
+        qMax(modeSelector->sizeHint().height(), canvas->minimumHeight());
+    header->setSizePolicy(
+        QSizePolicy::Preferred,
+        QSizePolicy::Fixed
+    );
+    header->setFixedHeight(
+        headerLayout->contentsMargins().top()
+        + titleRowHeight
+        + headerLayout->spacing()
+        + actionRowHeight
+        + headerLayout->contentsMargins().bottom()
+    );
     m_contentLayout->addWidget(header);
+
+    if (m_canvasMode)
+    {
+        FunctionCanvasEditor *editor = ensureCanvasEditor();
+        if (!editor) {
+            m_canvasMode = false;
+            refresh();
+            return;
+        }
+        const AppSettingsData data = m_access.settings->toData();
+        const int functionIndex = data.functionIndex(id);
+        if (functionIndex >= 0) {
+            editor->observeRemoteState(
+                data.functions.at(functionIndex).flow
+            );
+        }
+        editor->show();
+        m_contentLayout->addWidget(editor, 1);
+        return;
+    }
 
     const auto ensureInput = [this, id](const QString &changed, bool enabled)
     {
@@ -569,8 +1069,10 @@ void FunctionCommandPage::refresh()
                 saveSettings();
             });
 
-    QList<QWidget *> inputRows;
-    inputRows << commandAccordionCard(
+    QHash<QString, QWidget *> inputCards;
+    inputCards.insert(
+        functionInputVoiceId(),
+        commandAccordionCard(
         text8("语音输入"), text8("使用麦克风录音，并通过当前语音识别服务转换为文字。"),
         m_access.settings->useVoiceFor(id) ? text8("已启用") : text8("已关闭"),
         m_access.settings->useVoiceFor(id), true, false, voiceBody,
@@ -580,8 +1082,11 @@ void FunctionCommandPage::refresh()
                 return;
             m_access.settings->setUseVoiceFor(id, enabled);
             saveSettings();
-        });
-    inputRows << commandAccordionCard(
+        })
+    );
+    inputCards.insert(
+        functionInputSelectionId(),
+        commandAccordionCard(
         text8("读取选中文字"), text8("读取鼠标拖动选中的文字，作为原文、上下文或处理对象。"),
         m_access.settings->useSelectionFor(id) ? text8("已启用") : text8("已关闭"),
         m_access.settings->useSelectionFor(id), true, false, selectionBody,
@@ -591,8 +1096,11 @@ void FunctionCommandPage::refresh()
                 return;
             m_access.settings->setUseSelectionFor(id, enabled);
             saveSettings();
-        });
-    inputRows << commandAccordionCard(
+        })
+    );
+    inputCards.insert(
+        functionInputScreenshotId(),
+        commandAccordionCard(
         text8("截图识别"), text8("框选屏幕区域，通过本地文字识别或所选图片接口读取内容。"),
         m_access.settings->useScreenshotFor(id) ? text8("已启用") : text8("已关闭"),
         m_access.settings->useScreenshotFor(id), true, false, screenshotBody,
@@ -602,9 +1110,28 @@ void FunctionCommandPage::refresh()
                 return;
             m_access.settings->setUseScreenshotFor(id, enabled);
             saveSettings();
-        });
+        })
+    );
+    const QStringList inputOrder =
+        m_access.settings->inputOrderFor(id);
+    QList<QWidget *> inputRows;
+    for (const QString &inputId : inputOrder)
+    {
+        inputRows.append(inputCards.value(inputId));
+    }
     m_contentLayout->addWidget(
-        commandControlSection(text8("输入控制"), text8("可以同时启用多种输入方式"), inputRows));
+        commandControlSection(
+            text8("输入控制"),
+            text8("可以同时启用多种输入方式"),
+            inputRows,
+            inputOrder,
+            [this, id](const QStringList &order)
+            {
+                m_access.settings->setInputOrderFor(id, order);
+                saveSettings();
+            }
+        )
+    );
 
     auto *aiBody = new QWidget;
     auto *aiLayout = new QVBoxLayout(aiBody);
@@ -717,15 +1244,21 @@ void FunctionCommandPage::refresh()
     };
 
     const QString currentOutput = m_access.settings->outputModeFor(id);
-    QList<QWidget *> outputRows;
-    outputRows << commandAccordionCard(text8("AI 处理"),
-                                       text8("选择当前功能使用的大模型和提示词。"),
-                                       modelTitle(m_access.settings->modelFor(id)), true, false,
-                                       false, aiBody, std::function<void(bool)>());
-    outputRows << commandAccordionCard(
+    QHash<QString, QWidget *> outputCards;
+    outputCards.insert(
+        functionOutputAiId(),
+        commandAccordionCard(text8("AI 处理"),
+                             text8("选择当前功能使用的大模型和提示词。"),
+                             modelTitle(m_access.settings->modelFor(id)), true, false,
+                             false, aiBody, std::function<void(bool)>())
+    );
+    outputCards.insert(
+        functionOutputAutoWriteId(),
+        commandAccordionCard(
         text8("自动写入"), text8("处理完成后，直接把结果写入当前输入位置。"),
         currentOutput == outputModeAutoWrite() ? text8("当前默认") : text8("可选择"),
-        currentOutput == outputModeAutoWrite(), true, false, outputBody(outputModeAutoWrite()),
+        currentOutput == outputModeAutoWrite(), true, false,
+        outputBody(outputModeAutoWrite()),
         [this, id, currentOutput](bool enabled)
         {
             if (!enabled && currentOutput == outputModeAutoWrite())
@@ -738,8 +1271,11 @@ void FunctionCommandPage::refresh()
                 m_access.settings->setOutputModeFor(id, outputModeAutoWrite());
                 saveSettings();
             }
-        });
-    outputRows << commandAccordionCard(
+        })
+    );
+    outputCards.insert(
+        functionOutputPopupId(),
+        commandAccordionCard(
         text8("结果小框"), text8("先显示可编辑结果，再决定复制、写入、替换或继续追问。"),
         currentOutput == outputModePopup() ? text8("当前默认") : text8("可选择"),
         currentOutput == outputModePopup(), true, false, outputBody(outputModePopup()),
@@ -755,8 +1291,11 @@ void FunctionCommandPage::refresh()
                 m_access.settings->setOutputModeFor(id, outputModePopup());
                 saveSettings();
             }
-        });
-    outputRows << commandAccordionCard(
+        })
+    );
+    outputCards.insert(
+        functionOutputScreenshotPanelId(),
+        commandAccordionCard(
         text8("截图对照窗口"), text8("以截图原图、识别结果或翻译对照方式展示处理结果。"),
         currentOutput == outputModeScreenshotPanel() ? text8("当前默认") : text8("可选择"),
         currentOutput == outputModeScreenshotPanel(), true, false,
@@ -773,9 +1312,28 @@ void FunctionCommandPage::refresh()
                 m_access.settings->setOutputModeFor(id, outputModeScreenshotPanel());
                 saveSettings();
             }
-        });
+        })
+    );
+    const QStringList outputOrder =
+        m_access.settings->outputOrderFor(id);
+    QList<QWidget *> outputRows;
+    for (const QString &outputId : outputOrder)
+    {
+        outputRows.append(outputCards.value(outputId));
+    }
     m_contentLayout->addWidget(
-        commandControlSection(text8("输出控制"), text8("选择默认展现方式"), outputRows));
+        commandControlSection(
+            text8("输出控制"),
+            text8("选择默认展现方式"),
+            outputRows,
+            outputOrder,
+            [this, id](const QStringList &order)
+            {
+                m_access.settings->setOutputOrderFor(id, order);
+                saveSettings();
+            }
+        )
+    );
     m_contentLayout->addStretch();
     if (m_scroll)
     {

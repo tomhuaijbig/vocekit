@@ -1,5 +1,6 @@
 #include "history_list_row.h"
 
+#include "../domain/history_text.h"
 #include "history_row_frame.h"
 #include "ui_style.h"
 
@@ -122,7 +123,11 @@ QWidget *createHistoryRowWidget(
     layout->setContentsMargins(16, 12, 16, 12);
     layout->setSpacing(10);
 
-    auto *title = new QLabel(callbacks.titleText ? callbacks.titleText(entry) : entry.mode);
+    auto *title = new QLabel(
+        callbacks.titleText
+            ? callbacks.titleText(entry)
+            : historyEntryModeText(entry)
+    );
     title->setFont(appFont(10, QFont::DemiBold));
     title->setStyleSheet(QStringLiteral("color: #111827;"));
     title->setWordWrap(true);

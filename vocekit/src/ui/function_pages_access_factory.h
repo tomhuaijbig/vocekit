@@ -9,6 +9,7 @@ struct FunctionPagesAccessDependencies
 {
     HubSettingsState *settings = nullptr;
     PromptSettingsAccess prompts;
+    FunctionFlowSettingsAccess flows;
     std::function<void()> saveSettings;
     std::function<QString(const QString &, const QString &)> summaryProvider;
     std::function<void()> addFunction;
@@ -18,6 +19,7 @@ struct FunctionPagesAccessDependencies
         bool,
         const CustomFunctionDef &
     )> editFunction;
+    std::function<void(const OperationError &)> operationFailed;
 };
 
 struct FunctionPagesAccessAssembly

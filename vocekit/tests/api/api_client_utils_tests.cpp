@@ -10,7 +10,15 @@ private slots:
     void normalizesOpenAiCompatibleChatUrls()
     {
         QCOMPARE(
-            openAiCompatibleChatUrl(QStringLiteral("api.example.com")).toString(),
+            openAiCompatibleChatUrl(QString()).toString(),
+            QString()
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com")).toString(),
+            QStringLiteral("https://api.example.com/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("api.example.com/")).toString(),
             QStringLiteral("https://api.example.com/v1/chat/completions")
         );
         QCOMPARE(
@@ -18,9 +26,138 @@ private slots:
             QStringLiteral("https://api.example.com/v1/chat/completions")
         );
         QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/v1/")).toString(),
+            QStringLiteral("https://api.example.com/v1/chat/completions")
+        );
+        QCOMPARE(
             openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/v1/chat/completions")).toString(),
             QStringLiteral("https://api.example.com/v1/chat/completions")
         );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/v1/chat/completions/")).toString(),
+            QStringLiteral("https://api.example.com/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/proxy/v1/chat/completions/")).toString(),
+            QStringLiteral("https://api.example.com/proxy/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/service")).toString(),
+            QStringLiteral("https://api.example.com/service/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/service/v1")).toString(),
+            QStringLiteral("https://api.example.com/service/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/nested/gateway")).toString(),
+            QStringLiteral("https://api.example.com/nested/gateway/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/%2Fservice")).toString(QUrl::FullyEncoded),
+            QStringLiteral("https://api.example.com/%2Fservice/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://user:pass@api.example.com:8443/service")).toString(QUrl::FullyEncoded),
+            QStringLiteral("https://user:pass@api.example.com:8443/service/v1/chat/completions")
+        );
+        QCOMPARE(
+            openAiCompatibleChatUrl(QStringLiteral("https://[2001:db8::1]:8443/service")).toString(QUrl::FullyEncoded),
+            QStringLiteral("https://[2001:db8::1]:8443/service/v1/chat/completions")
+        );
+        const QUrl mixedCaseUrl = openAiCompatibleChatUrl(
+            QStringLiteral("HtTpS://api.example.com/service")
+        );
+        QCOMPARE(mixedCaseUrl.scheme(), QStringLiteral("https"));
+        QCOMPARE(mixedCaseUrl.host(), QStringLiteral("api.example.com"));
+        QCOMPARE(
+            mixedCaseUrl.path(QUrl::FullyEncoded),
+            QStringLiteral("/service/v1/chat/completions")
+        );
+    }
+
+    void rejectsInvalidOpenAiCompatibleChatUrls()
+    {
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("ftp://api.example.com")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("https://")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("not a host")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/v1/v1")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("https://api.example.com/v1/v1/chat/completions")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("https://api.example.com?key=value")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("https://api.example.com#fragment")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("https://api.example.com?")).isEmpty());
+        QVERIFY(openAiCompatibleChatUrl(QStringLiteral("https://api.example.com#")).isEmpty());
+    }
+
+    void normalizesAnthropicMessagesUrls()
+    {
+        QCOMPARE(anthropicMessagesUrl(QString()).toString(), QString());
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com")).toString(),
+            QStringLiteral("https://api.example.com/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("api.example.com/")).toString(),
+            QStringLiteral("https://api.example.com/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/v1/")).toString(),
+            QStringLiteral("https://api.example.com/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/v1/messages")).toString(),
+            QStringLiteral("https://api.example.com/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/v1/messages/")).toString(),
+            QStringLiteral("https://api.example.com/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/proxy/v1/messages/")).toString(),
+            QStringLiteral("https://api.example.com/proxy/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/service")).toString(),
+            QStringLiteral("https://api.example.com/service/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/service/v1")).toString(),
+            QStringLiteral("https://api.example.com/service/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/nested/gateway")).toString(),
+            QStringLiteral("https://api.example.com/nested/gateway/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://api.example.com/%2Fservice")).toString(QUrl::FullyEncoded),
+            QStringLiteral("https://api.example.com/%2Fservice/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://user:pass@api.example.com:8443/service")).toString(QUrl::FullyEncoded),
+            QStringLiteral("https://user:pass@api.example.com:8443/service/v1/messages")
+        );
+        QCOMPARE(
+            anthropicMessagesUrl(QStringLiteral("https://[2001:db8::1]:8443/service")).toString(QUrl::FullyEncoded),
+            QStringLiteral("https://[2001:db8::1]:8443/service/v1/messages")
+        );
+        const QUrl mixedCaseUrl = anthropicMessagesUrl(
+            QStringLiteral("HtTpS://api.example.com/service")
+        );
+        QCOMPARE(mixedCaseUrl.scheme(), QStringLiteral("https"));
+        QCOMPARE(mixedCaseUrl.host(), QStringLiteral("api.example.com"));
+        QCOMPARE(mixedCaseUrl.path(QUrl::FullyEncoded), QStringLiteral("/service/v1/messages"));
+    }
+
+    void rejectsInvalidAnthropicMessagesUrls()
+    {
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("file:///tmp/api")).isEmpty());
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("https://")).isEmpty());
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("not a host")).isEmpty());
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("https://api.example.com/v1/v1/messages")).isEmpty());
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("https://api.example.com?key=value")).isEmpty());
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("https://api.example.com#fragment")).isEmpty());
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("https://api.example.com?")).isEmpty());
+        QVERIFY(anthropicMessagesUrl(QStringLiteral("https://api.example.com#")).isEmpty());
     }
 
     void readsFirstJsonValueFromNestedPaths()

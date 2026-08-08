@@ -30,9 +30,9 @@ FunctionModeGrid::FunctionModeGrid(
     m_grid->setContentsMargins(0, 0, 0, 0);
 }
 
-void FunctionModeGrid::setEditCallback(const EditCallback &callback)
+void FunctionModeGrid::setOpenCallback(const OpenCallback &callback)
 {
-    m_editCallback = callback;
+    m_openCallback = callback;
 }
 
 void FunctionModeGrid::setSettingsChangedCallback(
@@ -152,13 +152,8 @@ QWidget *FunctionModeGrid::modeCard(const CardData &card)
         reorderModeCard(sourceId, targetId, dropAfter);
     });
     frame->setDoubleClickCallback([this, card]() {
-        if (m_editCallback) {
-            m_editCallback(
-                card.id,
-                card.title,
-                card.custom,
-                card.customFunction
-            );
+        if (m_openCallback) {
+            m_openCallback(card.id);
         }
     });
 

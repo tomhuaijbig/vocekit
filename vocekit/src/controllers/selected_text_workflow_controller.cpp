@@ -52,7 +52,9 @@ SelectedTextWorkflowResult SelectedTextWorkflowController::execute(
         m_access.recordReadResult(readResult);
     }
 
-    if (!result.text.isEmpty() || request.useVoice) {
+    if (!result.text.isEmpty()
+        || request.useVoice
+        || request.suppressMissingPrompt) {
         return result;
     }
 

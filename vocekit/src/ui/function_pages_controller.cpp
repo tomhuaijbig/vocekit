@@ -19,7 +19,9 @@ FunctionCommandPage *FunctionPagesController::commandPageWidget()
     if (!m_commandPage) {
         m_commandPage = new FunctionCommandPage(pageAccess().command, m_parent);
         if (!m_currentFunctionId.isEmpty()) {
-            m_commandPage->setFunctionId(m_currentFunctionId);
+            if (!m_commandPage->setFunctionId(m_currentFunctionId)) {
+                m_currentFunctionId.clear();
+            }
         }
     }
     return m_commandPage;
@@ -57,19 +59,21 @@ bool FunctionPagesController::setCurrentFunctionId(const QString &id)
     if (normalized.isEmpty()) {
         return false;
     }
-    m_currentFunctionId = normalized;
-    if (m_commandPage) {
-        m_commandPage->setFunctionId(normalized);
+    if (m_commandPage
+        && !m_commandPage->setFunctionId(normalized)) {
+        return false;
     }
+    m_currentFunctionId = normalized;
     return true;
 }
 
 void FunctionPagesController::clearCurrentFunction()
 {
-    m_currentFunctionId.clear();
-    if (m_commandPage) {
-        m_commandPage->setFunctionId(QString());
+    if (m_commandPage
+        && !m_commandPage->setFunctionId(QString())) {
+        return;
     }
+    m_currentFunctionId.clear();
 }
 
 QString FunctionPagesController::currentFunctionId() const
@@ -84,11 +88,34 @@ void FunctionPagesController::refreshCommandPage()
     }
 }
 
+void FunctionPagesController::refreshCanvasState()
+{
+    if (m_commandPage) {
+        m_commandPage->refreshCanvasState();
+    }
+}
+
 void FunctionPagesController::refreshManagementPage()
 {
     if (m_managementPage) {
         m_managementPage->refresh();
     }
+}
+
+bool FunctionPagesController::applyFunctionFlowRuntimeEvent(
+    const FunctionFlowNodeExecutionEvent &event)
+{
+    return m_commandPage
+        && m_currentFunctionId == event.functionId
+        && m_commandPage->applyFunctionFlowRuntimeEvent(event);
+}
+
+bool FunctionPagesController::applyFunctionFlowRunEvent(
+    const FunctionFlowRunExecutionEvent &event)
+{
+    return m_commandPage
+        && m_currentFunctionId == event.functionId
+        && m_commandPage->applyFunctionFlowRunEvent(event);
 }
 
 const FunctionPagesAccessAssembly &FunctionPagesController::pageAccess()

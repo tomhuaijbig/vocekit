@@ -2,6 +2,7 @@
 
 #include "app_dialogs.h"
 #include "attention_message.h"
+#include "custom_model_dialog_support.h"
 #include "history_row_frame.h"
 #include "ui_style.h"
 
@@ -40,6 +41,14 @@ void ApiSettingsSection::refreshFromSettings()
     updateSpeechSecretRows();
     setComboCurrentData(m_ocrProviderBox, current.ocrEngine);
     updateOcrSecretRows();
+
+    const SecretConfig secrets = loadSecrets();
+    if (m_openaiBaseUrlEdit) {
+        m_openaiBaseUrlEdit->setText(secrets.openaiBaseUrl);
+    }
+    if (m_anthropicBaseUrlEdit) {
+        m_anthropicBaseUrlEdit->setText(secrets.anthropicBaseUrl);
+    }
 }
 
 ApiSettingsSnapshot ApiSettingsSection::snapshot() const
@@ -150,8 +159,24 @@ QString ApiSettingsSection::apiRowDetailText(const QString &title, const QString
         if (title == apiTr8("OpenAI 密钥（GPT API Key）")) {
             return apiTr8("使用 OpenAI 模型时需要填写。只有功能自定义里选择 OpenAI 模型时才会调用它。");
         }
+        if (title == apiTr8("OpenAI Base URL（可选）")) {
+            const QString value = m_openaiBaseUrlEdit
+                ? m_openaiBaseUrlEdit->text().trimmed()
+                : QString();
+            return apiTr8("当前值：")
+                + (value.isEmpty() ? apiTr8("官方地址") : value)
+                + apiTr8("\n\n留空时使用 OpenAI 官方地址。也可填写网关根地址、以 /v1 结尾的地址，或完整 chat/completions 接口地址。");
+        }
         if (title == apiTr8("Anthropic 密钥（Claude API Key）")) {
             return apiTr8("使用 Claude 模型时需要填写。只有功能自定义里选择 Claude 模型时才会调用它。");
+        }
+        if (title == apiTr8("Anthropic Base URL（可选）")) {
+            const QString value = m_anthropicBaseUrlEdit
+                ? m_anthropicBaseUrlEdit->text().trimmed()
+                : QString();
+            return apiTr8("当前值：")
+                + (value.isEmpty() ? apiTr8("官方地址") : value)
+                + apiTr8("\n\n留空时使用 Anthropic 官方地址。也可填写网关根地址、以 /v1 结尾的地址，或完整 messages 接口地址。");
         }
         if (title == apiTr8("自定义大模型接口地址")) {
             return apiTr8("按 OpenAI 兼容接口调用。可以填写根地址，例如 https://api.example.com，软件会自动补成 /v1/chat/completions；也可以直接填写完整 chat/completions 地址。\n\n选择模型时使用“自定义大模型”才会调用这里。");
@@ -184,7 +209,17 @@ void ApiSettingsSection::buildUi()
 
         m_deepseekKeyEdit = newSecretEdit(secrets.deepseekApiKey);
         m_openaiKeyEdit = newSecretEdit(secrets.openaiApiKey);
+        m_openaiBaseUrlEdit = newPlainEdit(
+            secrets.openaiBaseUrl,
+            apiTr8("留空使用官方地址；可填网关根地址、/v1 或完整 chat/completions 地址")
+        );
+        m_openaiBaseUrlEdit->setObjectName(QStringLiteral("openaiBaseUrlEdit"));
         m_anthropicKeyEdit = newSecretEdit(secrets.anthropicApiKey);
+        m_anthropicBaseUrlEdit = newPlainEdit(
+            secrets.anthropicBaseUrl,
+            apiTr8("留空使用官方地址；可填网关根地址、/v1 或完整 messages 地址")
+        );
+        m_anthropicBaseUrlEdit->setObjectName(QStringLiteral("anthropicBaseUrlEdit"));
         m_baiduApiKeyEdit = newSecretEdit(secrets.baiduApiKey);
         m_baiduSecretKeyEdit = newSecretEdit(secrets.baiduSecretKey);
         m_baiduAppIdEdit = newSecretEdit(secrets.baiduAppId);
@@ -246,8 +281,41 @@ void ApiSettingsSection::buildUi()
         QVector<QWidget *> modelRows;
         modelRows.append(secretInputRow(apiTr8("DeepSeek 密钥（API Key）"), apiTr8("选择 DeepSeek 模型时使用"), m_deepseekKeyEdit));
         modelRows.append(secretInputRow(apiTr8("OpenAI 密钥（GPT API Key）"), apiTr8("选择 GPT 模型时使用"), m_openaiKeyEdit));
+        m_openaiBaseUrlRow = plainInputRow(
+            apiTr8("OpenAI Base URL（可选）"),
+            apiTr8("留空使用官方地址；支持网关根地址、/v1 或完整接口地址"),
+            m_openaiBaseUrlEdit
+        );
+        modelRows.append(m_openaiBaseUrlRow);
         modelRows.append(secretInputRow(apiTr8("Anthropic 密钥（Claude API Key）"), apiTr8("选择 Claude 模型时使用"), m_anthropicKeyEdit));
+        m_anthropicBaseUrlRow = plainInputRow(
+            apiTr8("Anthropic Base URL（可选）"),
+            apiTr8("留空使用官方地址；支持网关根地址、/v1 或完整接口地址"),
+            m_anthropicBaseUrlEdit
+        );
+        modelRows.append(m_anthropicBaseUrlRow);
         modelRows.append(customModelConfigCard());
+
+        connect(m_openaiBaseUrlEdit, &QLineEdit::textChanged, this, [this]() {
+            attachSettingDetail(
+                m_openaiBaseUrlRow,
+                apiTr8("OpenAI Base URL（可选）"),
+                apiRowDetailText(
+                    apiTr8("OpenAI Base URL（可选）"),
+                    QString()
+                )
+            );
+        });
+        connect(m_anthropicBaseUrlEdit, &QLineEdit::textChanged, this, [this]() {
+            attachSettingDetail(
+                m_anthropicBaseUrlRow,
+                apiTr8("Anthropic Base URL（可选）"),
+                apiRowDetailText(
+                    apiTr8("Anthropic Base URL（可选）"),
+                    QString()
+                )
+            );
+        });
 
         content->addWidget(secretSection(apiTr8("语音识别接口"), apiTr8("用于听写、问答和自定义功能里的语音输入。可以选择百度、讯飞或自定义语音接口。"), voiceRows));
         content->addWidget(secretSection(apiTr8("图片识别接口"), QString(), ocrRows));
@@ -699,7 +767,7 @@ QWidget *ApiSettingsSection::customModelEditorRow(
         auto addLine = [&](const QString &labelText, QLineEdit *edit) {
             auto *row = new QHBoxLayout;
             auto *label = new QLabel(labelText);
-            label->setMinimumWidth(92);
+            label->setMinimumWidth(132);
             label->setFont(appFont(10, QFont::DemiBold));
             row->addWidget(label);
             row->addWidget(edit, 1);
@@ -707,7 +775,8 @@ QWidget *ApiSettingsSection::customModelEditorRow(
         };
 
         *nameEdit = newPlainEdit(profile.name, apiTr8("显示名称，例如：公司网关 GPT"));
-        *urlEdit = newPlainEdit(profile.url, apiTr8("接口地址，例如：https://api.example.com"));
+        *urlEdit = newPlainEdit(profile.url, apiTr8("API URL，例如：https://api.example.com 或 /v1 地址"));
+        (*urlEdit)->setObjectName(QStringLiteral("customModelApiUrlEdit"));
         *keyEdit = newSecretEdit(profile.apiKey);
         *modelEdit = newPlainEdit(profile.model, apiTr8("实际模型名，例如：gpt-4o-compatible"));
         (*keyEdit)->setPlaceholderText(apiTr8("可选，不需要密钥可留空"));
@@ -716,18 +785,54 @@ QWidget *ApiSettingsSection::customModelEditorRow(
         auto *title = new QLabel(profile.name.trimmed().isEmpty() ? apiTr8("自定义大模型") : profile.name.trimmed());
         title->setFont(appFont(12, QFont::DemiBold));
         auto *testButton = new QPushButton(apiTr8("测试"));
-        testButton->setFixedHeight(32);
-        testButton->setStyleSheet(buttonStyle(QStringLiteral("#ffffff"), QStringLiteral("#111827")));
+        applyCustomModelDialogButtonSizing(
+            testButton,
+            QStringLiteral("#ffffff"),
+            QStringLiteral("#111827")
+        );
         *deleteButton = new QPushButton(apiTr8("删除"));
-        (*deleteButton)->setFixedHeight(32);
-        (*deleteButton)->setStyleSheet(buttonStyle(QStringLiteral("#ffffff"), QStringLiteral("#b91c1c")));
+        applyCustomModelDialogButtonSizing(
+            *deleteButton,
+            QStringLiteral("#ffffff"),
+            QStringLiteral("#b91c1c")
+        );
         top->addWidget(title, 1);
         top->addWidget(testButton);
         top->addWidget(*deleteButton);
         layout->addLayout(top);
 
         addLine(apiTr8("显示名称"), *nameEdit);
-        addLine(apiTr8("接口地址"), *urlEdit);
+        addLine(apiTr8("API URL（接口地址）"), *urlEdit);
+
+        auto *endpointPreviewRow = new QHBoxLayout;
+        auto *endpointPreviewTitle = new QLabel(apiTr8("最终请求地址"));
+        endpointPreviewTitle->setMinimumWidth(132);
+        endpointPreviewTitle->setFont(appFont(10, QFont::DemiBold));
+        auto *endpointPreview = new QLabel;
+        endpointPreview->setObjectName(QStringLiteral("customModelFinalEndpointPreview"));
+        endpointPreview->setWordWrap(true);
+        endpointPreview->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        endpointPreviewRow->addWidget(endpointPreviewTitle);
+        endpointPreviewRow->addWidget(endpointPreview, 1);
+        layout->addLayout(endpointPreviewRow);
+
+        auto updateEndpointPreview = [endpointPreview](const QString &urlText) {
+            const QString preview = customModelFinalEndpointPreview(urlText);
+            endpointPreview->setText(preview);
+            endpointPreview->setStyleSheet(
+                preview == apiTr8("地址无效")
+                    ? QStringLiteral("color: #b91c1c;")
+                    : QStringLiteral("color: #4b5563;")
+            );
+        };
+        updateEndpointPreview((*urlEdit)->text());
+        connect(
+            *urlEdit,
+            &QLineEdit::textChanged,
+            this,
+            updateEndpointPreview
+        );
+
         addLine(apiTr8("接口密钥"), *keyEdit);
         addLine(apiTr8("模型名称"), *modelEdit);
 
@@ -803,8 +908,7 @@ void ApiSettingsSection::showCustomModelConfigDialog()
         auto *title = new QLabel(apiTr8("自定义大模型"));
         title->setFont(appFont(20, QFont::DemiBold));
         auto *add = new QPushButton(apiTr8("新增模型"));
-        add->setFixedHeight(36);
-        add->setStyleSheet(buttonStyle(QStringLiteral("#111827")));
+        applyCustomModelDialogButtonSizing(add);
         top->addWidget(title, 1);
         top->addWidget(add);
         root->addLayout(top);
@@ -889,11 +993,13 @@ void ApiSettingsSection::showCustomModelConfigDialog()
         auto *buttons = new QHBoxLayout;
         buttons->addStretch();
         auto *cancel = new QPushButton(apiTr8("取消"));
-        cancel->setFixedHeight(38);
-        cancel->setStyleSheet(buttonStyle(QStringLiteral("#ffffff"), QStringLiteral("#111827")));
+        applyCustomModelDialogButtonSizing(
+            cancel,
+            QStringLiteral("#ffffff"),
+            QStringLiteral("#111827")
+        );
         auto *save = new QPushButton(apiTr8("保存"));
-        save->setFixedHeight(38);
-        save->setStyleSheet(buttonStyle(QStringLiteral("#111827")));
+        applyCustomModelDialogButtonSizing(save);
         buttons->addWidget(cancel);
         buttons->addWidget(save);
         root->addLayout(buttons);
@@ -936,7 +1042,9 @@ bool ApiSettingsSection::saveSecretsFromUi(bool showConfirmation)
         SecretConfig secrets;
         secrets.deepseekApiKey = m_deepseekKeyEdit ? m_deepseekKeyEdit->text().trimmed() : QString();
         secrets.openaiApiKey = m_openaiKeyEdit ? m_openaiKeyEdit->text().trimmed() : QString();
+        secrets.openaiBaseUrl = m_openaiBaseUrlEdit ? m_openaiBaseUrlEdit->text().trimmed() : QString();
         secrets.anthropicApiKey = m_anthropicKeyEdit ? m_anthropicKeyEdit->text().trimmed() : QString();
+        secrets.anthropicBaseUrl = m_anthropicBaseUrlEdit ? m_anthropicBaseUrlEdit->text().trimmed() : QString();
         secrets.baiduApiKey = m_baiduApiKeyEdit ? m_baiduApiKeyEdit->text().trimmed() : QString();
         secrets.baiduSecretKey = m_baiduSecretKeyEdit ? m_baiduSecretKeyEdit->text().trimmed() : QString();
         secrets.baiduAppId = m_baiduAppIdEdit ? m_baiduAppIdEdit->text().trimmed() : QString();

@@ -31,6 +31,15 @@ private slots:
         QVERIFY(ids.contains(QStringLiteral("hub")));
     }
 
+    void builtInFunctionTitlesUseChineseOnly()
+    {
+        const QVector<HotkeyDef> defs = coreFunctionDefs();
+        QCOMPARE(defs.size(), 3);
+        QCOMPARE(defs.at(0).title, QString::fromUtf8("听写"));
+        QCOMPARE(defs.at(1).title, QString::fromUtf8("翻译"));
+        QCOMPARE(defs.at(2).title, QString::fromUtf8("问答"));
+    }
+
     void coreFunctionsExcludeUtilityHotkeys()
     {
         const QStringList ids = idsOf(coreFunctionDefs());

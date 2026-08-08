@@ -3,88 +3,86 @@
 #include "../../src/ui/custom_function_creation_coordinator.h"
 #include "../../src/ui/hub_settings_state.h"
 
-namespace {
-
-HubSettingsState createSettings()
-{
-    HubWindowAccess access;
-    access.settingsSnapshotProvider = []() {
-        AppSettingsData data;
-        return data;
-    };
-    return HubSettingsState(access);
-}
-
-} // namespace
-
 class CustomFunctionCreationCoordinatorTests : public QObject
 {
     Q_OBJECT
 
 private slots:
-    void createsAndKeepsAcceptedFunction();
-    void rollsBackCancelledFunction();
+    void createsAndReturnsPersistedFunction();
+    void failedTransactionDoesNotMutateTheSettingsState();
     void ignoresMissingSettings();
 };
 
-void CustomFunctionCreationCoordinatorTests::createsAndKeepsAcceptedFunction()
+void CustomFunctionCreationCoordinatorTests::createsAndReturnsPersistedFunction()
 {
-    HubSettingsState settings = createSettings();
-    int saves = 0;
-    CustomFunctionDef edited;
+    AppSettingsData persisted;
+    HubWindowAccess stateAccess;
+    stateAccess.settingsSnapshotProvider = [&persisted]() {
+        return persisted;
+    };
+    HubSettingsState settings(stateAccess);
+    int transactions = 0;
 
     CustomFunctionCreationActions actions;
     actions.settings = &settings;
-    actions.saveSettings = [&saves]() { ++saves; };
-    actions.editFunction = [&edited](const CustomFunctionDef &function) {
-        edited = function;
+    actions.flows.addCustomFunction = [&](
+        const FunctionSettings &function,
+        OperationError *
+    ) {
+        ++transactions;
+        persisted.functions.append(function);
+        persisted.functionOrder.append(function.id);
         return true;
     };
 
-    QVERIFY(createAndEditCustomFunction(actions));
+    const QString id = createCustomFunction(actions);
+    QCOMPARE(id, QStringLiteral("custom_1"));
     QCOMPARE(settings.customFunctions().size(), 1);
-    QCOMPARE(saves, 1);
-    QCOMPARE(edited.id, QStringLiteral("custom_1"));
-    QCOMPARE(edited.name, QString::fromUtf8("自定义功能 1"));
-    QCOMPARE(edited.model, QStringLiteral("deepseek-v4-flash"));
-    QVERIFY(edited.useSelection);
-    QVERIFY(edited.useVoice);
-    QVERIFY(!edited.useScreenshot);
+    QCOMPARE(transactions, 1);
+    const CustomFunctionDef created = settings.customFunctions().first();
+    QCOMPARE(created.id, QStringLiteral("custom_1"));
+    QCOMPARE(created.name, QString::fromUtf8("自定义功能 1"));
+    QCOMPARE(created.model, QStringLiteral("deepseek-v4-flash"));
+    QVERIFY(created.useSelection);
+    QVERIFY(created.useVoice);
+    QVERIFY(!created.useScreenshot);
     QCOMPARE(
-        edited.prompt,
+        created.prompt,
         QString::fromUtf8(
             "请根据选中文本和我的语音要求完成任务，输出可以直接使用的结果。"
         )
     );
 }
 
-void CustomFunctionCreationCoordinatorTests::rollsBackCancelledFunction()
+void CustomFunctionCreationCoordinatorTests::
+failedTransactionDoesNotMutateTheSettingsState()
 {
-    HubSettingsState settings = createSettings();
-    int saves = 0;
-
+    AppSettingsData persisted;
+    HubWindowAccess stateAccess;
+    stateAccess.settingsSnapshotProvider = [&persisted]() {
+        return persisted;
+    };
+    HubSettingsState settings(stateAccess);
     CustomFunctionCreationActions actions;
     actions.settings = &settings;
-    actions.saveSettings = [&saves]() { ++saves; };
-    actions.editFunction = [](const CustomFunctionDef &) { return false; };
-
-    QVERIFY(!createAndEditCustomFunction(actions));
+    actions.flows.addCustomFunction = [](
+        const FunctionSettings &,
+        OperationError *error
+    ) {
+        error->code = QStringLiteral("flow_save_failed");
+        return false;
+    };
+    OperationError error;
+    QVERIFY(createCustomFunction(actions, &error).isEmpty());
     QVERIFY(settings.customFunctions().isEmpty());
-    QCOMPARE(saves, 2);
+    QVERIFY(persisted.functions.isEmpty());
+    QCOMPARE(error.code, QStringLiteral("flow_save_failed"));
 }
 
 void CustomFunctionCreationCoordinatorTests::ignoresMissingSettings()
 {
-    int calls = 0;
     CustomFunctionCreationActions actions;
-    actions.saveSettings = [&calls]() { ++calls; };
-    actions.editFunction = [&calls](const CustomFunctionDef &) {
-        ++calls;
-        return true;
-    };
-
-    QVERIFY(!createAndEditCustomFunction(actions));
-    QCOMPARE(calls, 0);
+    QVERIFY(createCustomFunction(actions).isEmpty());
 }
 
 QTEST_MAIN(CustomFunctionCreationCoordinatorTests)

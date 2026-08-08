@@ -12,6 +12,7 @@ struct SelectedTextWorkflowRequest
     QString modeId;
     bool strongSelectionEnabled = false;
     bool useVoice = false;
+    bool suppressMissingPrompt = false;
     SelectedTextNativeWindowHandle targetWindow = nullptr;
 };
 

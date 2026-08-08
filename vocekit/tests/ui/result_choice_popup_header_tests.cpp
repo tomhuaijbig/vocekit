@@ -1,8 +1,13 @@
 #include <QtTest>
 
+#define private public
 #include "../../src/ui/result_choice_popup.h"
+#undef private
 
+#include <QComboBox>
+#include <QDialog>
 #include <QPushButton>
+#include <QTimer>
 
 #include <type_traits>
 
@@ -32,6 +37,7 @@ private slots:
     void clampsConfiguredOpacity();
     void reportsTheResolvedActionOnce();
     void closingBusyPopupRequestsCancellation();
+    void retryDialogSelectsTheMigratedCurrentModel();
 };
 
 void ResultChoicePopupHeaderTests::exposesWidgetType()
@@ -156,6 +162,55 @@ void ResultChoicePopupHeaderTests::closingBusyPopupRequestsCancellation()
 
     QVERIFY(popup.close());
     QCOMPARE(cancellationCount, 1);
+}
+
+void ResultChoicePopupHeaderTests::
+retryDialogSelectsTheMigratedCurrentModel()
+{
+    ResultPopupWindowPreferences preferences;
+    ResultChoicePopup popup(
+        preferences,
+        QStringLiteral("test"),
+        QStringLiteral("result"),
+        nullptr,
+        false,
+        0
+    );
+    popup.setAttribute(Qt::WA_DeleteOnClose, false);
+    popup.setActionCallbacks(
+        std::function<void()>(),
+        [](const QString &) {},
+        std::function<void(const QString &)>()
+    );
+    popup.setCurrentModel(QStringLiteral("openai:gpt-5.4"));
+
+    QString selectedModel;
+    int oldModelIndex = -2;
+    bool dialogFound = false;
+    QTimer::singleShot(0, [&]() {
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            QDialog *dialog = qobject_cast<QDialog *>(widget);
+            if (!dialog || !dialog->isVisible()) {
+                continue;
+            }
+            dialogFound = true;
+            QComboBox *models = dialog->findChild<QComboBox *>();
+            if (models) {
+                selectedModel = models->currentData().toString();
+                oldModelIndex = models->findData(
+                    QStringLiteral("openai:gpt-5.4")
+                );
+            }
+            dialog->reject();
+            break;
+        }
+    });
+
+    popup.chooseModelAndRetry();
+    QVERIFY(dialogFound);
+    QCOMPARE(selectedModel, QStringLiteral("openai:gpt-5.6-terra"));
+    QVERIFY(selectedModel != QStringLiteral("deepseek-v4-flash"));
+    QCOMPARE(oldModelIndex, -1);
 }
 
 QTEST_MAIN(ResultChoicePopupHeaderTests)

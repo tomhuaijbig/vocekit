@@ -21,11 +21,18 @@ public:
     explicit HubPageRouter(QWidget *parent = nullptr);
 
     bool registerPage(const HubPageRegistration &registration);
+    bool registerDeferredPage(
+        const QString &id,
+        const std::function<QWidget *()> &factory,
+        const std::function<void(bool pageChanged)> &activated =
+            std::function<void(bool)>()
+    );
     bool selectPage(const QString &id);
     QString currentPageId() const;
 
 private:
     QMap<QString, int> m_pageIndexes;
+    QMap<QString, std::function<QWidget *()>> m_pageFactories;
     QMap<QString, std::function<void(bool)>> m_activationCallbacks;
     QString m_currentPageId;
 };

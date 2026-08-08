@@ -1,5 +1,6 @@
 #include "app_settings_json.h"
 #include "app_settings_defaults.h"
+#include "function_flow_json.h"
 
 #include <QJsonArray>
 #include <QSet>
@@ -111,6 +112,11 @@ void applyCommonFunctionJson(
         settings->input.useScreenshot =
             input.value(QStringLiteral("useScreenshot")).toBool();
     }
+    if (input.contains(QStringLiteral("inputOrder"))) {
+        settings->input.order = stringListFromJson(
+            input.value(QStringLiteral("inputOrder")).toArray()
+        );
+    }
     const QString screenshotTriggerMode =
         input.value(QStringLiteral("screenshotTriggerMode")).toString();
     if (!screenshotTriggerMode.trimmed().isEmpty()) {
@@ -174,6 +180,10 @@ QJsonObject inputJson(const FunctionSettings &settings)
         settings.input.useScreenshot
     );
     object.insert(
+        QStringLiteral("inputOrder"),
+        stringListToJson(normalizeFunctionInputOrder(settings.input.order))
+    );
+    object.insert(
         QStringLiteral("screenshotTriggerMode"),
         settings.input.screenshotTriggerMode
     );
@@ -232,6 +242,36 @@ QJsonObject recordingJson(const FunctionSettings &settings)
     return object;
 }
 
+QJsonObject functionFlowJson(const FunctionSettings &settings)
+{
+    QJsonObject object = functionFlowStateToJson(settings.flow);
+    const QJsonValue retainedMode =
+        settings.flow.retainedValues.value(
+            QStringLiteral("executionMode")
+        );
+    bool retainedModeKnown = false;
+    if (retainedMode.isString()) {
+        functionExecutionModeFromId(
+            retainedMode.toString(),
+            &retainedModeKnown
+        );
+    }
+    const QJsonValue writtenMode =
+        !retainedMode.isUndefined()
+            && (!retainedMode.isString() || !retainedModeKnown)
+            ? retainedMode
+            : QJsonValue(functionExecutionModeId(settings.executionMode));
+    object.insert(
+        QStringLiteral("executionMode"),
+        writtenMode
+    );
+    object.insert(
+        QStringLiteral("enabled"),
+        settings.executionMode == FunctionExecutionMode::Canvas
+    );
+    return object;
+}
+
 QJsonObject pointJson(const QPoint &point)
 {
     QJsonObject object;
@@ -286,6 +326,7 @@ AppSettingsData appSettingsDataFromJson(
 {
     AppSettingsData data;
     data.retainedRootValues = root;
+    data.retainedRootValues.remove(QStringLiteral("functionFlows"));
     data.trayResident =
         root.value(QStringLiteral("trayResident")).toBool(true);
     data.autoStartEnabled =
@@ -398,6 +439,8 @@ AppSettingsData appSettingsDataFromJson(
         root.value(QStringLiteral("models")).toObject();
     const QJsonObject outputModes =
         root.value(QStringLiteral("outputModes")).toObject();
+    const QJsonObject outputOrders =
+        root.value(QStringLiteral("outputOrders")).toObject();
     const QJsonObject resultTemplates =
         root.value(QStringLiteral("resultTemplates")).toObject();
     const QJsonObject resultActions =
@@ -428,6 +471,9 @@ AppSettingsData appSettingsDataFromJson(
         if (!outputMode.isEmpty()) {
             settings.output.outputMode = outputMode;
         }
+        settings.output.order = stringListFromJson(
+            outputOrders.value(id).toArray()
+        );
         const QString resultTemplate =
             resultTemplates.value(id).toString().trimmed();
         if (!resultTemplate.isEmpty()) {
@@ -487,6 +533,9 @@ AppSettingsData appSettingsDataFromJson(
         settings.output.outputMode =
             object.value(QStringLiteral("outputMode"))
                 .toString(outputModePopup());
+        settings.output.order = stringListFromJson(
+            object.value(QStringLiteral("outputOrder")).toArray()
+        );
         settings.output.resultTemplate =
             object.value(QStringLiteral("resultTemplate"))
                 .toString(resultTemplateSimple());
@@ -532,12 +581,57 @@ AppSettingsData appSettingsDataFromJson(
             data.functionOrder.append(settings.id);
         }
     }
+
+    const QJsonValue functionFlowsValue =
+        root.value(QStringLiteral("functionFlows"));
+    if (functionFlowsValue.isObject()) {
+        const QJsonObject functionFlows =
+            functionFlowsValue.toObject();
+        for (auto it = functionFlows.constBegin();
+             it != functionFlows.constEnd();
+             ++it) {
+            const int index = data.functionIndex(it.key());
+            if (index < 0) {
+                data.retainedOrphanFunctionFlows.insert(
+                    it.key(),
+                    it.value()
+                );
+                continue;
+            }
+            if (it.value().isObject()) {
+                QJsonObject flowObject = it.value().toObject();
+                FunctionExecutionMode executionMode =
+                    FunctionExecutionMode::Classic;
+                const QJsonValue executionModeValue =
+                    flowObject.value(QStringLiteral("executionMode"));
+                if (executionModeValue.isString()) {
+                    executionMode = functionExecutionModeFromId(
+                        executionModeValue.toString()
+                    );
+                } else if (executionModeValue.isUndefined()
+                    && flowObject
+                    .value(QStringLiteral("enabled")).toBool(false)) {
+                    executionMode = FunctionExecutionMode::Canvas;
+                }
+                flowObject.insert(
+                    QStringLiteral("enabled"),
+                    executionMode == FunctionExecutionMode::Canvas
+                );
+                data.functions[index].executionMode = executionMode;
+                data.functions[index].flow =
+                    functionFlowStateFromJson(flowObject, warnings);
+                data.functions[index] =
+                    normalizeFunctionSettings(data.functions[index]);
+            }
+        }
+    }
     return data;
 }
 
 QJsonObject appSettingsDataToJson(const AppSettingsData &data)
 {
     QJsonObject root = data.retainedRootValues;
+    root.remove(QStringLiteral("functionFlows"));
     QJsonObject hotkeys;
     for (auto it = data.applicationHotkeys.constBegin();
          it != data.applicationHotkeys.constEnd();
@@ -547,6 +641,7 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
 
     QJsonObject models;
     QJsonObject outputModes;
+    QJsonObject outputOrders;
     QJsonObject resultTemplates;
     QJsonObject resultActions;
     QJsonObject networkPolicies;
@@ -555,16 +650,25 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
     QJsonObject displayTimes;
     QJsonObject recordingModes;
     QJsonArray customFunctions;
+    QJsonObject functionFlows = data.retainedOrphanFunctionFlows;
 
     for (const FunctionSettings &rawSettings : data.functions) {
         const FunctionSettings settings =
             normalizeFunctionSettings(rawSettings);
+        functionFlows.insert(
+            settings.id,
+            functionFlowJson(settings)
+        );
         if (settings.builtIn) {
             hotkeys.insert(settings.id, settings.shortcut);
             models.insert(settings.id, settings.modelId);
             outputModes.insert(
                 settings.id,
                 settings.output.outputMode
+            );
+            outputOrders.insert(
+                settings.id,
+                stringListToJson(settings.output.order)
             );
             resultTemplates.insert(
                 settings.id,
@@ -611,6 +715,10 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
             settings.output.outputMode
         );
         object.insert(
+            QStringLiteral("outputOrder"),
+            stringListToJson(settings.output.order)
+        );
+        object.insert(
             QStringLiteral("resultTemplate"),
             settings.output.resultTemplate
         );
@@ -628,6 +736,7 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
     root.insert(QStringLiteral("hotkeys"), hotkeys);
     root.insert(QStringLiteral("models"), models);
     root.insert(QStringLiteral("outputModes"), outputModes);
+    root.insert(QStringLiteral("outputOrders"), outputOrders);
     root.insert(QStringLiteral("resultTemplates"), resultTemplates);
     root.insert(QStringLiteral("resultActions"), resultActions);
     root.insert(QStringLiteral("networkPolicies"), networkPolicies);
@@ -636,6 +745,7 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
     root.insert(QStringLiteral("displayTimes"), displayTimes);
     root.insert(QStringLiteral("recordingModes"), recordingModes);
     root.insert(QStringLiteral("customFunctions"), customFunctions);
+    root.insert(QStringLiteral("functionFlows"), functionFlows);
 
     root.insert(QStringLiteral("trayResident"), data.trayResident);
     root.insert(QStringLiteral("autoStartEnabled"), data.autoStartEnabled);

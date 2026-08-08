@@ -15,14 +15,12 @@ struct FunctionWorkspaceControllerAccess
 {
     HubSettingsState *settings = nullptr;
     PromptSettingsAccess prompts;
+    FunctionFlowSettingsAccess flows;
     std::function<void()> saveSettings;
-    std::function<bool(
-        const FunctionEditorDialogRequest &,
-        const FunctionEditorDialogAccess &
-    )> openEditorDialog;
+    std::function<void(const OperationError &)> operationFailed;
 };
 
-// 集中管理功能页面、功能新增和功能编辑流程，主窗口只负责提供外部动作。
+// 集中管理内置功能页面及新增流程，不再打开独立编辑窗口。
 class FunctionWorkspaceController
 {
 public:
@@ -44,7 +42,17 @@ public:
     QString currentFunctionId() const;
 
     void refreshCommandPage();
+    void refreshCanvasState();
     void refreshManagementPage();
+    bool flushPendingFlowDraft();
+    void discardPendingFlowDraft();
+    bool canLeaveFunctionPage();
+    bool applyFunctionFlowRuntimeEvent(
+        const FunctionFlowNodeExecutionEvent &event
+    );
+    bool applyFunctionFlowRunEvent(
+        const FunctionFlowRunExecutionEvent &event
+    );
 
     QString summaryText(const QString &id, const QString &shortcut);
     bool editFunction(

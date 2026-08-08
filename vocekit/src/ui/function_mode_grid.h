@@ -43,12 +43,7 @@ struct FunctionModeGridAccess
 class FunctionModeGrid : public QWidget
 {
 public:
-    using EditCallback = std::function<void(
-        const QString &id,
-        const QString &title,
-        bool custom,
-        const CustomFunctionDef &customFunction
-    )>;
+    using OpenCallback = std::function<void(const QString &id)>;
     using SettingsChangedCallback = std::function<void()>;
     using WarningCallback = std::function<void(
         const QString &title,
@@ -60,7 +55,7 @@ public:
         QWidget *parent = nullptr
     );
 
-    void setEditCallback(const EditCallback &callback);
+    void setOpenCallback(const OpenCallback &callback);
     void setSettingsChangedCallback(const SettingsChangedCallback &callback);
     void setWarningCallback(const WarningCallback &callback);
 
@@ -95,7 +90,7 @@ private:
 
     FunctionModeGridAccess m_access;
     QGridLayout *m_grid = nullptr;
-    EditCallback m_editCallback;
+    OpenCallback m_openCallback;
     SettingsChangedCallback m_settingsChangedCallback;
     WarningCallback m_warningCallback;
 };

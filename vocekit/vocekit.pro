@@ -111,6 +111,7 @@ SOURCES += \
     src/providers/provider_websocket_transport.cpp \
     src/providers/provider_registry.cpp \
     src/providers/xfyun_speech_provider.cpp \
+    src/providers/xfyun_speech_protocol.cpp \
     src/recording/segmented_recording.cpp \
     src/recording/voice_audio_recorder_adapter.cpp \
     src/recording/voice_long_recording_session.cpp \
@@ -369,6 +370,7 @@ HEADERS += \
     src/providers/provider_registry.h \
     src/providers/provider_types.h \
     src/providers/speech_provider.h \
+    src/providers/xfyun_speech_protocol.h \
     src/providers/xfyun_speech_provider.h \
     src/recording/segmented_recording.h \
     src/recording/voice_audio_recorder_adapter.h \

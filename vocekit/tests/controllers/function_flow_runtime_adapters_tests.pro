@@ -33,6 +33,7 @@ SOURCES += \
     ../../src/providers/provider_network_transport.cpp \
     ../../src/providers/provider_websocket_transport.cpp \
     ../../src/providers/provider_registry.cpp \
+    ../../src/providers/xfyun_speech_protocol.cpp \
     ../../src/providers/xfyun_speech_provider.cpp \
     ../../src/result_flow_config.cpp \
     ../../src/runtime_log.cpp \

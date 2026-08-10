@@ -4,14 +4,13 @@
 #include "../config/app_settings_defaults.h"
 #include "../runtime_log.h"
 #include "network_error_messages.h"
+#include "xfyun_speech_protocol.h"
 
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocale>
-#include <QUrlQuery>
 
 namespace {
 
@@ -68,85 +67,6 @@ NetworkRequestOptions recognitionOptions(
     return options;
 }
 
-QUrl signedUrl(
-    const SecretConfig &secrets,
-    const QDateTime &utcNow)
-{
-    const QString host = QStringLiteral("iat-api.xfyun.cn");
-    const QString path = QStringLiteral("/v2/iat");
-    const QString date = QLocale::c().toString(
-        utcNow.toUTC(),
-        QStringLiteral("ddd, dd MMM yyyy HH:mm:ss 'GMT'")
-    );
-    const QByteArray signatureOrigin = (
-        QStringLiteral("host: ") + host
-        + QStringLiteral("\ndate: ") + date
-        + QStringLiteral("\nGET ") + path
-        + QStringLiteral(" HTTP/1.1")
-    ).toUtf8();
-    const QByteArray signature = hmacSha256(
-        secrets.xfyunApiSecret.toUtf8(),
-        signatureOrigin
-    ).toBase64();
-    const QByteArray authorizationOrigin = (
-        QStringLiteral("api_key=\"") + secrets.xfyunApiKey
-        + QStringLiteral(
-            "\", algorithm=\"hmac-sha256\", "
-            "headers=\"host date request-line\", signature=\""
-        )
-        + QString::fromLatin1(signature)
-        + QStringLiteral("\"")
-    ).toUtf8();
-
-    QUrl url(QStringLiteral("wss://") + host + path);
-    QUrlQuery query;
-    query.addQueryItem(
-        QStringLiteral("authorization"),
-        QString::fromLatin1(authorizationOrigin.toBase64())
-    );
-    query.addQueryItem(QStringLiteral("date"), date);
-    query.addQueryItem(QStringLiteral("host"), host);
-    url.setQuery(query);
-    return url;
-}
-
-QByteArray audioFrame(
-    const SecretConfig &secrets,
-    const QByteArray &audio,
-    int status,
-    int sampleRate)
-{
-    QJsonObject root;
-    if (status == 0) {
-        QJsonObject common;
-        common.insert(QStringLiteral("app_id"), secrets.xfyunAppId);
-        root.insert(QStringLiteral("common"), common);
-
-        QJsonObject business;
-        business.insert(QStringLiteral("language"), QStringLiteral("zh_cn"));
-        business.insert(QStringLiteral("domain"), QStringLiteral("iat"));
-        business.insert(QStringLiteral("accent"), QStringLiteral("mandarin"));
-        business.insert(QStringLiteral("vad_eos"), 10000);
-        root.insert(QStringLiteral("business"), business);
-    }
-
-    QJsonObject data;
-    data.insert(QStringLiteral("status"), status);
-    data.insert(
-        QStringLiteral("format"),
-        QStringLiteral("audio/L16;rate=%1").arg(
-            sampleRate > 0 ? sampleRate : 16000
-        )
-    );
-    data.insert(QStringLiteral("encoding"), QStringLiteral("raw"));
-    data.insert(
-        QStringLiteral("audio"),
-        QString::fromLatin1(audio.toBase64())
-    );
-    root.insert(QStringLiteral("data"), data);
-    return QJsonDocument(root).toJson(QJsonDocument::Compact);
-}
-
 QList<QByteArray> audioFrames(
     const SecretConfig &secrets,
     const QByteArray &audio,
@@ -159,51 +79,24 @@ QList<QByteArray> audioFrames(
         const QByteArray chunk = audio.mid(offset, 1280);
         offset += chunk.size();
         frames.append(
-            audioFrame(
+            xfyunAudioFrame(
                 secrets,
                 chunk,
                 first ? 0 : 1,
-                sampleRate
+                sampleRate,
+                false
             )
         );
         first = false;
     }
-    frames.append(audioFrame(secrets, QByteArray(), 2, sampleRate));
+    frames.append(xfyunAudioFrame(
+        secrets,
+        QByteArray(),
+        2,
+        sampleRate,
+        false
+    ));
     return frames;
-}
-
-bool isFinalMessage(const QByteArray &message)
-{
-    QJsonParseError parseError;
-    const QJsonDocument document =
-        QJsonDocument::fromJson(message, &parseError);
-    if (parseError.error != QJsonParseError::NoError
-        || !document.isObject()) {
-        return false;
-    }
-    const QJsonObject root = document.object();
-    if (root.value(QStringLiteral("code")).toInt(-1) != 0) {
-        return true;
-    }
-    return root.value(QStringLiteral("data")).toObject()
-        .value(QStringLiteral("status")).toInt(-1) == 2;
-}
-
-QString recognizedPart(const QJsonObject &root)
-{
-    QString part;
-    const QJsonArray words = root.value(QStringLiteral("data")).toObject()
-        .value(QStringLiteral("result")).toObject()
-        .value(QStringLiteral("ws")).toArray();
-    for (const QJsonValue &wordValue : words) {
-        const QJsonArray candidates = wordValue.toObject()
-            .value(QStringLiteral("cw")).toArray();
-        if (!candidates.isEmpty()) {
-            part += candidates.first().toObject()
-                .value(QStringLiteral("w")).toString();
-        }
-    }
-    return part;
 }
 
 OperationError websocketError(const ProviderWebSocketResult &response)
@@ -361,7 +254,7 @@ SpeechRecognitionResult XfyunSpeechProvider::recognizeRequest(
     }
 
     ProviderWebSocketRequest websocketRequest;
-    websocketRequest.url = signedUrl(
+    websocketRequest.url = xfyunSignedIatUrl(
         m_secrets,
         m_utcNow
             ? m_utcNow()
@@ -387,7 +280,9 @@ SpeechRecognitionResult XfyunSpeechProvider::recognizeRequest(
     timer.start();
     const ProviderWebSocketResult response = m_transport->exchange(
         websocketRequest,
-        isFinalMessage,
+        [](const QByteArray &message) {
+            return parseXfyunRecognitionEvent(message).isFinal();
+        },
         cancellation
     );
     result.durationMs = response.durationMs >= 0
@@ -405,11 +300,9 @@ SpeechRecognitionResult XfyunSpeechProvider::recognizeRequest(
     } else {
         QStringList parts;
         for (const QByteArray &message : response.messages) {
-            QJsonParseError parseError;
-            const QJsonDocument document =
-                QJsonDocument::fromJson(message, &parseError);
-            if (parseError.error != QJsonParseError::NoError
-                || !document.isObject()) {
+            const XfyunRecognitionEvent event =
+                parseXfyunRecognitionEvent(message);
+            if (!event.valid) {
                 result.error = operationError(
                     QStringLiteral("speech.invalid_response"),
                     tr8("讯飞语音听写返回的不是有效 JSON。"),
@@ -417,22 +310,19 @@ SpeechRecognitionResult XfyunSpeechProvider::recognizeRequest(
                 );
                 break;
             }
-            const QJsonObject root = document.object();
-            const int code =
-                root.value(QStringLiteral("code")).toInt(-1);
-            if (code != 0) {
+            if (event.code != 0) {
                 result.error = operationError(
                     QStringLiteral("speech.api"),
                     tr8("讯飞识别失败：")
-                        + root.value(QStringLiteral("message"))
-                            .toString(QString::number(code)),
+                        + (event.message.trimmed().isEmpty()
+                            ? QString::number(event.code)
+                            : event.message),
                     QString::fromUtf8(message)
                 );
                 break;
             }
-            const QString part = recognizedPart(root);
-            if (!part.isEmpty()) {
-                parts.append(part);
+            if (!event.text.isEmpty()) {
+                parts.append(event.text);
             }
         }
         result.text = parts.join(QString()).trimmed();

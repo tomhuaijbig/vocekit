@@ -133,7 +133,7 @@ QString ApiSettingsSection::apiRowDetailText(const QString &title, const QString
             return apiTr8("百度语音识别的 Secret Key，必须和百度 API Key 属于同一个应用。\n\n如果填错，通常会出现令牌获取失败或接口认证失败。");
         }
         if (title == apiTr8("百度应用编号（AppID）")) {
-            return apiTr8("百度应用编号是可选项，主要用于记录应用来源。当前基础语音识别流程不依赖它，不确定时可以先不填。");
+            return apiTr8("百度实时语音识别需要 AppID 和 API Key。仅使用停止后的整段 REST 识别时可以留空；留空不会阻止保存，软件会自动使用整段识别。");
         }
         if (title == apiTr8("讯飞应用编号（AppID）")) {
             return apiTr8("讯飞语音听写的 AppID。讯飞 WebSocket 鉴权时需要它和 API Key、API Secret 对应。\n\n请按讯飞控制台的字段顺序填写，避免把 API Key 和 API Secret 填反。");
@@ -239,7 +239,7 @@ void ApiSettingsSection::buildUi()
         m_baiduSampleCodeImportRow = baiduSampleCodeImportRow();
         m_baiduApiKeyRow = secretInputRow(apiTr8("百度接口密钥（API Key）"), apiTr8("语音转文字时使用"), m_baiduApiKeyEdit);
         m_baiduSecretKeyRow = secretInputRow(apiTr8("百度安全密钥（Secret Key）"), apiTr8("用于获取语音识别访问令牌"), m_baiduSecretKeyEdit);
-        m_baiduAppIdRow = secretInputRow(apiTr8("百度应用编号（AppID）"), apiTr8("可选，便于记录应用来源"), m_baiduAppIdEdit);
+        m_baiduAppIdRow = secretInputRow(apiTr8("百度应用编号（AppID）"), apiTr8("实时识别必填；仅整段识别可留空"), m_baiduAppIdEdit);
         m_xfyunAppIdRow = secretInputRow(apiTr8("讯飞应用编号（AppID）"), apiTr8("讯飞语音听写应用编号"), m_xfyunAppIdEdit);
         m_xfyunApiKeyRow = secretInputRow(apiTr8("讯飞接口密钥（API Key）"), apiTr8("用于生成讯飞接口鉴权签名"), m_xfyunApiKeyEdit);
         m_xfyunApiSecretRow = secretInputRow(apiTr8("讯飞安全密钥（API Secret）"), apiTr8("用于生成讯飞接口鉴权签名"), m_xfyunApiSecretEdit);

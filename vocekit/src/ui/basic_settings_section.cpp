@@ -174,6 +174,24 @@ void BasicSettingsSection::addVoiceRows(QVBoxLayout *layout)
             applyAndRefresh(next);
         }
     ));
+    QWidget *streamingRow = toggleRow(
+        bssTr8("实时识别"),
+        bssTr8("开启后，讯飞和百度会在录音时实时显示文字；不可用时自动使用停止后识别。"),
+        current.streamingSpeechRecognitionEnabled,
+        [this](bool enabled) {
+            BasicSettingsSnapshot next = snapshot();
+            next.streamingSpeechRecognitionEnabled = enabled;
+            applyAndRefresh(next);
+        }
+    );
+    QCheckBox *streamingToggle =
+        streamingRow->findChild<QCheckBox *>();
+    if (streamingToggle) {
+        streamingToggle->setObjectName(
+            QStringLiteral("streamingSpeechRecognitionToggle")
+        );
+    }
+    layout->addWidget(streamingRow);
     layout->addWidget(toggleRow(
         bssTr8("启用录音倒计时"),
         bssTr8("开启后按下快捷键不会立刻录音，会先显示 3 秒倒计时，避免还没准备好就开始说。"),
@@ -470,6 +488,9 @@ QString BasicSettingsSection::settingDetailText(const QString &title, const QStr
     }
     if (title == bssTr8("启用浮动条")) {
         return bssTr8("开启后，语音输入、识别和大模型处理时会在屏幕底部临时显示浮动条，用来显示当前状态、波形、复制、撤销和重试。\n\n关闭后，语音功能仍可用，但不会显示浮动条。");
+    }
+    if (title == bssTr8("实时识别")) {
+        return bssTr8("开启后，讯飞和百度会在录音过程中持续返回文字，并显示在浮动条中。临时文字可能自动修正，停止录音并定稿后才会执行后续处理。\n\n服务商不支持、配置不足或连接失败时，会继续保存完整录音，并在停止后使用整段识别。关闭后始终使用原有停止后识别流程。");
     }
     if (title == bssTr8("启用词库")) {
         return bssTr8("开启后，听写、翻译、问答和自定义功能生成结果后，会按词库里的启用词条进行修正。\n\n词条可以设置作用范围。全局词条对所有功能生效；听写、翻译、问答或某个自定义功能词条只对对应功能生效。");

@@ -335,6 +335,9 @@ AppSettingsData appSettingsDataFromJson(
         root.value(QStringLiteral("strongSelectionEnabled")).toBool(false);
     data.floatingBarEnabled =
         root.value(QStringLiteral("floatingBarEnabled")).toBool(true);
+    data.streamingSpeechRecognitionEnabled = root
+        .value(QStringLiteral("streamingSpeechRecognitionEnabled"))
+        .toBool(true);
     data.promptLocked =
         root.value(QStringLiteral("promptLocked")).toBool(false);
     data.dictatePolishEnabled =
@@ -756,6 +759,10 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
     root.insert(
         QStringLiteral("floatingBarEnabled"),
         data.floatingBarEnabled
+    );
+    root.insert(
+        QStringLiteral("streamingSpeechRecognitionEnabled"),
+        data.streamingSpeechRecognitionEnabled
     );
     root.insert(QStringLiteral("promptLocked"), data.promptLocked);
     root.insert(

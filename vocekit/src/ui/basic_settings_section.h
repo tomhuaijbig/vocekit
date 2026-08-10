@@ -20,6 +20,7 @@ struct BasicSettingsSnapshot
     bool vocabularyOnlyForVoiceInput = false;
     int vocabularyPromptEntryLimit = 16;
     bool floatingBarEnabled = true;
+    bool streamingSpeechRecognitionEnabled = true;
     bool preRecordCountdownEnabled = false;
     bool recordingBeepEnabled = false;
     bool dictatePolishEnabled = false;

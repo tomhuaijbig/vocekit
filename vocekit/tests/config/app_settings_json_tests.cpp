@@ -28,6 +28,27 @@ class AppSettingsJsonTests : public QObject
     Q_OBJECT
 
 private slots:
+    void missingStreamingSpeechSettingDefaultsToEnabled()
+    {
+        const AppSettingsData restored = appSettingsDataFromJson(
+            QJsonObject()
+        );
+
+        QVERIFY(restored.streamingSpeechRecognitionEnabled);
+    }
+
+    void streamingSpeechSettingRoundTripsFalse()
+    {
+        AppSettingsData original;
+        original.streamingSpeechRecognitionEnabled = false;
+
+        const AppSettingsData restored = appSettingsDataFromJson(
+            appSettingsDataToJson(original)
+        );
+
+        QVERIFY(!restored.streamingSpeechRecognitionEnabled);
+    }
+
     void loadsCurrentSettingsShape()
     {
         QStringList warnings;

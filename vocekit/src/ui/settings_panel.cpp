@@ -397,6 +397,8 @@ QString normalizedRecordDirectorySetting(const QString &path)
             snapshot.vocabularyPromptEntryLimit =
                 settings.vocabularyPromptEntryLimit;
             snapshot.floatingBarEnabled = settings.floatingBarEnabled;
+            snapshot.streamingSpeechRecognitionEnabled =
+                settings.streamingSpeechRecognitionEnabled;
             snapshot.preRecordCountdownEnabled =
                 settings.preRecordCountdownEnabled;
             snapshot.recordingBeepEnabled = settings.recordingBeepEnabled;
@@ -417,6 +419,8 @@ QString normalizedRecordDirectorySetting(const QString &path)
                 settings.vocabularyPromptEntryLimit =
                     snapshot.vocabularyPromptEntryLimit;
                 settings.floatingBarEnabled = snapshot.floatingBarEnabled;
+                settings.streamingSpeechRecognitionEnabled =
+                    snapshot.streamingSpeechRecognitionEnabled;
                 settings.preRecordCountdownEnabled =
                     snapshot.preRecordCountdownEnabled;
                 settings.recordingBeepEnabled =

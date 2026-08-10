@@ -31,6 +31,7 @@ struct AppSettingsData
     bool autoStartEnabled = false;
     bool strongSelectionEnabled = false;
     bool floatingBarEnabled = true;
+    bool streamingSpeechRecognitionEnabled = true;
     bool promptLocked = false;
     bool dictatePolishEnabled = false;
     bool useSystemProxy = false;

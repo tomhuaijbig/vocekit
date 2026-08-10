@@ -16,6 +16,9 @@ struct VoiceRecordingCaptureHandlers
     std::function<QByteArray()> stop;
     std::function<QString()> lastWavPath;
     std::function<int()> takePeakLevel;
+    std::function<void(
+        const std::function<void(const QByteArray &)> &
+    )> setPcmListener;
 };
 
 struct VoiceRecordingStartRequest
@@ -76,6 +79,9 @@ public:
         const QString &startFailurePrefix
     );
     VoiceRecordingStopResult stopNormal();
+    void setPcmListener(
+        const std::function<void(const QByteArray &)> &listener
+    );
 
     int takePeakLevel() const;
     QString lastWavPath() const;

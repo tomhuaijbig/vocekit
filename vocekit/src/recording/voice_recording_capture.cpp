@@ -136,6 +136,15 @@ VoiceRecordingStopResult VoiceRecordingCapture::stopNormal()
     return result;
 }
 
+void VoiceRecordingCapture::setPcmListener(
+    const std::function<void(const QByteArray &)> &listener
+)
+{
+    if (m_handlers.setPcmListener) {
+        m_handlers.setPcmListener(listener);
+    }
+}
+
 int VoiceRecordingCapture::takePeakLevel() const
 {
     return m_handlers.takePeakLevel ? m_handlers.takePeakLevel() : 0;

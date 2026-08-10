@@ -50,5 +50,10 @@ VoiceRecordingCaptureHandlers VoiceAudioRecorderAdapter::handlers()
     result.takePeakLevel = [this]() {
         return m_impl->recorder.takePeakLevel();
     };
+    result.setPcmListener = [this](
+        const std::function<void(const QByteArray &)> &listener
+    ) {
+        m_impl->recorder.setPcmListener(listener);
+    };
     return result;
 }

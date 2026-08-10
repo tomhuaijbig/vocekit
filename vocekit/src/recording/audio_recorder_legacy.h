@@ -1,6 +1,8 @@
 #ifndef VOCEKIT_AUDIO_RECORDER_LEGACY_H
 #define VOCEKIT_AUDIO_RECORDER_LEGACY_H
 
+#include <functional>
+
 // 音频采集设备：边写入 PCM 数据边计算峰值，用来驱动浮动条里的声音波形。
 class AudioCaptureDevice : public QIODevice
 {
@@ -22,6 +24,13 @@ public:
         return value;
     }
 
+    void setPcmListener(
+        const std::function<void(const QByteArray &)> &listener
+    )
+    {
+        m_pcmListener = listener;
+    }
+
 protected:
     qint64 readData(char *, qint64) override
     {
@@ -33,14 +42,24 @@ protected:
         if (!m_file || !m_file->isOpen()) {
             return -1;
         }
-        const QByteArray pcm(data, static_cast<int>(len));
-        m_peak = qMax(m_peak, pcm16PeakLevel(pcm));
-        return m_file->write(data, len);
+        const qint64 written = m_file->write(data, len);
+        if (written <= 0) {
+            return written;
+        }
+        const QByteArray accepted(data, static_cast<int>(written));
+        m_peak = qMax(m_peak, pcm16PeakLevel(accepted));
+        const std::function<void(const QByteArray &)> listener =
+            m_pcmListener;
+        if (listener) {
+            listener(accepted);
+        }
+        return written;
     }
 
 private:
     QFile *m_file = nullptr;
     int m_peak = 0;
+    std::function<void(const QByteArray &)> m_pcmListener;
 };
 
 // 录音器：负责启动麦克风、保存 PCM/WAV 文件，并把音频交给语音识别接口。
@@ -131,6 +150,7 @@ private:
         }
 
         m_capture = new AudioCaptureDevice(m_file);
+        m_capture->setPcmListener(m_pcmListener);
         m_capture->open(QIODevice::WriteOnly);
 
         m_audioInput = new QAudioInput(format);
@@ -140,6 +160,16 @@ private:
     }
 
 public:
+    void setPcmListener(
+        const std::function<void(const QByteArray &)> &listener
+    )
+    {
+        m_pcmListener = listener;
+        if (m_capture) {
+            m_capture->setPcmListener(listener);
+        }
+    }
+
     int takePeakLevel()
     {
         return m_capture ? m_capture->takePeakLevel() : 0;
@@ -190,6 +220,7 @@ private:
     QString m_rawPath;
     QString m_lastWavPath;
     QElapsedTimer m_timer;
+    std::function<void(const QByteArray &)> m_pcmListener;
 };
 
 #endif // VOCEKIT_AUDIO_RECORDER_LEGACY_H

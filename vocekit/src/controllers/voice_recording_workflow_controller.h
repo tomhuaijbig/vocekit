@@ -2,6 +2,7 @@
 #define VOCEKIT_VOICE_RECORDING_WORKFLOW_CONTROLLER_H
 
 #include "../domain/function_flow_compiler.h"
+#include "../providers/streaming_speech_session_factory.h"
 #include "../recording/voice_recording_capture.h"
 #include "../tasks/voice_speech_recognition_executor.h"
 
@@ -38,6 +39,11 @@ struct VoiceRecordingWorkflowAccess
         const VoiceSpeechRecognitionHandlers &,
         const VoiceRecordingFlowSpeechCompletion &
     )> runSpeechRecognition;
+    std::function<StreamingSpeechSessionCreation(
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &
+    )> createStreamingSpeechSession;
+    int streamingFinalTimeoutMs = 5000;
 };
 
 // 完整管理录音准备、采集、长录音分段、语音识别和录音结果元数据。

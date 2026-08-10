@@ -28,6 +28,14 @@ struct FakeRecorder
     QByteArray pcm = QByteArrayLiteral("fake-pcm");
     bool startSucceeds = true;
     QString startError = QStringLiteral("fake recorder failure");
+    std::function<void(const QByteArray &)> pcmListener;
+
+    void emitPcm(const QByteArray &pcmChunk)
+    {
+        if (pcmListener) {
+            pcmListener(pcmChunk);
+        }
+    }
 
     VoiceRecordingCaptureHandlers handlers()
     {
@@ -57,8 +65,87 @@ struct FakeRecorder
         result.takePeakLevel = []() {
             return 0;
         };
+        result.setPcmListener = [this](
+            const std::function<void(const QByteArray &)> &listener
+        ) {
+            pcmListener = listener;
+        };
         return result;
     }
+};
+
+class FakeStreamingSpeechSession : public IStreamingSpeechSession
+{
+public:
+    bool start(QString *) override
+    {
+        ++startCount;
+        currentState = StreamingSpeechState::Streaming;
+        return startSucceeds;
+    }
+
+    bool pushAudio(const QByteArray &pcm) override
+    {
+        pushedAudio.append(pcm);
+        return pushSucceeds;
+    }
+
+    void finish() override
+    {
+        ++finishCount;
+        currentState = StreamingSpeechState::Finalizing;
+    }
+
+    void cancel() override
+    {
+        ++cancelCount;
+        currentState = StreamingSpeechState::Cancelled;
+    }
+
+    StreamingSpeechState state() const override
+    {
+        return currentState;
+    }
+
+    void emitSnapshot(
+        const QString &committed,
+        const QString &provisional
+    )
+    {
+        StreamingTranscriptSnapshot snapshot;
+        snapshot.revision = ++revision;
+        snapshot.committedText = committed;
+        snapshot.provisionalText = provisional;
+        if (callbacks.transcriptUpdated) {
+            callbacks.transcriptUpdated(snapshot);
+        }
+    }
+
+    void emitDegraded(const QString &message)
+    {
+        currentState = StreamingSpeechState::Degraded;
+        if (callbacks.degraded) {
+            callbacks.degraded(message);
+        }
+    }
+
+    void emitCompleted(const QString &text)
+    {
+        currentState = StreamingSpeechState::Completed;
+        if (callbacks.completed) {
+            callbacks.completed(text);
+        }
+    }
+
+    StreamingSpeechCallbacks callbacks;
+    QList<QByteArray> pushedAudio;
+    StreamingSpeechState currentState = StreamingSpeechState::Idle;
+    quint64 revision = 0;
+    int startCount = 0;
+    int finishCount = 0;
+    int cancelCount = 0;
+    bool startSucceeds = true;
+    bool pushSucceeds = true;
 };
 
 QSharedPointer<FunctionFlowResolvedDependencies> flowDependencies(
@@ -267,6 +354,11 @@ private slots:
     void longRecordingEmptyRecognitionSucceedsForInput();
     void longRecordingCancellationStopsRecognitionAndPreservesSegments();
     void classicRecognitionReturnsBeforeProviderCompletes();
+    void classicStreamingForwardsPcmAndSkipsBatch();
+    void streamingDegradeFallsBackOnceAndIgnoresLateCompletion();
+    void disabledStreamingUsesBatchOnly();
+    void flowStreamingUsesFrozenProviderAndCompletesOnce();
+    void longRecordingStreamingSkipsSegmentRecognition();
     void classicToggleAndHoldPathsRemainAvailable();
     void classicHoldReleaseSurvivesConfigurationRemoval();
     void ownsPressOnlyForTheCurrentActiveRecording();
@@ -980,6 +1072,308 @@ classicRecognitionReturnsBeforeProviderCompletes()
         recognized.first(),
         QStringLiteral("classic-async:recognized later")
     );
+    QVERIFY(!controller.isBusy());
+}
+
+void VoiceRecordingWorkflowControllerTests::
+classicStreamingForwardsPcmAndSkipsBatch()
+{
+    FakeRecorder recorder;
+    QSharedPointer<FakeStreamingSpeechSession> streaming(
+        new FakeStreamingSpeechSession
+    );
+    int batchCount = 0;
+    QStringList recognized;
+    QString requestedProvider;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [
+        streaming,
+        &requestedProvider
+    ](
+        const StreamingSpeechSessionRequest &request,
+        const StreamingSpeechCallbacks &callbacks
+    ) -> StreamingSpeechSessionCreation {
+        requestedProvider = request.provider;
+        streaming->callbacks = callbacks;
+        StreamingSpeechSessionCreation result;
+        result.session = streaming;
+        return result;
+    };
+    access.runSpeechRecognition = [
+        &batchCount
+    ](const VoiceSpeechRecognitionRequest &,
+      const VoiceSpeechRecognitionHandlers &,
+      const VoiceRecordingFlowSpeechCompletion &) {
+        ++batchCount;
+    };
+    access.processRecognizedSpeech = [
+        &recognized
+    ](const QString &modeId, const QString &text) {
+        recognized.append(modeId + QLatin1Char(':') + text);
+    };
+
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = QStringLiteral("xfyun");
+    FunctionSettings function;
+    function.id = QStringLiteral("classic-stream");
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(QStringLiteral("classic-stream")));
+    QCOMPARE(requestedProvider, QStringLiteral("xfyun"));
+    QCOMPARE(streaming->startCount, 1);
+    recorder.emitPcm(QByteArrayLiteral("live-pcm"));
+    QCOMPARE(
+        streaming->pushedAudio,
+        QList<QByteArray>() << QByteArrayLiteral("live-pcm")
+    );
+    streaming->emitSnapshot(
+        QStringLiteral("final "),
+        QStringLiteral("draft")
+    );
+
+    QVERIFY(controller.handleHotkey(QStringLiteral("classic-stream")));
+    QCOMPARE(streaming->finishCount, 1);
+    QCOMPARE(batchCount, 0);
+    QVERIFY(recognized.isEmpty());
+    streaming->emitCompleted(QStringLiteral("stream result"));
+
+    QTRY_COMPARE_WITH_TIMEOUT(recognized.size(), 1, 1000);
+    QCOMPARE(
+        recognized.first(),
+        QStringLiteral("classic-stream:stream result")
+    );
+    QCOMPARE(batchCount, 0);
+    streaming->emitCompleted(QStringLiteral("late duplicate"));
+    QTest::qWait(20);
+    QCOMPARE(recognized.size(), 1);
+    QVERIFY(!recorder.pcmListener);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+streamingDegradeFallsBackOnceAndIgnoresLateCompletion()
+{
+    FakeRecorder recorder;
+    QSharedPointer<FakeStreamingSpeechSession> streaming(
+        new FakeStreamingSpeechSession
+    );
+    int batchCount = 0;
+    QStringList recognized;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [streaming](
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &callbacks
+    ) -> StreamingSpeechSessionCreation {
+        streaming->callbacks = callbacks;
+        StreamingSpeechSessionCreation result;
+        result.session = streaming;
+        return result;
+    };
+    access.runSpeechRecognition = [
+        &batchCount
+    ](const VoiceSpeechRecognitionRequest &,
+      const VoiceSpeechRecognitionHandlers &,
+      const VoiceRecordingFlowSpeechCompletion &completion) {
+        ++batchCount;
+        VoiceSpeechRecognitionResult result;
+        result.ok = true;
+        result.text = QStringLiteral("batch result");
+        completion(result);
+    };
+    access.processRecognizedSpeech = [
+        &recognized
+    ](const QString &, const QString &text) {
+        recognized.append(text);
+    };
+
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = QStringLiteral("baidu");
+    FunctionSettings function;
+    function.id = QStringLiteral("fallback");
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(QStringLiteral("fallback")));
+    streaming->emitDegraded(QStringLiteral("socket failed"));
+    streaming->emitDegraded(QStringLiteral("duplicate"));
+    QTRY_VERIFY_WITH_TIMEOUT(!recorder.pcmListener, 1000);
+    QVERIFY(controller.handleHotkey(QStringLiteral("fallback")));
+
+    QTRY_COMPARE_WITH_TIMEOUT(batchCount, 1, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(recognized.size(), 1, 1000);
+    QCOMPARE(recognized.first(), QStringLiteral("batch result"));
+    streaming->emitCompleted(QStringLiteral("late stream"));
+    QTest::qWait(20);
+    QCOMPARE(batchCount, 1);
+    QCOMPARE(recognized.size(), 1);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+disabledStreamingUsesBatchOnly()
+{
+    FakeRecorder recorder;
+    int factoryCount = 0;
+    int batchCount = 0;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [
+        &factoryCount
+    ](const StreamingSpeechSessionRequest &,
+      const StreamingSpeechCallbacks &)
+        -> StreamingSpeechSessionCreation {
+        ++factoryCount;
+        return StreamingSpeechSessionCreation();
+    };
+    access.runSpeechRecognition = [
+        &batchCount
+    ](const VoiceSpeechRecognitionRequest &,
+      const VoiceSpeechRecognitionHandlers &,
+      const VoiceRecordingFlowSpeechCompletion &completion) {
+        ++batchCount;
+        VoiceSpeechRecognitionResult result;
+        result.ok = true;
+        result.text = QStringLiteral("batch only");
+        completion(result);
+    };
+
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = false;
+    settings.speechProvider = QStringLiteral("xfyun");
+    FunctionSettings function;
+    function.id = QStringLiteral("disabled");
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(QStringLiteral("disabled")));
+    QVERIFY(controller.handleHotkey(QStringLiteral("disabled")));
+    QTRY_COMPARE_WITH_TIMEOUT(batchCount, 1, 1000);
+    QCOMPARE(factoryCount, 0);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+flowStreamingUsesFrozenProviderAndCompletesOnce()
+{
+    FakeRecorder recorder;
+    QSharedPointer<FakeStreamingSpeechSession> streaming(
+        new FakeStreamingSpeechSession
+    );
+    QString requestedProvider;
+    int batchCount = 0;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [
+        streaming,
+        &requestedProvider
+    ](const StreamingSpeechSessionRequest &request,
+      const StreamingSpeechCallbacks &callbacks)
+        -> StreamingSpeechSessionCreation {
+        requestedProvider = request.provider;
+        streaming->callbacks = callbacks;
+        StreamingSpeechSessionCreation result;
+        result.session = streaming;
+        return result;
+    };
+    access.runSpeechRecognition = [
+        &batchCount
+    ](const VoiceSpeechRecognitionRequest &,
+      const VoiceSpeechRecognitionHandlers &,
+      const VoiceRecordingFlowSpeechCompletion &) {
+        ++batchCount;
+    };
+
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = QStringLiteral("baidu");
+    controller.updateConfiguration(settings);
+
+    CancellationSource source;
+    FunctionFlowNodeResult observed;
+    int completionCount = 0;
+    QVERIFY(controller.beginForFlow(
+        flowRun(source, flowDependencies(
+            QStringLiteral("voice-node"),
+            QStringLiteral("xfyun")
+        )),
+        voiceNode(),
+        [&](const FunctionFlowNodeResult &result) {
+            ++completionCount;
+            observed = result;
+        }
+    ));
+    QCOMPARE(requestedProvider, QStringLiteral("xfyun"));
+    QVERIFY(controller.handleHotkey(QStringLiteral("flow-function")));
+    QCOMPARE(streaming->finishCount, 1);
+    QCOMPARE(batchCount, 0);
+
+    streaming->emitCompleted(QStringLiteral("flow stream result"));
+    QTRY_COMPARE_WITH_TIMEOUT(completionCount, 1, 1000);
+    QCOMPARE(observed.state, FunctionFlowNodeState::Succeeded);
+    QCOMPARE(observed.values.size(), 1);
+    QCOMPARE(observed.values.first().text, QStringLiteral("flow stream result"));
+    streaming->emitCompleted(QStringLiteral("late"));
+    QTest::qWait(20);
+    QCOMPARE(completionCount, 1);
+    QCOMPARE(batchCount, 0);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+longRecordingStreamingSkipsSegmentRecognition()
+{
+    FakeRecorder recorder;
+    QSharedPointer<FakeStreamingSpeechSession> streaming(
+        new FakeStreamingSpeechSession
+    );
+    int providerRecognitionCount = 0;
+    QStringList recognized;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [streaming](
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &callbacks
+    ) -> StreamingSpeechSessionCreation {
+        streaming->callbacks = callbacks;
+        StreamingSpeechSessionCreation result;
+        result.session = streaming;
+        return result;
+    };
+    access.speechRecognition.recognizeProvider = [
+        &providerRecognitionCount
+    ](const SpeechRecognitionProviderTaskRequest &) {
+        ++providerRecognitionCount;
+        SpeechRecognitionTaskResult result;
+        result.text = QStringLiteral("batch segment");
+        return result;
+    };
+    access.processRecognizedSpeech = [
+        &recognized
+    ](const QString &, const QString &text) {
+        recognized.append(text);
+    };
+
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = QStringLiteral("xfyun");
+    FunctionSettings function;
+    function.id = QStringLiteral("long-stream");
+    function.recording.longRecordingEnabled = true;
+    function.recording.segmentSeconds = 20;
+    function.recording.maximumMinutes = 1;
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(QStringLiteral("long-stream")));
+    QVERIFY(controller.handleHotkey(QStringLiteral("long-stream")));
+    QCOMPARE(streaming->finishCount, 1);
+    QCOMPARE(providerRecognitionCount, 0);
+    streaming->emitCompleted(QStringLiteral("complete long stream"));
+
+    QTRY_COMPARE_WITH_TIMEOUT(recognized.size(), 1, 1000);
+    QCOMPARE(recognized.first(), QStringLiteral("complete long stream"));
+    QCOMPARE(providerRecognitionCount, 0);
     QVERIFY(!controller.isBusy());
 }
 

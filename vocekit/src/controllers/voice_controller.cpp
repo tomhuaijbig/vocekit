@@ -26,6 +26,7 @@ static QString tr8(const char *text)
 #include "../domain/voice_run_session.h"
 #include "../output/clipboard_writer.h"
 #include "../providers/network_error_messages.h"
+#include "../providers/streaming_speech_session_factory.h"
 #include "../tasks/diagnostic_helpers.h"
 #include "../result_flow_config.h"
 #include "../runtime_log.h"
@@ -133,6 +134,15 @@ public:
             } else {
                 processRecognizedSpeech(modeId, text);
             }
+        };
+        recordingAccess.createStreamingSpeechSession = [](
+            const StreamingSpeechSessionRequest &request,
+            const StreamingSpeechCallbacks &callbacks
+        ) {
+            return createDefaultStreamingSpeechSession(
+                request,
+                callbacks
+            );
         };
         m_recordingWorkflow =
             new VoiceRecordingWorkflowController(

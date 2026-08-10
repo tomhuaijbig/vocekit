@@ -109,6 +109,7 @@ public:
         configureCoordinatorCallbacks();
         configureRecognitionCallbacks();
         m_flowCancellationTimer.setInterval(10);
+        m_streamingFinalTimer.setSingleShot(true);
         connect(
             &m_flowCancellationTimer,
             &QTimer::timeout,
@@ -117,11 +118,23 @@ public:
                 cancelFlowIfRequested();
             }
         );
+        connect(
+            &m_streamingFinalTimer,
+            &QTimer::timeout,
+            this,
+            [this]() {
+                handleStreamingDegraded(
+                    m_operationGeneration,
+                    tr8("等待实时识别最终结果超时。")
+                );
+            }
+        );
     }
 
     ~Impl() override
     {
         m_flowCancellationTimer.stop();
+        cancelStreamingSession();
         m_recordingCoordinator.cancelPreparation();
         m_longRecognitionCoordinator.cancel();
         if (m_recordingLifecycle.isRecording()) {
@@ -816,6 +829,254 @@ private:
         showFailure(error);
     }
 
+    void startStreamingForCurrentRecording()
+    {
+        m_streamingFinalTimer.stop();
+        m_streamingSession.reset();
+        m_streamingStoppedRecording = VoiceRecordingStopResult();
+        m_streamingFinalizing = false;
+        m_streamingTerminalHandled = false;
+        m_streamingFallbackActive = false;
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
+
+        if (!m_settings.streamingSpeechRecognitionEnabled
+            || !m_access.createStreamingSpeechSession) {
+            return;
+        }
+
+        StreamingSpeechSessionRequest request;
+        request.provider = m_flow.active
+            ? m_flow.provider
+            : m_settings.speechProvider;
+        request.networkPolicy = m_flow.active
+            ? m_flow.networkPolicy
+            : QStringLiteral("inherit");
+        request.useSystemProxy = m_flow.active
+            ? m_flow.networkPolicy == QStringLiteral("systemProxy")
+            : m_settings.useSystemProxy;
+
+        const quint64 generation = m_operationGeneration;
+        const QPointer<Impl> self(this);
+        StreamingSpeechCallbacks callbacks;
+        callbacks.transcriptUpdated = [self, generation](
+            const StreamingTranscriptSnapshot &snapshot
+        ) {
+            if (!self) {
+                return;
+            }
+            QTimer::singleShot(0, self.data(), [self, generation, snapshot]() {
+                if (self) {
+                    self->handleStreamingSnapshot(generation, snapshot);
+                }
+            });
+        };
+        callbacks.degraded = [self, generation](const QString &message) {
+            if (!self) {
+                return;
+            }
+            QTimer::singleShot(0, self.data(), [self, generation, message]() {
+                if (self) {
+                    self->handleStreamingDegraded(generation, message);
+                }
+            });
+        };
+        callbacks.completed = [self, generation](const QString &text) {
+            if (!self) {
+                return;
+            }
+            QTimer::singleShot(0, self.data(), [self, generation, text]() {
+                if (self) {
+                    self->handleStreamingCompleted(generation, text);
+                }
+            });
+        };
+
+        const StreamingSpeechSessionCreation creation =
+            m_access.createStreamingSpeechSession(request, callbacks);
+        if (creation.session.isNull()) {
+            if (!creation.unavailableReason.trimmed().isEmpty()) {
+                logRuntimeEvent(
+                    tr8("实时语音识别"),
+                    tr8("使用整段识别"),
+                    creation.unavailableReason
+                );
+            }
+            return;
+        }
+
+        QString error;
+        if (!creation.session->start(&error)) {
+            logRuntimeEvent(
+                tr8("实时语音识别"),
+                tr8("启动失败"),
+                error
+            );
+            return;
+        }
+        m_streamingSession = creation.session;
+        const QWeakPointer<IStreamingSpeechSession> weakSession =
+            m_streamingSession.toWeakRef();
+        m_recordingCapture.setPcmListener(
+            [weakSession](const QByteArray &pcm) {
+                const QSharedPointer<IStreamingSpeechSession> session =
+                    weakSession.toStrongRef();
+                if (!session.isNull()) {
+                    session->pushAudio(pcm);
+                }
+            }
+        );
+        logRuntimeEvent(
+            tr8("实时语音识别"),
+            tr8("开始"),
+            QStringLiteral("服务=") + request.provider
+        );
+    }
+
+    bool hasHealthyStreamingSession() const
+    {
+        return !m_streamingSession.isNull()
+            && !m_streamingFallbackActive
+            && !m_streamingTerminalHandled;
+    }
+
+    void handleStreamingSnapshot(
+        quint64 generation,
+        const StreamingTranscriptSnapshot &snapshot
+    )
+    {
+        if (generation != m_operationGeneration
+            || m_streamingFallbackActive
+            || m_streamingTerminalHandled) {
+            return;
+        }
+        if (m_bar) {
+            m_bar->setStreamingTranscript(
+                snapshot.committedText,
+                snapshot.provisionalText
+            );
+        }
+    }
+
+    void handleStreamingDegraded(
+        quint64 generation,
+        const QString &message
+    )
+    {
+        if (generation != m_operationGeneration
+            || m_streamingFallbackActive
+            || m_streamingTerminalHandled) {
+            return;
+        }
+        const bool wasFinalizing = m_streamingFinalizing;
+        m_streamingFallbackActive = true;
+        m_streamingFinalTimer.stop();
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
+        const QSharedPointer<IStreamingSpeechSession> session =
+            m_streamingSession;
+        m_streamingSession.reset();
+        if (!session.isNull()
+            && session->state() != StreamingSpeechState::Degraded) {
+            session->cancel();
+        }
+        if (m_bar) {
+            m_bar->setStreamingFallback();
+        }
+        logRuntimeEvent(
+            tr8("实时语音识别"),
+            tr8("自动降级"),
+            message
+        );
+        if (!wasFinalizing) {
+            if (m_longRecordingSession.isActive()) {
+                startNextSegmentRecognition();
+            }
+            return;
+        }
+        if (m_longRecordingSession.isFinalizing()) {
+            startNextSegmentRecognition();
+        } else if (m_flow.active) {
+            beginFlowBatchRecognition(m_flow.generation, m_flow.runId);
+        } else {
+            beginClassicBatchRecognition(
+                m_modeId,
+                m_streamingStoppedRecording,
+                generation
+            );
+        }
+    }
+
+    void handleStreamingCompleted(
+        quint64 generation,
+        const QString &text
+    )
+    {
+        if (generation != m_operationGeneration
+            || m_streamingFallbackActive
+            || m_streamingTerminalHandled
+            || !m_streamingFinalizing) {
+            return;
+        }
+        const QString finalText = text.trimmed();
+        if (finalText.isEmpty()) {
+            handleStreamingDegraded(
+                generation,
+                tr8("实时识别没有返回文字。")
+            );
+            return;
+        }
+        m_streamingTerminalHandled = true;
+        m_streamingFinalTimer.stop();
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
+        m_streamingSession.reset();
+        if (m_bar) {
+            m_bar->setStreamingTranscript(finalText, QString());
+        }
+
+        if (m_longRecordingSession.isFinalizing()) {
+            completeLongRecordingFromStreaming(finalText);
+        } else if (m_flow.active) {
+            const QSharedPointer<const FunctionFlowVoicePayload> payload =
+                flowPayload(
+                    m_flow.normalRecording.wavPath,
+                    QVector<RecordingSegment>(),
+                    m_flow.speechElapsedMs,
+                    false
+                );
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Succeeded;
+            result.values.append(flowValue(finalText, payload));
+            finishFlow(result, m_flow.generation, m_flow.runId);
+        } else {
+            m_classicRecognitionRunning = false;
+            processRecognizedSpeech(m_modeId, finalText);
+            setProcessing(false);
+        }
+    }
+
+    void cancelStreamingSession()
+    {
+        m_streamingFinalTimer.stop();
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
+        const QSharedPointer<IStreamingSpeechSession> session =
+            m_streamingSession;
+        m_streamingSession.reset();
+        if (!session.isNull()
+            && session->state() != StreamingSpeechState::Completed
+            && session->state() != StreamingSpeechState::Cancelled) {
+            session->cancel();
+        }
+        m_streamingTerminalHandled = true;
+        m_streamingFinalizing = false;
+    }
+
     void handleRecordingStarted(
         const QString &id,
         bool longRecordingActive
@@ -829,6 +1090,7 @@ private:
         if (!m_flow.active && m_runSession) {
             m_runSession->setLongRecording(longRecordingActive);
         }
+        startStreamingForCurrentRecording();
         setWaveformVisible(true);
         setTimedStatus(
             tr8("正在录音"),
@@ -940,7 +1202,7 @@ private:
                     + QStringLiteral("，分段数=33"),
                 elapsedMs()
             );
-            startNextSegmentRecognition();
+            finishLongStreamingOrBatch();
             return;
         }
         if (nextSegment.status
@@ -959,7 +1221,7 @@ private:
                     + nextSegment.error,
                 elapsedMs()
             );
-            startNextSegmentRecognition();
+            finishLongStreamingOrBatch();
             return;
         }
 
@@ -975,7 +1237,29 @@ private:
         m_recordingLifecycle.restartSegment(
             segmentSecondsFor(m_modeId) * 1000
         );
-        startNextSegmentRecognition();
+        if (!hasHealthyStreamingSession()) {
+            startNextSegmentRecognition();
+        }
+    }
+
+    void finishLongStreamingOrBatch()
+    {
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
+        if (!hasHealthyStreamingSession()) {
+            startNextSegmentRecognition();
+            return;
+        }
+        m_streamingFinalizing = true;
+        if (m_bar) {
+            m_bar->setStreamingFinalizing();
+        }
+        m_streamingSession->finish();
+        m_streamingFinalTimer.start(qMax(
+            1,
+            m_access.streamingFinalTimeoutMs
+        ));
     }
 
     void stopAndProcess()
@@ -993,6 +1277,10 @@ private:
             return;
         }
 
+        const bool finishWithStreaming = hasHealthyStreamingSession();
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
         setProcessing(true);
         const QString modeId = m_modeId;
         setWaveformVisible(false);
@@ -1037,6 +1325,34 @@ private:
                 + QString::number(recording.pcm.size()),
             elapsedMs()
         );
+
+        if (finishWithStreaming) {
+            m_streamingStoppedRecording = recording;
+            m_streamingFinalizing = true;
+            m_classicRecognitionRunning = true;
+            if (m_bar) {
+                m_bar->setStreamingFinalizing();
+            }
+            m_streamingSession->finish();
+            m_streamingFinalTimer.start(qMax(
+                1,
+                m_access.streamingFinalTimeoutMs
+            ));
+            return;
+        }
+
+        beginClassicBatchRecognition(modeId, recording, generation);
+    }
+
+    void beginClassicBatchRecognition(
+        const QString &modeId,
+        const VoiceRecordingStopResult &recording,
+        quint64 generation
+    )
+    {
+        if (m_streamingTerminalHandled && !m_streamingFallbackActive) {
+            return;
+        }
 
         VoiceSpeechRecognitionRequest request;
         request.modeId = modeId;
@@ -1153,6 +1469,10 @@ private:
             return;
         }
 
+        const bool finishWithStreaming = hasHealthyStreamingSession();
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
         const quint64 generation = m_flow.generation;
         const ExecutionId runId = m_flow.runId;
         m_flow.processing = true;
@@ -1175,6 +1495,36 @@ private:
             elapsedMs()
         );
 
+        if (m_flow.cancellation.isCancellationRequested()) {
+            cancelActiveFlow();
+            return;
+        }
+
+        if (finishWithStreaming) {
+            m_streamingStoppedRecording = m_flow.normalRecording;
+            m_streamingFinalizing = true;
+            if (m_bar) {
+                m_bar->setStreamingFinalizing();
+            }
+            m_streamingSession->finish();
+            m_streamingFinalTimer.start(qMax(
+                1,
+                m_access.streamingFinalTimeoutMs
+            ));
+            return;
+        }
+
+        beginFlowBatchRecognition(generation, runId);
+    }
+
+    void beginFlowBatchRecognition(
+        quint64 generation,
+        const ExecutionId &runId
+    )
+    {
+        if (!flowMatches(generation, runId)) {
+            return;
+        }
         if (m_flow.cancellation.isCancellationRequested()) {
             cancelActiveFlow();
             return;
@@ -1333,7 +1683,7 @@ private:
                 ),
             elapsedMs()
         );
-        startNextSegmentRecognition();
+        finishLongStreamingOrBatch();
     }
 
     VoiceSpeechRecognitionHandlers speechRecognitionHandlers() const
@@ -1370,6 +1720,70 @@ private:
             config,
             speechRecognitionHandlers()
         );
+    }
+
+    void completeLongRecordingFromStreaming(const QString &text)
+    {
+        if (!m_longRecordingSession.isFinalizing()) {
+            return;
+        }
+        const VoiceLongRecordingBuildResult build =
+            VoiceLongRecordingResultBuilder::build(
+                m_longRecordingSession.recognitionState(),
+                m_longRecordingSession.pcmBySegment()
+            );
+        QString audioPath;
+        QString audioSaveError;
+        if (!build.completePcm.isEmpty()) {
+            audioPath = uniqueFilePath(
+                QDir(m_longRecordingSession.audioDirectory()).filePath(
+                    m_longRecordingSession.fileBase()
+                        + tr8("_完整录音.wav")
+                )
+            );
+            if (!writeBytesAtomically(
+                    audioPath,
+                    wavFromPcm(build.completePcm, 16000, 1, 16))) {
+                audioSaveError = tr8("无法保存完整录音：") + audioPath;
+                audioPath.clear();
+            }
+        }
+
+        if (!audioSaveError.isEmpty()) {
+            logRuntimeEvent(
+                tr8("长录音"),
+                tr8("完整录音保存失败"),
+                audioSaveError,
+                elapsedMs()
+            );
+        }
+
+        if (m_flow.active) {
+            const quint64 generation = m_flow.generation;
+            const ExecutionId runId = m_flow.runId;
+            const QSharedPointer<const FunctionFlowVoicePayload> payload =
+                flowPayload(
+                    audioPath,
+                    build.segments,
+                    m_flow.speechElapsedMs,
+                    true
+                );
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Succeeded;
+            result.values.append(flowValue(text, payload));
+            m_longRecordingSession.complete();
+            finishFlow(result, generation, runId);
+            return;
+        }
+
+        if (m_runSession) {
+            m_runSession->setRecordingAudioPath(audioPath);
+            m_runSession->setRecordingSegments(build.segments);
+            m_runSession->setSpeechElapsedMs(0);
+        }
+        m_longRecordingSession.complete();
+        processRecognizedSpeech(m_modeId, text);
+        setProcessing(false);
     }
 
     void finishLongRecordingRecognition()
@@ -1602,6 +2016,7 @@ private:
         if (!m_flow.active) {
             return;
         }
+        cancelStreamingSession();
         const quint64 generation = m_flow.generation;
         const ExecutionId runId = m_flow.runId;
         m_recordingCoordinator.cancelPreparation();
@@ -1631,6 +2046,7 @@ private:
         if (!flowMatches(generation, runId)) {
             return;
         }
+        cancelStreamingSession();
         const bool wasProcessing = m_flow.processing;
         const FunctionFlowNodeCompletion completion =
             m_flow.completion;
@@ -1767,6 +2183,12 @@ private:
     QSet<QString> m_activeHoldFunctions;
     FlowState m_flow;
     QTimer m_flowCancellationTimer;
+    QTimer m_streamingFinalTimer;
+    QSharedPointer<IStreamingSpeechSession> m_streamingSession;
+    VoiceRecordingStopResult m_streamingStoppedRecording;
+    bool m_streamingFinalizing = false;
+    bool m_streamingTerminalHandled = false;
+    bool m_streamingFallbackActive = false;
     quint64 m_operationGeneration = 0;
     bool m_classicRecognitionRunning = false;
     QString m_modeId;

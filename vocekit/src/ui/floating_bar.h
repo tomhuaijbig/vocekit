@@ -223,12 +223,12 @@ public:
         setAttribute(Qt::WA_TranslucentBackground);
         setFixedSize(720, 76);
 
-        auto *root = new QFrame(this);
-        root->setObjectName(QStringLiteral("root"));
-        root->setGeometry(rect());
-        root->setCursor(Qt::OpenHandCursor);
-        root->installEventFilter(this);
-        root->setStyleSheet(QStringLiteral(
+        m_root = new QFrame(this);
+        m_root->setObjectName(QStringLiteral("root"));
+        m_root->setGeometry(rect());
+        m_root->setCursor(Qt::OpenHandCursor);
+        m_root->installEventFilter(this);
+        m_root->setStyleSheet(QStringLiteral(
             "QFrame#root {"
             "  background: #111827;"
             "  border: 1px solid #2f3a4a;"
@@ -237,7 +237,15 @@ public:
             "QLabel { color: #f9fafb; }"
         ));
 
-        auto *layout = new QHBoxLayout(root);
+        auto *outerLayout = new QVBoxLayout(m_root);
+        outerLayout->setContentsMargins(0, 0, 0, 0);
+        outerLayout->setSpacing(0);
+
+        auto *header = new QWidget(m_root);
+        header->setFixedHeight(74);
+        header->setCursor(Qt::OpenHandCursor);
+        header->installEventFilter(this);
+        auto *layout = new QHBoxLayout(header);
         layout->setContentsMargins(14, 10, 14, 10);
         layout->setSpacing(12);
 
@@ -251,11 +259,13 @@ public:
         textLayout->setSpacing(2);
 
         m_title = new QLabel(QString::fromUtf8("等待快捷键"));
+        m_title->setObjectName(QStringLiteral("floatingBarTitle"));
         m_title->setFont(appFont(11, QFont::DemiBold));
         m_title->setCursor(Qt::OpenHandCursor);
         m_title->installEventFilter(this);
 
         m_subtitle = new QLabel(QString::fromUtf8("按快捷键开始使用"));
+        m_subtitle->setObjectName(QStringLiteral("floatingBarSubtitle"));
         m_subtitle->setFont(appFont(9));
         m_subtitle->setStyleSheet(QStringLiteral("color: #aeb7c5;"));
         m_subtitle->setCursor(Qt::OpenHandCursor);
@@ -286,6 +296,49 @@ public:
         layout->addWidget(copy);
         layout->addWidget(undo);
         layout->addWidget(retry);
+
+        outerLayout->addWidget(header);
+
+        m_streamingPreview = new QFrame(m_root);
+        m_streamingPreview->setObjectName(
+            QStringLiteral("streamingTranscriptPreview")
+        );
+        m_streamingPreview->setStyleSheet(QStringLiteral(
+            "QFrame#streamingTranscriptPreview {"
+            "  background: #0f172a;"
+            "  border-top: 1px solid #263244;"
+            "}"
+        ));
+        auto *previewLayout = new QVBoxLayout(m_streamingPreview);
+        previewLayout->setContentsMargins(18, 7, 18, 8);
+        previewLayout->setSpacing(1);
+
+        m_streamingCommitted = new QLabel;
+        m_streamingCommitted->setObjectName(
+            QStringLiteral("streamingCommittedText")
+        );
+        m_streamingCommitted->setFont(appFont(9));
+        m_streamingCommitted->setWordWrap(true);
+        m_streamingCommitted->setTextInteractionFlags(Qt::NoTextInteraction);
+        m_streamingCommitted->setStyleSheet(
+            QStringLiteral("color: #e5e7eb;")
+        );
+
+        m_streamingProvisional = new QLabel;
+        m_streamingProvisional->setObjectName(
+            QStringLiteral("streamingProvisionalText")
+        );
+        m_streamingProvisional->setFont(appFont(9));
+        m_streamingProvisional->setWordWrap(true);
+        m_streamingProvisional->setTextInteractionFlags(Qt::NoTextInteraction);
+        m_streamingProvisional->setStyleSheet(
+            QStringLiteral("color: #60a5fa;")
+        );
+
+        previewLayout->addWidget(m_streamingCommitted);
+        previewLayout->addWidget(m_streamingProvisional);
+        outerLayout->addWidget(m_streamingPreview);
+        m_streamingPreview->hide();
     }
 
     void setStatus(const QString &title, const QString &subtitle)
@@ -303,6 +356,48 @@ public:
         if (m_indicator) {
             m_indicator->startPulse();
         }
+    }
+
+    void setStreamingTranscript(
+        const QString &committed,
+        const QString &provisional
+    )
+    {
+        if (!m_streamingPreview) {
+            return;
+        }
+        m_streamingCommitted->setText(committed);
+        m_streamingProvisional->setText(provisional);
+        const bool hasText = !committed.isEmpty() || !provisional.isEmpty();
+        m_streamingPreview->setVisible(hasText);
+        updateStreamingGeometry(hasText);
+    }
+
+    void setStreamingFinalizing()
+    {
+        setStatus(
+            QString::fromUtf8("正在完成识别"),
+            QString::fromUtf8("正在等待最终文字")
+        );
+    }
+
+    void setStreamingFallback()
+    {
+        setStatus(
+            QString::fromUtf8("实时识别已切换"),
+            QString::fromUtf8("将使用录音结束后的整段识别")
+        );
+    }
+
+    void clearStreamingTranscript()
+    {
+        if (!m_streamingPreview) {
+            return;
+        }
+        m_streamingCommitted->clear();
+        m_streamingProvisional->clear();
+        m_streamingPreview->hide();
+        updateStreamingGeometry(false);
     }
 
     void setResult(const QString &title, const QString &result)
@@ -401,6 +496,14 @@ public:
     }
 
 protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        if (m_root) {
+            m_root->setGeometry(rect());
+        }
+        QWidget::resizeEvent(event);
+    }
+
     bool eventFilter(QObject *watched, QEvent *event) override
     {
         Q_UNUSED(watched);
@@ -442,6 +545,38 @@ protected:
     }
 
 private:
+    void updateStreamingGeometry(bool expanded)
+    {
+        if (!expanded) {
+            setFixedSize(720, 76);
+            if (m_root) {
+                m_root->setGeometry(rect());
+            }
+            return;
+        }
+
+        const int committedLine = QFontMetrics(
+            m_streamingCommitted->font()
+        ).lineSpacing();
+        const int provisionalLine = QFontMetrics(
+            m_streamingProvisional->font()
+        ).lineSpacing();
+        m_streamingCommitted->setMaximumHeight(committedLine * 2 + 2);
+        m_streamingProvisional->setMaximumHeight(provisionalLine + 2);
+        const int previewHeight = qMax(
+            70,
+            committedLine * 2 + provisionalLine + 18
+        );
+        m_streamingPreview->setFixedHeight(previewHeight);
+        setFixedSize(720, 76 + previewHeight);
+        if (m_root) {
+            m_root->setGeometry(rect());
+        }
+        if (isVisible()) {
+            placeNearBottom();
+        }
+    }
+
     QPushButton *smallActionButton(const QString &text)
     {
         auto *button = new QPushButton(text);
@@ -468,8 +603,12 @@ private:
     }
 
     FloatingBarPositionCallbacks m_positionCallbacks;
+    QFrame *m_root = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_subtitle = nullptr;
+    QFrame *m_streamingPreview = nullptr;
+    QLabel *m_streamingCommitted = nullptr;
+    QLabel *m_streamingProvisional = nullptr;
     FloatingStatusIndicator *m_indicator = nullptr;
     WaveformMeter *m_waveform = nullptr;
     QString m_lastResult;

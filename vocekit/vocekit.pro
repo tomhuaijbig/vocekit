@@ -98,7 +98,9 @@ SOURCES += \
     src/output/voice_result_output_dispatcher.cpp \
     src/platform/windows_autostart.cpp \
     src/providers/built_in_provider_factory.cpp \
+    src/providers/baidu_realtime_speech_protocol.cpp \
     src/providers/baidu_speech_provider.cpp \
+    src/providers/baidu_streaming_speech_session.cpp \
     src/providers/claude_model_provider.cpp \
     src/providers/custom_speech_provider.cpp \
     src/providers/deepseek_model_provider.cpp \
@@ -108,10 +110,15 @@ SOURCES += \
     src/providers/openai_compatible_model_provider.cpp \
     src/providers/provider_configuration.cpp \
     src/providers/provider_network_transport.cpp \
+    src/providers/provider_streaming_websocket_transport.cpp \
     src/providers/provider_websocket_transport.cpp \
     src/providers/provider_registry.cpp \
+    src/providers/streaming_speech_session_factory.cpp \
+    src/providers/streaming_speech_session_factory_default.cpp \
+    src/providers/streaming_transcript_accumulator.cpp \
     src/providers/xfyun_speech_provider.cpp \
     src/providers/xfyun_speech_protocol.cpp \
+    src/providers/xfyun_streaming_speech_session.cpp \
     src/recording/segmented_recording.cpp \
     src/recording/voice_audio_recorder_adapter.cpp \
     src/recording/voice_long_recording_session.cpp \
@@ -355,7 +362,9 @@ HEADERS += \
     src/platform/windows_autostart.h \
     src/recording/audio_recorder_legacy.h \
     src/providers/built_in_provider_factory.h \
+    src/providers/baidu_realtime_speech_protocol.h \
     src/providers/baidu_speech_provider.h \
+    src/providers/baidu_streaming_speech_session.h \
     src/providers/claude_model_provider.h \
     src/providers/custom_speech_provider.h \
     src/providers/deepseek_model_provider.h \
@@ -366,12 +375,17 @@ HEADERS += \
     src/providers/openai_compatible_model_provider.h \
     src/providers/provider_configuration.h \
     src/providers/provider_network_transport.h \
+    src/providers/provider_streaming_websocket_transport.h \
     src/providers/provider_websocket_transport.h \
     src/providers/provider_registry.h \
     src/providers/provider_types.h \
     src/providers/speech_provider.h \
+    src/providers/streaming_speech_session.h \
+    src/providers/streaming_speech_session_factory.h \
+    src/providers/streaming_transcript_accumulator.h \
     src/providers/xfyun_speech_protocol.h \
     src/providers/xfyun_speech_provider.h \
+    src/providers/xfyun_streaming_speech_session.h \
     src/recording/segmented_recording.h \
     src/recording/voice_audio_recorder_adapter.h \
     src/recording/voice_long_recording_session.h \

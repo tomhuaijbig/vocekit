@@ -34,6 +34,12 @@ QString stageTitle(FloatingBarStage stage)
         return tr8("处理完成");
     case FloatingBarStage::Failed:
         return tr8("处理失败");
+    case FloatingBarStage::Streaming:
+        return tr8("实时识别中");
+    case FloatingBarStage::StreamingFinalizing:
+        return tr8("正在完成识别");
+    case FloatingBarStage::StreamingFallback:
+        return tr8("实时识别已切换");
     }
     return tr8("浮动条测试");
 }
@@ -55,6 +61,12 @@ QString stageSubtitle(FloatingBarStage stage)
         return tr8("浮动条完成状态显示正常");
     case FloatingBarStage::Failed:
         return tr8("这是浮动条失败状态测试");
+    case FloatingBarStage::Streaming:
+        return tr8("文字会在录音时持续更新");
+    case FloatingBarStage::StreamingFinalizing:
+        return tr8("正在等待最终文字");
+    case FloatingBarStage::StreamingFallback:
+        return tr8("将使用录音结束后的整段识别");
     }
     return QString();
 }
@@ -114,6 +126,15 @@ FloatingBarTestCard::FloatingBarTestCard(
     m_stageBox->addItem(tr8("写入中"), int(FloatingBarStage::Writing));
     m_stageBox->addItem(tr8("已完成"), int(FloatingBarStage::Completed));
     m_stageBox->addItem(tr8("失败"), int(FloatingBarStage::Failed));
+    m_stageBox->addItem(tr8("实时识别中"), int(FloatingBarStage::Streaming));
+    m_stageBox->addItem(
+        tr8("等待实时最终结果"),
+        int(FloatingBarStage::StreamingFinalizing)
+    );
+    m_stageBox->addItem(
+        tr8("实时识别已降级"),
+        int(FloatingBarStage::StreamingFallback)
+    );
 
     auto *button = new QPushButton(tr8("开始测试"));
     button->setMinimumSize(96, 36);
@@ -173,7 +194,22 @@ void FloatingBarTestCard::runTest()
 
     m_floatingBar->setSuppressed(false);
     m_floatingBar->setWaveformVisible(false);
+    m_floatingBar->clearStreamingTranscript();
     m_floatingBar->setStatus(title, stageSubtitle(stage));
+    if (stage == FloatingBarStage::Streaming) {
+        m_floatingBar->setStreamingTranscript(
+            tr8("这是已经确认的实时识别文字，"),
+            tr8("这是正在变化的临时文字")
+        );
+    } else if (stage == FloatingBarStage::StreamingFinalizing) {
+        m_floatingBar->setStreamingTranscript(
+            tr8("这是已经确认的实时识别文字。"),
+            QString()
+        );
+        m_floatingBar->setStreamingFinalizing();
+    } else if (stage == FloatingBarStage::StreamingFallback) {
+        m_floatingBar->setStreamingFallback();
+    }
     showDiagnosticResult(
         m_result,
         diagnosticStatusLine(tr8("浮动条测试"), tr8("已显示"), title)

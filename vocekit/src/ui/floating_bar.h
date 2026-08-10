@@ -16,7 +16,10 @@ enum class FloatingBarStage
     ModelProcessing,
     Writing,
     Completed,
-    Failed
+    Failed,
+    Streaming,
+    StreamingFinalizing,
+    StreamingFallback
 };
 
 struct FloatingBarPositionCallbacks

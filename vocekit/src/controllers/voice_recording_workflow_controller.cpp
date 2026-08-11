@@ -23,12 +23,41 @@
 #include <QtConcurrent>
 #include <QtWidgets>
 
+#include <QCoreApplication>
+#include <QEvent>
+
 namespace {
 
 QString tr8(const char *text)
 {
     return QString::fromUtf8(text);
 }
+
+int streamingPcmEventType()
+{
+    static const int type = QEvent::registerEventType();
+    return type;
+}
+
+class StreamingPcmEvent : public QEvent
+{
+public:
+    StreamingPcmEvent(
+        quint64 generationValue,
+        const QWeakPointer<IStreamingSpeechSession> &sessionValue,
+        const QByteArray &pcmValue
+    )
+        : QEvent(static_cast<QEvent::Type>(streamingPcmEventType())),
+          generation(generationValue),
+          session(sessionValue),
+          pcm(pcmValue)
+    {
+    }
+
+    quint64 generation = 0;
+    QWeakPointer<IStreamingSpeechSession> session;
+    QByteArray pcm;
+};
 
 VoiceRecordingCaptureHandlers recordingCaptureHandlers(
     const VoiceRecordingWorkflowAccess &access,
@@ -142,6 +171,23 @@ public:
             m_recordingCapture.stopNormal();
         }
         m_longRecordingSession.complete();
+    }
+
+    bool event(QEvent *event) override
+    {
+        if (event && event->type() == streamingPcmEventType()) {
+            StreamingPcmEvent *pcmEvent =
+                static_cast<StreamingPcmEvent *>(event);
+            if (pcmEvent->generation == m_operationGeneration) {
+                const QSharedPointer<IStreamingSpeechSession> session =
+                    pcmEvent->session.toStrongRef();
+                if (!session.isNull()) {
+                    session->pushAudio(pcmEvent->pcm);
+                }
+            }
+            return true;
+        }
+        return QObject::event(event);
     }
 
     void updateConfiguration(const AppSettingsData &settings)
@@ -919,12 +965,14 @@ private:
         const QWeakPointer<IStreamingSpeechSession> weakSession =
             m_streamingSession.toWeakRef();
         m_recordingCapture.setPcmListener(
-            [weakSession](const QByteArray &pcm) {
-                const QSharedPointer<IStreamingSpeechSession> session =
-                    weakSession.toStrongRef();
-                if (!session.isNull()) {
-                    session->pushAudio(pcm);
+            [self, weakSession, generation](const QByteArray &pcm) {
+                if (!self) {
+                    return;
                 }
+                QCoreApplication::postEvent(
+                    self.data(),
+                    new StreamingPcmEvent(generation, weakSession, pcm)
+                );
             }
         );
         logRuntimeEvent(

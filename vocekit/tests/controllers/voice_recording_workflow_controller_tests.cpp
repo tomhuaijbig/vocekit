@@ -13,6 +13,7 @@
 #include <QThread>
 
 #include <atomic>
+#include <thread>
 #include <type_traits>
 
 namespace {
@@ -86,6 +87,7 @@ public:
 
     bool pushAudio(const QByteArray &pcm) override
     {
+        lastPushThread = QThread::currentThread();
         pushedAudio.append(pcm);
         return pushSucceeds;
     }
@@ -146,6 +148,7 @@ public:
     int cancelCount = 0;
     bool startSucceeds = true;
     bool pushSucceeds = true;
+    QThread *lastPushThread = nullptr;
 };
 
 QSharedPointer<FunctionFlowResolvedDependencies> flowDependencies(
@@ -1124,11 +1127,23 @@ classicStreamingForwardsPcmAndSkipsBatch()
     QVERIFY(controller.begin(QStringLiteral("classic-stream")));
     QCOMPARE(requestedProvider, QStringLiteral("xfyun"));
     QCOMPARE(streaming->startCount, 1);
-    recorder.emitPcm(QByteArrayLiteral("live-pcm"));
-    QCOMPARE(
+    const std::function<void(const QByteArray &)> pcmListener =
+        recorder.pcmListener;
+    QVERIFY(pcmListener);
+    std::thread audioThread([pcmListener]() {
+        pcmListener(QByteArrayLiteral("live-pcm"));
+    });
+    audioThread.join();
+
+    // The audio callback must never enter a WebSocket session from the
+    // recorder thread. Delivery is queued to the controller's Qt thread.
+    QVERIFY(streaming->pushedAudio.isEmpty());
+    QTRY_COMPARE_WITH_TIMEOUT(
         streaming->pushedAudio,
-        QList<QByteArray>() << QByteArrayLiteral("live-pcm")
+        QList<QByteArray>() << QByteArrayLiteral("live-pcm"),
+        1000
     );
+    QCOMPARE(streaming->lastPushThread, QThread::currentThread());
     streaming->emitSnapshot(
         QStringLiteral("final "),
         QStringLiteral("draft")

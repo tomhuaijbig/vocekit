@@ -16,7 +16,7 @@
 - `src/config/app_settings_data.h`, `src/domain/function_settings.{h,cpp}`, `src/config/app_settings_json.cpp`: typed configuration, migration defaults, and JSON round-trip.
 - `src/ui/floating_bar_style_selector.{h,cpp}`: reusable clickable B/C preview cards; optional `inherit` card for function-level use.
 - `src/ui/floating_bar_surface.{h,cpp}`: shared view-state/action contract plus B and C child surfaces.
-- `src/ui/floating_bar.h`: existing top-level window, drag persistence, auto-hide, and compatibility methods; delegates visual rendering to the selected surface.
+- `src/ui/floating_bar.{h,cpp}`: existing top-level window, drag persistence, auto-hide, and compatibility methods; delegates visual rendering to the selected surface.
 - `src/ui/basic_settings_section.{h,cpp}`, `src/ui/settings_panel.cpp`: global style card selector and default-on write-fallback switch.
 - `src/ui/hub_settings_state.{h,cpp}`, `src/domain/app_legacy_types.h`, `src/ui/function_command_page.{h,cpp}`: per-function style override and summary/edit UI.
 - `src/output/classic_auto_write_executor.{h,cpp}`: checked classic auto-write, success/failure presentation plan, and one-shot popup fallback through injected callbacks.
@@ -109,7 +109,7 @@ bool writeFailurePopupFallbackEnabled = true;
 QString floatingBarStyleOverride = QStringLiteral("inherit");
 ```
 
-Normalize the function override in `normalizeFunctionSettings()`.
+Normalize the function override in `normalizeFunctionSettings()` with a small domain-local helper accepting only `inherit`, `statusPill`, and `liveTranscriptCard`. Do not make `function_settings.cpp` link against `app_settings_defaults.cpp`: several domain/controller test projects intentionally compile it independently. Keep the public app-level resolver in `app_settings_defaults.cpp`.
 
 - [ ] **Step 5: Read and write the exact JSON keys**
 
@@ -197,8 +197,11 @@ git commit -m "feat: add floating bar style cards"
 - Create: `src/ui/floating_bar_surface.h`
 - Create: `src/ui/floating_bar_surface.cpp`
 - Modify: `src/ui/floating_bar.h`
+- Create: `src/ui/floating_bar.cpp`
 - Modify: `tests/ui/floating_bar_streaming_tests.cpp`
 - Modify: `tests/ui/floating_bar_streaming_tests.pro`
+- Modify: `tests/controllers/voice_recording_workflow_controller_tests.pro`
+- Modify: `tests/controllers/screenshot_workflow_controller_tests.pro`
 - Modify: `vocekit.pro`
 
 - [ ] **Step 1: Write B/C runtime widget tests**
@@ -259,7 +262,9 @@ void setStage(FloatingBarStage stage,
               const QString &detail = QString());
 ```
 
-Each existing method updates one stored `FloatingBarViewState` and rerenders the active surface. `setStyle()` uses `normalizeGlobalFloatingBarStyle()`, replaces the child only while no recording is active, and clamps the new host size/position to the saved screen. Remove the inert legacy `复制/撤销/重试` buttons from the floating window; full-result actions remain in the result popup.
+Move the nontrivial existing host implementation from `floating_bar.h` into `floating_bar.cpp`. Each existing method updates one stored `FloatingBarViewState` and rerenders the active surface. `setStyle()` uses `normalizeGlobalFloatingBarStyle()`, replaces the child only while no recording is active, and clamps the new host size/position to the saved screen. Remove the inert legacy `复制/撤销/重试` buttons from the floating window; full-result actions remain in the result popup.
+
+Because controller sources now call out-of-line `FloatingBar` methods, add the real `floating_bar.cpp`, `floating_bar_surface.cpp`, `app_settings_defaults.cpp`, and `ui_style.cpp` dependencies to the existing recording and screenshot controller test projects. Do not add link-time `FloatingBar` stubs: these two projects must compile the same host/surface code as the application.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -281,6 +286,10 @@ git commit -m "feat: add selectable floating bar surfaces"
 - Modify: `src/ui/hub_utility_pages_controller.cpp`
 - Modify: `tests/ui/settings_panel_header_tests.cpp`
 - Modify: `tests/ui/settings_panel_header_tests.pro`
+- Modify: `tests/ui/settings_panel_access_factory_tests.cpp`
+- Modify: `tests/ui/settings_panel_access_factory_tests.pro`
+- Modify: `tests/ui/hub_utility_pages_controller_tests.cpp`
+- Modify: `tests/ui/basic_settings_section_tests.pro`
 - Create: `tests/ui/basic_settings_section_floating_bar_tests.cpp`
 - Create: `tests/ui/basic_settings_section_floating_bar_tests.pro`
 
@@ -295,7 +304,7 @@ bool writeFailurePopupFallbackEnabled = true;
 
 Test the Voice tab with B selected, click C, and assert `applySnapshot` receives C and `saveAndRefresh` runs once. Click “预览所选样式” and assert `SettingsPanelAccess::previewFloatingBarStyle(C)` runs once. Test the new Write tab contains `writeFailurePopupFallbackToggle`, defaults checked for a missing/old snapshot, and persists false when toggled.
 
-The header/contract test must assert `SettingsPanel` maps both fields in both snapshot directions; do not use only a fragile total-string-count assertion.
+The header/contract test must assert `SettingsPanel` maps both fields in both snapshot directions; do not use only a fragile total-string-count assertion. Extend `settings_panel_access_factory_tests` to prove preview callback forwarding, and extend `hub_utility_pages_controller_tests` to require the controller—not the factory—to adapt the real `FloatingBar` preview.
 
 - [ ] **Step 2: Run RED**
 
@@ -303,11 +312,11 @@ Build the new widget suite and existing settings header suite Release/offscreen.
 
 - [ ] **Step 3: Wire the global controls**
 
-Extend `SettingsPanelAccess` with `std::function<void(const QString &)> previewFloatingBarStyle`. Pass `HubUtilityPagesControllerAccess::floatingBar` into `SettingsPanelAccessFactoryDependencies`, and let the factory callback temporarily call `FloatingBar::setStyle(normalizedStyle)`, `setStage(Recording, ...)`, show a simulated waveform, and auto-hide after five seconds. It must not save a different style, start recording, or change the current target window.
+Extend `SettingsPanelAccess` and `SettingsPanelAccessFactoryDependencies` with `std::function<void(const QString &)> previewFloatingBarStyle`. `SettingsPanelAccessFactory` only forwards this injected callback and remains independent of `FloatingBar`. In `HubUtilityPagesController`, adapt `HubUtilityPagesControllerAccess::floatingBar` to a lambda that temporarily calls `FloatingBar::setStyle(normalizedStyle)`, `setStage(Recording, ...)`, shows a simulated waveform, and auto-hides after five seconds. It must not save a different style, start recording, or change the current target window.
 
 Embed `FloatingBarStyleSelector(allowInherit=false)` below “启用浮动条” on the Voice tab with heading “漂浮窗样式” and explanatory text. Add a “预览所选样式” button that invokes the access callback with the currently selected normalized style.
 
-Add `BasicSettingsSection::addWriteRows()` and a dedicated `SettingsPanel::writeSettingsTab()` labeled “写入”. Put the default-on toggle “写入失败时弹出结果小框” there. Its detail text must list target missing, activation failure, unreliable input position, and injection failure, and state that cancel/recognition/AI failures do not trigger it.
+Add `BasicSettingsSection::addWriteRows()` and a dedicated `SettingsPanel::writeSettingsTab()` labeled “写入”. Put the default-on toggle “写入失败时弹出结果小框” there. Its detail text must list missing/invalid target, activation failure, clipboard failure, and input-injection failure, and state that cancel/recognition/AI failures do not trigger it.
 
 Insert the new tab immediately after “语音录音”. Add a widget test that asserts the exact tab title sequence `常用设置, 词库, 语音录音, 写入, 网络, 历史记录, 快捷键, 接口`. Existing callers currently open only the default index 0; if a future named entry is found during implementation, migrate it to a named enum instead of preserving a shifted magic number.
 
@@ -334,6 +343,7 @@ git commit -m "feat: expose global floating bar settings"
 - Modify: `src/ui/function_summary_formatter.cpp`
 - Modify: `tests/ui/hub_settings_state_tests.cpp`
 - Modify: `tests/ui/function_command_page_tests.cpp`
+- Modify: `tests/ui/function_command_page_tests.pro`
 - Modify: `tests/ui/function_summary_formatter_tests.cpp`
 
 - [ ] **Step 1: Write state conversion and UI tests**
@@ -380,7 +390,11 @@ git commit -m "feat: allow per-function floating bar styles"
 - Modify: `src/controllers/voice_recording_workflow_controller.cpp`
 - Modify: `src/app/vocekit_application_runtime.cpp`
 - Modify: `tests/controllers/function_command_controller_tests.cpp`
+- Modify: `tests/controllers/function_command_controller_tests.pro`
 - Modify: `tests/controllers/voice_recording_workflow_controller_tests.cpp`
+- Modify: `tests/controllers/voice_recording_workflow_controller_tests.pro`
+- Modify: `tests/controllers/screenshot_workflow_controller_tests.cpp`
+- Modify: `tests/controllers/screenshot_workflow_controller_tests.pro`
 
 - [ ] **Step 1: Write style-resolution and action tests**
 
@@ -392,7 +406,7 @@ std::function<void(bool enabled,
                    const QString &style)> prepareFloatingBar;
 ```
 
-Test a custom function using `inherit` with global C receives C, a custom function override B receives B, a built-in function with even an accidentally stored C override still follows global B, and invalid global values resolve B. In recording tests, click/call confirm while recording and require the existing `stopAndProcess()` path exactly once; call cancel and require capture/session cancellation with no batch fallback, AI execution, write, or result popup.
+Test a custom function using `inherit` with global C receives C, a custom function override B receives B, a built-in function with even an accidentally stored C override still follows global B, and invalid global values resolve B. Require the resolved style to be prepared before all four entry classes: primary hotkey, separate screenshot hotkey, screenshot launcher, and published canvas flow. Busy, unknown, and same-trigger cancellation paths must not replace the current style. In recording tests, click/call confirm while recording and require the existing `stopAndProcess()` path exactly once; call cancel and require capture/session cancellation with no batch fallback, AI execution, write, or result popup. For a canvas voice node, require the node completion to be `Cancelled`, allowing the existing execution controller to cancel all remaining nodes.
 
 Define the public UI-action boundary before wiring:
 
@@ -401,7 +415,7 @@ bool confirmActiveRecording();
 bool cancelActiveRecording();
 ```
 
-Both return `true` only when they consumed an active preparation/recording/finalizing run; repeated or stale calls return `false` and have no side effects.
+Both return `true` only when they consume an active preparation or recording action. Hide and clear both actions before transcription finalization, AI processing, or writing; repeated, stale, or post-recording calls return `false` and have no side effects.
 
 - [ ] **Step 2: Run RED**
 
@@ -420,11 +434,13 @@ const QString style = resolveFloatingBarStyle(
     m_settings.floatingBarStyle);
 ```
 
-Pass it with enabled/duration to `VoiceController`, which calls `m_bar->setStyle(style)` before the first status. Update the tray preview to use the current global style.
+Extract `prepareFloatingBarForFunction(const FunctionSettings &)` and invoke it only immediately before a real start attempt at each existing boundary: before `startPublishedFlow` for a valid canvas trigger, before `startScreenshot` for the separate screenshot hotkey and screenshot launcher, and once after classic busy checks before the classic input sequence begins. Do not move target capture, busy checks, or same-trigger cancellation order, and do not prepare a style for unknown/no-action/busy/cancel-existing outcomes. Pass enabled, duration, and resolved style to `VoiceController`, which calls `m_bar->setStyle(style)` before the first status. This makes primary voice/selection, screenshot hotkey, screenshot launcher, and published canvas starts use the same resolution rule without inventing a nonexistent common branch. `ScreenshotWorkflowController` may continue updating enabled/duration, but must not replace the style selected at the command boundary. Update the tray preview to use the current global style.
+
+Add `app_settings_defaults.cpp` to `function_command_controller_tests.pro`, because style resolution is real production logic. The recording and screenshot projects already gain the out-of-line floating host/surface sources in Task 3; keep those registrations when adding the new action assertions.
 
 - [ ] **Step 4: Map UI actions to the active recording lifecycle**
 
-Implement `VoiceRecordingWorkflowController::confirmActiveRecording()` and `cancelActiveRecording()` as thin delegates to `Impl`. At recording start, install `FloatingBarActions` with `QPointer<VoiceRecordingWorkflowController>` and generation-guarded callbacks; confirm reuses the same release/stop route as the configured trigger mode, and cancel reuses the existing explicit cancellation route. Clear actions on terminal state, destruction, or generation change.
+Implement `VoiceRecordingWorkflowController::confirmActiveRecording()` and `cancelActiveRecording()` as thin delegates to `Impl`. When preparation/recording becomes actionable, install `FloatingBarActions` with `QPointer<VoiceRecordingWorkflowController>` and generation-guarded callbacks; confirm reuses the same release/stop route as the configured trigger mode. Cancel reuses the classic preparation/capture cancellation route, while an active canvas voice node completes through the existing `cancelActiveFlow()` path so `FunctionFlowExecutionController` receives `Cancelled` and cancels the remaining run. Clear actions before finalization/processing, on every terminal path, destruction, and generation change. The status-only transcription/AI/write surfaces expose no cancel/check controls.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -487,7 +503,7 @@ flow_input_injection_failed
 flow_clipboard_unavailable
 ```
 
-For each, assert one checked write, no “已写入” status, and exactly one popup containing the complete output; the log contains the error code but never the output text. Also assert fallback-disabled and success produce zero fallback popups. Cancellation, recognition failure, and model failure never call this executor and are covered at their existing controller entry points.
+For each, assert one checked write, no “已写入” status, and exactly one popup containing the complete output; the log contains the error code but never the output text. Also assert fallback-disabled and success produce zero fallback popups. Cancellation, recognition failure, and model failure never call this executor and are covered at their existing controller entry points. Do not add a test claiming that successful `SendInput` proves a third-party edit control accepted the text; Windows does not provide that acknowledgement through this path.
 
 - [ ] **Step 2: Run RED**
 
@@ -495,7 +511,7 @@ Build/run `classic_auto_write_executor_tests`. Expected: compile failure because
 
 - [ ] **Step 3: Implement the executor and run GREEN**
 
-Implement the executor so missing `checkedWrite` returns `flow_auto_write_failed`; success emits only done status/log; failure emits one failure status/log and, only when enabled, calls `showFallbackPopup(request.text)` once. It never retains state across executions and never owns a window.
+Implement the executor so missing `checkedWrite` returns `flow_auto_write_failed`; success emits only done status/log; failure emits one failure status/log and, only when enabled, calls `showFallbackPopup(request.text)` once. It never retains state across executions and never owns a window. Treat `ClipboardWriteResult::ok` as “the target/clipboard/input-injection checks completed”, not as proof that a third-party application mutated its document.
 
 - [ ] **Step 4: Return the real checked-write result and delegate from presentation**
 
@@ -554,7 +570,7 @@ voice_recording_workflow_controller_tests
 voice_result_presentation_controller_tests
 function_flow_result_controller_tests
 result_flow_tests
-clipboard_writer_tests
+classic_auto_write_executor_tests
 ```
 
 Expected: all pass, zero skipped network/key-dependent cases, no real API calls.

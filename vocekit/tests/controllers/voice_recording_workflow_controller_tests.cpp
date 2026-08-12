@@ -274,11 +274,6 @@ QString functionDisplayTitle(
     return fallback.trimmed().isEmpty() ? id : fallback;
 }
 
-QString speechProviderTitle(const QString &provider)
-{
-    return provider;
-}
-
 QString historyRootPath(const QString &recordDirectory)
 {
     return recordDirectory;

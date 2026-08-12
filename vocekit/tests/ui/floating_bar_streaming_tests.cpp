@@ -1,87 +1,150 @@
 #include <QtTest>
 
+#include "../../src/config/app_settings_defaults.h"
 #include "../../src/ui/floating_bar.h"
+
+#include <QLabel>
+#include <QPushButton>
 
 class FloatingBarStreamingTests : public QObject
 {
     Q_OBJECT
 
 private slots:
-    void expandsForCommittedAndProvisionalTextAndReturnsToBaseSize()
+    void statusPillIsCompactAndMapsStages()
     {
         FloatingBar bar;
-        QCOMPARE(bar.size(), QSize(720, 76));
+        bar.setStyle(floatingBarStyleStatusPill());
+        bar.setStage(FloatingBarStage::Recording);
+        bar.setWaveformVisible(true);
+        bar.show();
 
-        bar.setStreamingTranscript(
-            QString::fromUtf8("已经确认，"),
-            QString::fromUtf8("正在识别")
+        QVERIFY(bar.width() <= 420);
+        QVERIFY(bar.height() <= 90);
+        QVERIFY(bar.findChild<QPushButton *>(
+            QStringLiteral("floatingCancelButton")));
+        QVERIFY(bar.findChild<QPushButton *>(
+            QStringLiteral("floatingConfirmButton")));
+        QVERIFY(bar.findChild<QWidget *>(
+            QStringLiteral("floatingWaveform")));
+        QVERIFY(!bar.findChild<QLabel *>(
+            QStringLiteral("streamingCommittedText")));
+
+        QLabel *title = bar.findChild<QLabel *>(
+            QStringLiteral("floatingBarTitle")
         );
-
-        QVERIFY(bar.height() > 76);
-        QLabel *committed = bar.findChild<QLabel *>(
-            QStringLiteral("streamingCommittedText")
-        );
-        QLabel *provisional = bar.findChild<QLabel *>(
-            QStringLiteral("streamingProvisionalText")
-        );
-        QVERIFY(committed);
-        QVERIFY(provisional);
-        QCOMPARE(committed->text(), QString::fromUtf8("已经确认，"));
-        QCOMPARE(provisional->text(), QString::fromUtf8("正在识别"));
-        QVERIFY(committed->wordWrap());
-        QVERIFY(provisional->wordWrap());
-        QVERIFY(provisional->styleSheet().contains(QStringLiteral("#60a5fa")));
-        QCOMPARE(committed->textInteractionFlags(), Qt::NoTextInteraction);
-        QCOMPARE(provisional->textInteractionFlags(), Qt::NoTextInteraction);
-
-        bar.clearStreamingTranscript();
-        QCOMPARE(bar.size(), QSize(720, 76));
-    }
-
-    void finalizingAndFallbackExposeDiagnosticStatus()
-    {
-        FloatingBar bar;
-        bar.setStreamingFinalizing();
-        QLabel *title = bar.findChild<QLabel *>(QStringLiteral("floatingBarTitle"));
-        QLabel *subtitle = bar.findChild<QLabel *>(QStringLiteral("floatingBarSubtitle"));
         QVERIFY(title);
-        QVERIFY(subtitle);
-        QCOMPARE(title->text(), QString::fromUtf8("正在完成识别"));
-        QVERIFY(subtitle->text().contains(QString::fromUtf8("最终文字")));
-
-        bar.setStreamingFallback();
-        QCOMPARE(title->text(), QString::fromUtf8("实时识别已切换"));
-        QVERIFY(subtitle->text().contains(QString::fromUtf8("整段识别")));
+        QCOMPARE(title->text(), QString::fromUtf8("正在聆听"));
+        bar.setStage(FloatingBarStage::Recognizing);
+        QCOMPARE(title->text(), QString::fromUtf8("正在转录"));
+        bar.setStage(FloatingBarStage::ModelProcessing);
+        QCOMPARE(title->text(), QString::fromUtf8("AI 处理中"));
+        bar.setStage(FloatingBarStage::Writing);
+        QCOMPARE(title->text(), QString::fromUtf8("正在写入"));
+        bar.setStage(
+            FloatingBarStage::Completed,
+            QString::fromUtf8("已写入")
+        );
+        QCOMPARE(title->text(), QString::fromUtf8("已写入"));
     }
 
-    void longMixedTextIsCappedAndActionButtonsRemainAvailable()
+    void liveTranscriptKeepsCommittedTextAcrossFallbackAndCapsHeight()
     {
         FloatingBar bar;
+        bar.setStyle(floatingBarStyleLiveTranscriptCard());
+        bar.setStage(FloatingBarStage::Streaming);
+        const QString committed = QString(240, QChar(0x8bc6));
         bar.setStreamingTranscript(
-            QString(240, QChar(0x8bc6)),
+            committed,
             QStringLiteral(" streaming provisional text that keeps changing")
         );
         bar.show();
-        QTest::qWait(20);
 
-        const QList<QPushButton *> buttons = bar.findChildren<QPushButton *>();
-        QCOMPARE(buttons.size(), 3);
-        for (QPushButton *button : buttons) {
-            QVERIFY(button->isVisible());
-            QVERIFY(button->height() >= 32);
-        }
-        QLabel *committed = bar.findChild<QLabel *>(
+        QLabel *committedLabel = bar.findChild<QLabel *>(
             QStringLiteral("streamingCommittedText")
         );
         QLabel *provisional = bar.findChild<QLabel *>(
             QStringLiteral("streamingProvisionalText")
         );
-        const int lineHeight = QFontMetrics(committed->font()).lineSpacing();
-        QVERIFY(committed->maximumHeight() <= lineHeight * 2 + 2);
-        QVERIFY(provisional->maximumHeight() <= lineHeight + 2);
+        QVERIFY(committedLabel);
+        QVERIFY(provisional);
+        QCOMPARE(committedLabel->text(), committed);
+        QVERIFY(provisional->styleSheet().contains(QStringLiteral("#60a5fa")));
+        QVERIFY(bar.height() <= 240);
+        QVERIFY(bar.findChild<QPushButton *>(
+            QStringLiteral("floatingCancelButton"))->isVisible());
+        QVERIFY(bar.findChild<QPushButton *>(
+            QStringLiteral("floatingConfirmButton"))->isVisible());
+
+        bar.setStreamingFallback();
+        QCOMPARE(committedLabel->text(), committed);
+        QLabel *title = bar.findChild<QLabel *>(
+            QStringLiteral("floatingBarTitle")
+        );
+        QVERIFY(title->text().contains(QString::fromUtf8("整段识别")));
+    }
+
+    void actionsFireOnceAndOldSurfaceCannotFireAfterSwitch()
+    {
+        FloatingBar bar;
+        int cancelled = 0;
+        int confirmed = 0;
+        FloatingBarActions actions;
+        actions.cancel = [&cancelled]() { ++cancelled; };
+        actions.confirm = [&confirmed]() { ++confirmed; };
+        bar.setActions(actions);
+        bar.setStyle(floatingBarStyleStatusPill());
+        bar.setStage(FloatingBarStage::Recording);
+        bar.setWaveformVisible(true);
+        bar.show();
+
+        QPushButton *oldCancel = bar.findChild<QPushButton *>(
+            QStringLiteral("floatingCancelButton")
+        );
+        QPushButton *oldConfirm = bar.findChild<QPushButton *>(
+            QStringLiteral("floatingConfirmButton")
+        );
+        QVERIFY(oldCancel);
+        QVERIFY(oldConfirm);
+        QTest::mouseClick(oldCancel, Qt::LeftButton);
+        QTest::mouseClick(oldConfirm, Qt::LeftButton);
+        QCOMPARE(cancelled, 1);
+        QCOMPARE(confirmed, 1);
+
+        bar.setStage(FloatingBarStage::Completed);
+        bar.setStyle(floatingBarStyleLiveTranscriptCard());
+        QVERIFY(oldCancel->parent() == nullptr || oldCancel->isHidden());
+        QPushButton *newCancel = bar.findChild<QPushButton *>(
+            QStringLiteral("floatingCancelButton")
+        );
+        QVERIFY(newCancel);
+        QVERIFY(newCancel != oldCancel);
+        bar.setActions(actions);
+        bar.setStage(FloatingBarStage::Recording);
+        QTest::mouseClick(newCancel, Qt::LeftButton);
+        QCOMPARE(cancelled, 2);
+    }
+
+    void compatibilityStreamingMethodsRemainDiagnostic()
+    {
+        FloatingBar bar;
+        bar.setStyle(floatingBarStyleLiveTranscriptCard());
+        bar.setStreamingFinalizing();
+        QLabel *title = bar.findChild<QLabel *>(
+            QStringLiteral("floatingBarTitle")
+        );
+        QVERIFY(title);
+        QCOMPARE(title->text(), QString::fromUtf8("正在完成识别"));
+        bar.setStreamingFallback();
+        QVERIFY(title->text().contains(QString::fromUtf8("整段识别")));
+        bar.clearStreamingTranscript();
+        QCOMPARE(
+            bar.findChild<QLabel *>(
+                QStringLiteral("streamingCommittedText"))->text(),
+            QString()
+        );
     }
 };
 
 QTEST_MAIN(FloatingBarStreamingTests)
-
 #include "floating_bar_streaming_tests.moc"

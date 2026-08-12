@@ -256,6 +256,8 @@ SOURCES += \
     src/ui/toggle_switch.cpp \
     src/ui/ui_style.cpp \
     src/ui/floating_bar_style_selector.cpp \
+    src/ui/floating_bar.cpp \
+    src/ui/floating_bar_surface.cpp \
     src/ui/vocabulary_candidates_dialog.cpp \
     src/ui/vocabulary_entry_dialog.cpp \
     src/ui/vocabulary_page.cpp \
@@ -527,6 +529,7 @@ HEADERS += \
     src/ui/toggle_switch.h \
     src/ui/ui_style.h \
     src/ui/floating_bar_style_selector.h \
+    src/ui/floating_bar_surface.h \
     src/ui/vocabulary_candidates_dialog.h \
     src/ui/vocabulary_entry_dialog.h \
     src/ui/vocabulary_page.h \

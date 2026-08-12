@@ -65,11 +65,11 @@ namespace VoceKit.WindowsSpeech
             }
         }
 
-        internal void Error(string code, string message, bool inputStreamEnded)
+        internal void Error(string errorCode, string message, bool inputStreamEnded)
         {
             Write("error", Values(
                 "ok", false,
-                "code", code,
+                "errorCode", errorCode,
                 "message", message,
                 "inputStreamEnded", inputStreamEnded));
         }
@@ -114,6 +114,191 @@ namespace VoceKit.WindowsSpeech
                 }
                 completed = true;
                 return true;
+            }
+        }
+    }
+
+    internal sealed class BlockingReadStream : Stream
+    {
+        private readonly ManualResetEvent readStarted = new ManualResetEvent(false);
+        private readonly ManualResetEvent released = new ManualResetEvent(false);
+        private bool disposed;
+
+        internal bool WasDisposed
+        {
+            get { return disposed; }
+        }
+
+        internal bool WaitUntilReadStarted(int milliseconds)
+        {
+            return readStarted.WaitOne(milliseconds);
+        }
+
+        public override bool CanRead { get { return true; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanWrite { get { return false; } }
+        public override long Length { get { throw new NotSupportedException(); } }
+        public override long Position
+        {
+            get { throw new NotSupportedException(); }
+            set { throw new NotSupportedException(); }
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            readStarted.Set();
+            released.WaitOne();
+            if (disposed)
+            {
+                throw new ObjectDisposedException("BlockingReadStream");
+            }
+            return 0;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !disposed)
+            {
+                disposed = true;
+                released.Set();
+            }
+            base.Dispose(disposing);
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+        public override void SetLength(long value) { throw new NotSupportedException(); }
+        public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+    }
+
+    internal sealed class InputPump : IDisposable
+    {
+        private const int StopWaitMilliseconds = 1000;
+        private readonly Stream input;
+        private readonly ProducerConsumerAudioStream audio;
+        private readonly Action cancelRecognizer;
+        private readonly Thread thread;
+        private readonly bool isBackground;
+        private readonly ManualResetEvent stopped = new ManualResetEvent(false);
+        private volatile bool stopRequested;
+        private volatile bool inputStreamEnded;
+        private Exception failure;
+        private bool started;
+        private bool disposed;
+
+        internal InputPump(Stream input, ProducerConsumerAudioStream audio, Action cancelRecognizer)
+        {
+            if (input == null) { throw new ArgumentNullException("input"); }
+            if (audio == null) { throw new ArgumentNullException("audio"); }
+            if (cancelRecognizer == null) { throw new ArgumentNullException("cancelRecognizer"); }
+            this.input = input;
+            this.audio = audio;
+            this.cancelRecognizer = cancelRecognizer;
+            thread = new Thread(Pump);
+            isBackground = true;
+            thread.IsBackground = isBackground;
+            thread.Name = "windows-speech-pcm-producer";
+        }
+
+        internal bool InputStreamEnded
+        {
+            get { return inputStreamEnded; }
+        }
+
+        internal Exception Failure
+        {
+            get { return failure; }
+        }
+
+        internal bool IsBackground
+        {
+            get { return isBackground; }
+        }
+
+        internal bool IsStopped
+        {
+            get { return stopped.WaitOne(0); }
+        }
+
+        internal void Start()
+        {
+            if (disposed) { throw new ObjectDisposedException("InputPump"); }
+            if (started) { throw new InvalidOperationException("The input pump has already started."); }
+            started = true;
+            thread.Start();
+        }
+
+        internal void StopAfterRecognizerCompleted()
+        {
+            stopRequested = true;
+            audio.Cancel();
+            try
+            {
+                input.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+            if (started)
+            {
+                stopped.WaitOne(StopWaitMilliseconds);
+            }
+        }
+
+        internal bool WaitForStop(int milliseconds)
+        {
+            return !started || stopped.WaitOne(milliseconds);
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            if (!IsStopped)
+            {
+                StopAfterRecognizerCompleted();
+            }
+            else
+            {
+                try { input.Dispose(); } catch (Exception) { }
+            }
+            if (IsStopped)
+            {
+                stopped.Dispose();
+            }
+        }
+
+        private void Pump()
+        {
+            try
+            {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    audio.WriteChunk(buffer, 0, read);
+                }
+                if (!stopRequested)
+                {
+                    inputStreamEnded = true;
+                    audio.CompleteWriting();
+                }
+            }
+            catch (Exception exception)
+            {
+                if (!stopRequested)
+                {
+                    failure = exception;
+                    audio.Cancel();
+                    try { cancelRecognizer(); } catch (InvalidOperationException) { }
+                }
+            }
+            finally
+            {
+                stopped.Set();
             }
         }
     }
@@ -410,10 +595,8 @@ namespace VoceKit.WindowsSpeech
             using (ManualResetEvent completed = new ManualResetEvent(false))
             {
                 FinalAccumulator accumulator = new FinalAccumulator();
-                Exception producerFailure = null;
                 Exception recognitionFailure = null;
                 bool recognitionCancelled = false;
-                bool inputStreamEnded = false;
 
                 try
                 {
@@ -466,97 +649,85 @@ namespace VoceKit.WindowsSpeech
                     return 6;
                 }
 
-                Thread producer = new Thread(delegate()
-                {
-                    try
+                using (InputPump inputPump = new InputPump(
+                    Console.OpenStandardInput(),
+                    audio,
+                    delegate
                     {
-                        Stream input = Console.OpenStandardInput();
-                        byte[] buffer = new byte[8192];
-                        int read;
-                        while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
-                        {
-                            audio.WriteChunk(buffer, 0, read);
-                        }
-                        inputStreamEnded = true;
-                        audio.CompleteWriting();
-                    }
-                    catch (Exception exception)
+                        engine.RecognizeAsyncCancel();
+                    }))
+                {
+                    writer.Write("ready", EventWriter.Values(
+                        "ok", true,
+                        "resolvedLanguage", recognizer.Culture.Name,
+                        "mode", options.Mode));
+                    engine.RecognizeAsync(RecognizeMode.Multiple);
+                    inputPump.Start();
+                    completed.WaitOne();
+                    inputPump.StopAfterRecognizerCompleted();
+
+                    Exception producerFailure = inputPump.Failure;
+                    bool inputStreamEnded = inputPump.InputStreamEnded;
+                    if (producerFailure is InputTooLargeException)
                     {
-                        producerFailure = exception;
-                        audio.Cancel();
-                        try
-                        {
-                            engine.RecognizeAsyncCancel();
-                        }
-                        catch (InvalidOperationException)
-                        {
-                        }
+                        writer.Error("INPUT_TOO_LARGE", "Raw PCM input exceeds the 64 MiB limit.", inputStreamEnded);
+                        return 7;
                     }
-                });
-                producer.IsBackground = true;
-                producer.Name = "windows-speech-pcm-producer";
+                    if (producerFailure is OperationCanceledException || recognitionCancelled)
+                    {
+                        writer.Error("CANCELLED", "Speech recognition was cancelled.", inputStreamEnded);
+                        return 8;
+                    }
+                    if (producerFailure != null || recognitionFailure != null)
+                    {
+                        writer.Error("LOCAL_FAILURE", "Windows speech recognition failed locally.", inputStreamEnded);
+                        Diagnostic("recognition failed", producerFailure ?? recognitionFailure);
+                        return 1;
+                    }
 
-                writer.Write("ready", EventWriter.Values(
-                    "ok", true,
-                    "resolvedLanguage", recognizer.Culture.Name,
-                    "mode", options.Mode));
-                engine.RecognizeAsync(RecognizeMode.Multiple);
-                producer.Start();
-                completed.WaitOne();
-                producer.Join();
-
-                if (producerFailure is InputTooLargeException)
-                {
-                    writer.Error("INPUT_TOO_LARGE", "Raw PCM input exceeds the 64 MiB limit.", inputStreamEnded);
-                    return 7;
+                    string transcript;
+                    if (!accumulator.TryComplete(out transcript))
+                    {
+                        writer.Error("LOCAL_FAILURE", "Final transcript was emitted more than once.", inputStreamEnded);
+                        return 1;
+                    }
+                    if (string.IsNullOrWhiteSpace(transcript))
+                    {
+                        writer.Error("NO_SPEECH", "No speech was recognized.", inputStreamEnded);
+                        return 9;
+                    }
+                    writer.Write("final", EventWriter.Values(
+                        "ok", true,
+                        "text", transcript,
+                        "inputStreamEnded", inputStreamEnded));
+                    return 0;
                 }
-                if (producerFailure is OperationCanceledException || recognitionCancelled)
-                {
-                    writer.Error("CANCELLED", "Speech recognition was cancelled.", inputStreamEnded);
-                    return 8;
-                }
-                if (producerFailure != null || recognitionFailure != null)
-                {
-                    writer.Error("LOCAL_FAILURE", "Windows speech recognition failed locally.", inputStreamEnded);
-                    Diagnostic("recognition failed", producerFailure ?? recognitionFailure);
-                    return 1;
-                }
-
-                string transcript;
-                if (!accumulator.TryComplete(out transcript))
-                {
-                    writer.Error("LOCAL_FAILURE", "Final transcript was emitted more than once.", inputStreamEnded);
-                    return 1;
-                }
-                if (string.IsNullOrWhiteSpace(transcript))
-                {
-                    writer.Error("NO_SPEECH", "No speech was recognized.", inputStreamEnded);
-                    return 9;
-                }
-                writer.Write("final", EventWriter.Values(
-                    "ok", true,
-                    "text", transcript,
-                    "inputStreamEnded", inputStreamEnded));
-                return 0;
             }
         }
 
         private static int RunSelfTests(EventWriter writer)
         {
             List<string> passed = new List<string>();
+            List<string> failures = new List<string>();
             try
             {
-                TestArgumentsAndProtocol(); passed.Add("arguments-and-protocol");
-                TestEventJson(); passed.Add("event-json");
-                TestLanguageResolver(); passed.Add("language-resolver");
-                TestSegmentJoin(); passed.Add("segment-join");
-                TestFinalAccumulator(); passed.Add("exact-one-final");
-                TestStreamOrderEofAndSeek(); passed.Add("stream-order-eof-seek");
-                TestStreamLimit(); passed.Add("stream-64mib-limit");
-                TestBackpressure(); passed.Add("stream-backpressure");
-                TestCompleteWakeup(); passed.Add("stream-complete-wakeup");
-                TestCancelWakeups(); passed.Add("stream-cancel-wakeups");
-                TestConcurrentEventWriter(); passed.Add("concurrent-event-json");
+                RunSelfTestCase("arguments-and-protocol", TestArgumentsAndProtocol, passed, failures);
+                RunSelfTestCase("event-json", TestEventJson, passed, failures);
+                RunSelfTestCase("error-event-protocol", TestErrorEventProtocol, passed, failures);
+                RunSelfTestCase("early-recognizer-completion", TestEarlyRecognizerCompletion, passed, failures);
+                RunSelfTestCase("language-resolver", TestLanguageResolver, passed, failures);
+                RunSelfTestCase("segment-join", TestSegmentJoin, passed, failures);
+                RunSelfTestCase("exact-one-final", TestFinalAccumulator, passed, failures);
+                RunSelfTestCase("stream-order-eof-seek", TestStreamOrderEofAndSeek, passed, failures);
+                RunSelfTestCase("stream-64mib-limit", TestStreamLimit, passed, failures);
+                RunSelfTestCase("stream-backpressure", TestBackpressure, passed, failures);
+                RunSelfTestCase("stream-complete-wakeup", TestCompleteWakeup, passed, failures);
+                RunSelfTestCase("stream-cancel-wakeups", TestCancelWakeups, passed, failures);
+                RunSelfTestCase("concurrent-event-json", TestConcurrentEventWriter, passed, failures);
+                if (failures.Count != 0)
+                {
+                    throw new InvalidOperationException(string.Join(" | ", failures.ToArray()));
+                }
                 writer.Write("self-test", EventWriter.Values("ok", true, "tests", passed.ToArray()));
                 return 0;
             }
@@ -568,6 +739,19 @@ namespace VoceKit.WindowsSpeech
                     "message", exception.GetType().Name + ": " + exception.Message));
                 Diagnostic("self-test failure", exception);
                 return 10;
+            }
+        }
+
+        private static void RunSelfTestCase(string name, ThreadStart test, ICollection<string> passed, ICollection<string> failures)
+        {
+            try
+            {
+                test();
+                passed.Add(name);
+            }
+            catch (Exception exception)
+            {
+                failures.Add(name + ": " + exception.GetType().Name + ": " + exception.Message);
             }
         }
 
@@ -590,6 +774,36 @@ namespace VoceKit.WindowsSpeech
             new EventWriter(output, "quoted").Write("recognized", EventWriter.Values("text", "中\"文\nline"));
             Dictionary<string, object> json = DeserializeLine(output.ToString());
             Assert((string)json["text"] == "中\"文\nline", "event text did not survive JSON serialization");
+        }
+
+        private static void TestErrorEventProtocol()
+        {
+            StringWriter output = new StringWriter(CultureInfo.InvariantCulture);
+            new EventWriter(output, "error-contract").Error("INVALID_ARGUMENT", "invalid", false);
+            Dictionary<string, object> json = DeserializeLine(output.ToString());
+            Assert(json.ContainsKey("errorCode"), "error event is missing the required errorCode field");
+            Assert((string)json["errorCode"] == "INVALID_ARGUMENT", "errorCode value changed");
+            Assert(!json.ContainsKey("code"), "legacy code field must not be emitted");
+        }
+
+        private static void TestEarlyRecognizerCompletion()
+        {
+            using (BlockingReadStream input = new BlockingReadStream())
+            using (ProducerConsumerAudioStream audio = new ProducerConsumerAudioStream())
+            using (InputPump pump = new InputPump(input, audio, delegate { throw new InvalidOperationException("recognizer already completed"); }))
+            {
+                pump.Start();
+                Assert(input.WaitUntilReadStarted(2000), "fake stdin pump did not enter its blocking read");
+                System.Diagnostics.Stopwatch timer = System.Diagnostics.Stopwatch.StartNew();
+                pump.StopAfterRecognizerCompleted();
+                timer.Stop();
+
+                Assert(timer.ElapsedMilliseconds < 1500, "recognizer completion waited indefinitely for blocked stdin");
+                Assert(pump.IsBackground, "stdin pump must never be a foreground thread");
+                Assert(pump.IsStopped, "disposing blocked stdin did not stop the fake pump");
+                Assert(!pump.InputStreamEnded, "recognizer cancellation must not be reported as stdin EOF");
+                Assert(input.WasDisposed, "recognizer completion did not release stdin");
+            }
         }
 
         private static void TestLanguageResolver()

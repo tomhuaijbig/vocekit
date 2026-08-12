@@ -9,6 +9,9 @@
 namespace {
 
 AttentionFaqCallback g_openFaqCallback;
+#ifdef VOCEKIT_TESTING
+AttentionActionDialogCallback g_actionDialogCallback;
+#endif
 
 QString tr8(const char *text)
 {
@@ -159,7 +162,9 @@ void showAttentionMessageBox(
     QMessageBox::Icon icon,
     QWidget *parent,
     const QString &title,
-    const QString &text
+    const QString &text,
+    const QString &actionText = QString(),
+    const AttentionActionCallback &action = AttentionActionCallback()
 )
 {
     QWidget *visibleParent = parent && parent->isVisible() ? parent : nullptr;
@@ -179,6 +184,10 @@ void showAttentionMessageBox(
     QPushButton *faqButton = nullptr;
     if (!faqId.isEmpty()) {
         faqButton = box.addButton(tr8("查看解决办法"), QMessageBox::ActionRole);
+    }
+    QPushButton *actionButton = nullptr;
+    if (!actionText.trimmed().isEmpty() && action) {
+        actionButton = box.addButton(actionText, QMessageBox::ActionRole);
     }
     if (QAbstractButton *okButton = box.button(QMessageBox::Ok)) {
         okButton->setText(tr8("确定"));
@@ -204,6 +213,14 @@ void showAttentionMessageBox(
     if (faqButton && box.clickedButton() == faqButton && g_openFaqCallback) {
         g_openFaqCallback(faqId);
     }
+    if (actionButton
+        && (box.clickedButton() == actionButton
+            || box.property(
+                "vocekit_attention_action_selected"
+            ).toBool())
+        && action) {
+        action();
+    }
 }
 
 } // namespace
@@ -227,3 +244,44 @@ void showAttentionInformation(QWidget *parent, const QString &title, const QStri
 {
     showAttentionMessageBox(QMessageBox::Information, parent, title, text);
 }
+
+void showAttentionWarningWithAction(
+    QWidget *parent,
+    const QString &title,
+    const QString &text,
+    const QString &actionText,
+    const AttentionActionCallback &action
+)
+{
+#ifdef VOCEKIT_TESTING
+    if (g_actionDialogCallback) {
+        if (g_actionDialogCallback(
+                parent,
+                title,
+                text,
+                actionText
+            )
+            && action) {
+            action();
+        }
+        return;
+    }
+#endif
+    showAttentionMessageBox(
+        QMessageBox::Warning,
+        parent,
+        title,
+        text,
+        actionText,
+        action
+    );
+}
+
+#ifdef VOCEKIT_TESTING
+void setAttentionActionDialogCallbackForTests(
+    const AttentionActionDialogCallback &callback
+)
+{
+    g_actionDialogCallback = callback;
+}
+#endif

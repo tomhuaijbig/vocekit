@@ -2,6 +2,7 @@ QT += core testlib widgets multimedia concurrent
 
 CONFIG += c++11 console testcase
 CONFIG -= app_bundle
+DEFINES += VOCEKIT_TESTING
 
 TEMPLATE = app
 TARGET = voice_recording_workflow_controller_tests
@@ -9,6 +10,7 @@ TARGET = voice_recording_workflow_controller_tests
 SOURCES += \
     voice_recording_workflow_controller_tests.cpp \
     ../../src/config/app_settings_defaults.cpp \
+    ../../src/providers/windows_speech_helper_protocol.cpp \
     ../../src/controllers/voice_recording_workflow_controller.cpp \
     ../../src/domain/voice_run_session.cpp \
     ../../src/recording/segmented_recording.cpp \
@@ -26,11 +28,13 @@ SOURCES += \
     ../../src/tasks/voice_speech_recognition_executor.cpp \
     ../../src/ui/floating_bar.cpp \
     ../../src/ui/floating_bar_surface.cpp \
+    ../../src/ui/attention_message.cpp \
     ../../src/ui/ui_style.cpp
 
 HEADERS += \
     ../../src/controllers/voice_recording_workflow_controller.h \
     ../../src/config/app_settings_defaults.h \
+    ../../src/providers/windows_speech_helper_protocol.h \
     ../../src/domain/function_flow_compiler.h \
     ../../src/domain/function_flow_runtime_types.h \
     ../../src/domain/voice_run_session.h \
@@ -51,4 +55,5 @@ HEADERS += \
     ../../src/tasks/voice_speech_recognition_executor.h \
     ../../src/ui/floating_bar.h \
     ../../src/ui/floating_bar_surface.h \
+    ../../src/ui/attention_message.h \
     ../../src/ui/ui_style.h

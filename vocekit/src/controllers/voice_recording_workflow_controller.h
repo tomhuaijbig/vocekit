@@ -27,6 +27,8 @@ struct VoiceRecordingWorkflowAccess
     std::function<bool()> externalProcessing;
     std::function<void(bool)> processingChanged;
     std::function<void(const QString &)> showFailure;
+    std::function<void(const QString &, const QString &)>
+        showWindowsSpeechFailure;
     std::function<void(const QString &, const QString &)> saveFailureHistory;
     std::function<void(const QString &, const QString &)> processRecognizedSpeech;
     VoiceRecordingCaptureHandlers recordingCapture;

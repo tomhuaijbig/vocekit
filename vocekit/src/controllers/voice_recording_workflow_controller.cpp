@@ -18,6 +18,7 @@
 #include "../tasks/voice_long_recording_recognition_coordinator.h"
 #include "../tasks/voice_speech_recognition_executor.h"
 #include "../ui/floating_bar.h"
+#include "../providers/windows_speech_helper_protocol.h"
 
 #include <QtMultimedia>
 #include <QtConcurrent>
@@ -25,6 +26,7 @@
 
 #include <QCoreApplication>
 #include <QEvent>
+#include <QUuid>
 
 namespace {
 
@@ -240,6 +242,10 @@ public:
         }
 
         ++m_operationGeneration;
+        m_windowsSpeechFailureShown = false;
+        m_activeSpeechLanguage = normalizeWindowsSpeechLanguage(
+            m_settings.windowsSpeechLanguage
+        );
         m_modeId = id;
         m_coordinatorModeId = id;
         m_classicEffectiveTriggerMode =
@@ -306,6 +312,10 @@ public:
         }
 
         FlowState flow;
+        m_windowsSpeechFailureShown = false;
+        m_activeSpeechLanguage = normalizeWindowsSpeechLanguage(
+            m_settings.windowsSpeechLanguage
+        );
         flow.active = true;
         flow.generation = ++m_operationGeneration;
         flow.runId = run.runId;
@@ -706,6 +716,12 @@ private:
         callbacks.segmentFinished = [this](
             const VoiceLongRecordingSegmentResult &result
         ) {
+            if (isWindowsSpeechConfigurationErrorCode(result.errorCode)) {
+                showWindowsSpeechFailure(
+                    result.errorCode,
+                    result.error
+                );
+            }
             if (m_flow.active) {
                 if (cancelFlowIfRequested()) {
                     return;
@@ -1026,7 +1042,7 @@ private:
         );
     }
 
-    void startStreamingForCurrentRecording()
+    bool startStreamingForCurrentRecording()
     {
         m_streamingFinalTimer.stop();
         m_streamingSession.reset();
@@ -1034,9 +1050,10 @@ private:
         m_streamingFinalizing = false;
         m_streamingTerminalHandled = false;
         m_streamingFallbackActive = false;
+        m_windowsSpeechFailureShown = false;
         if (!m_settings.streamingSpeechRecognitionEnabled
             || !m_access.createStreamingSpeechSession) {
-            return;
+            return true;
         }
 
         StreamingSpeechSessionRequest request;
@@ -1049,6 +1066,16 @@ private:
         request.useSystemProxy = m_flow.active
             ? m_flow.networkPolicy == QStringLiteral("systemProxy")
             : m_settings.useSystemProxy;
+        if (request.provider == speechProviderWindowsLocal()) {
+            request.language = normalizeWindowsSpeechLanguage(
+                m_activeSpeechLanguage
+            );
+        }
+        request.runId = QString::number(m_operationGeneration)
+            + QLatin1Char('-')
+            + QUuid::createUuid().toString().remove(
+                QLatin1Char('{')
+            ).remove(QLatin1Char('}'));
 
         const quint64 generation = m_operationGeneration;
         const QPointer<Impl> self(this);
@@ -1085,6 +1112,27 @@ private:
                 }
             });
         };
+        callbacks.configurationFailed = [self, generation](
+            const QString &errorCode,
+            const QString &message
+        ) {
+            if (!self) {
+                return;
+            }
+            QTimer::singleShot(
+                0,
+                self.data(),
+                [self, generation, errorCode, message]() {
+                    if (self) {
+                        self->handleStreamingConfigurationFailed(
+                            generation,
+                            errorCode,
+                            message
+                        );
+                    }
+                }
+            );
+        };
 
         const StreamingSpeechSessionCreation creation =
             m_access.createStreamingSpeechSession(request, callbacks);
@@ -1096,7 +1144,7 @@ private:
                     creation.unavailableReason
                 );
             }
-            return;
+            return true;
         }
 
         QString error;
@@ -1106,7 +1154,17 @@ private:
                 tr8("启动失败"),
                 error
             );
-            return;
+            if (request.provider == speechProviderWindowsLocal()) {
+                handleStreamingConfigurationFailed(
+                    generation,
+                    QStringLiteral(
+                        "speech.windows.process_start_failed"
+                    ),
+                    error
+                );
+                return false;
+            }
+            return true;
         }
         m_streamingSession = creation.session;
         logRuntimeEvent(
@@ -1114,6 +1172,7 @@ private:
             tr8("开始"),
             QStringLiteral("服务=") + request.provider
         );
+        return true;
     }
 
     bool hasHealthyStreamingSession() const
@@ -1141,6 +1200,69 @@ private:
         }
     }
 
+    void handleStreamingConfigurationFailed(
+        quint64 generation,
+        const QString &errorCode,
+        const QString &message
+    )
+    {
+        if (generation != m_operationGeneration
+            || m_streamingTerminalHandled
+            || m_streamingFallbackActive) {
+            return;
+        }
+        m_streamingTerminalHandled = true;
+        m_streamingFinalTimer.stop();
+        clearRecordingActions();
+        clearPcmTracking();
+        const QSharedPointer<IStreamingSpeechSession> session =
+            m_streamingSession;
+        m_streamingSession.reset();
+        if (!session.isNull()
+            && session->state() != StreamingSpeechState::Completed
+            && session->state() != StreamingSpeechState::Cancelled) {
+            session->cancel();
+        }
+
+        VoiceRecordingStopResult stopped;
+        if (m_recordingLifecycle.isRecording()) {
+            if (m_longRecordingSession.isActive()) {
+                m_recordingLifecycle.stop();
+                captureCurrentLongRecordingSegment();
+            } else {
+                stopped = m_recordingCoordinator.stopNormal();
+            }
+        }
+        if (!m_flow.active && m_runSession) {
+            m_runSession->setRecordingAudioPath(stopped.wavPath);
+            m_runSession->setLongRecording(false);
+        }
+        setWaveformVisible(false);
+        if (m_bar) {
+            m_bar->setStage(FloatingBarStage::Failed);
+        }
+        showWindowsSpeechFailure(errorCode, message);
+
+        if (m_flow.active) {
+            const quint64 flowGeneration = m_flow.generation;
+            const ExecutionId runId = m_flow.runId;
+            m_flow.normalRecording = stopped;
+            FunctionFlowNodeResult result;
+            result.state = FunctionFlowNodeState::Failed;
+            result.error = flowVoiceError(errorCode, message);
+            appendFlowObservation(currentFlowPayload(), &result);
+            finishFlow(result, flowGeneration, runId);
+            return;
+        }
+
+        m_longRecognitionCoordinator.cancel();
+        m_longRecordingSession.complete();
+        m_classicRecognitionRunning = false;
+        m_modeId.clear();
+        m_coordinatorModeId.clear();
+        setProcessing(false);
+    }
+
     void handleStreamingDegraded(
         quint64 generation,
         const QString &message
@@ -1164,6 +1286,15 @@ private:
         if (m_bar) {
             m_bar->setStreamingFallback();
         }
+        const QString provider = m_flow.active
+            ? m_flow.provider
+            : m_settings.speechProvider;
+        if (provider == speechProviderWindowsLocal()) {
+            setStatus(
+                tr8("实时识别已中断，确认后将本地重新识别"),
+                message
+            );
+        }
         logRuntimeEvent(
             tr8("实时语音识别"),
             tr8("自动降级"),
@@ -1174,6 +1305,12 @@ private:
                 startNextSegmentRecognition();
             }
             return;
+        }
+        if (provider == speechProviderWindowsLocal()) {
+            setStatus(
+                tr8("正在使用 Windows 本地语音识别重新识别"),
+                QString()
+            );
         }
         if (m_longRecordingSession.isFinalizing()) {
             startNextSegmentRecognition();
@@ -1267,7 +1404,9 @@ private:
         if (!m_flow.active && m_runSession) {
             m_runSession->setLongRecording(longRecordingActive);
         }
-        startStreamingForCurrentRecording();
+        if (!startStreamingForCurrentRecording()) {
+            return;
+        }
         installRecordingActions();
         setWaveformVisible(true);
         setTimedStatus(
@@ -1542,6 +1681,11 @@ private:
         request.modeId = modeId;
         request.audioData = recording.pcm;
         request.provider = m_settings.speechProvider;
+        if (request.provider == speechProviderWindowsLocal()) {
+            request.language = normalizeWindowsSpeechLanguage(
+                m_activeSpeechLanguage
+            );
+        }
         request.networkPolicy = QStringLiteral("inherit");
         request.useSystemProxy = m_settings.useSystemProxy;
         const VoiceSpeechRecognitionHandlers handlers =
@@ -1630,6 +1774,9 @@ private:
         );
 
         if (!speech.ok) {
+            if (isWindowsSpeechConfigurationErrorCode(speech.errorCode)) {
+                showWindowsSpeechFailure(speech.errorCode, speech.error);
+            }
             showFailure(speech.error);
             saveFailureHistory(modeId, speech.error);
             setProcessing(false);
@@ -1722,6 +1869,11 @@ private:
         request.modeId = m_flow.functionId;
         request.audioData = m_flow.normalRecording.pcm;
         request.provider = m_flow.provider;
+        if (request.provider == speechProviderWindowsLocal()) {
+            request.language = normalizeWindowsSpeechLanguage(
+                m_activeSpeechLanguage
+            );
+        }
         request.networkPolicy = m_flow.networkPolicy;
         request.useSystemProxy =
             m_flow.networkPolicy == QStringLiteral("systemProxy");
@@ -1823,6 +1975,9 @@ private:
             result.state = FunctionFlowNodeState::Succeeded;
             result.values.append(flowValue(speech.text, payload));
         } else {
+            if (isWindowsSpeechConfigurationErrorCode(speech.errorCode)) {
+                showWindowsSpeechFailure(speech.errorCode, speech.error);
+            }
             result.state = FunctionFlowNodeState::Failed;
             result.error = flowVoiceError(
                 QStringLiteral("flow_voice_failed"),
@@ -1908,6 +2063,11 @@ private:
             config.provider = m_settings.speechProvider;
             config.useSystemProxy = m_settings.useSystemProxy;
             config.networkPolicy = QStringLiteral("inherit");
+        }
+        if (config.provider == speechProviderWindowsLocal()) {
+            config.language = normalizeWindowsSpeechLanguage(
+                m_activeSpeechLanguage
+            );
         }
         m_longRecognitionCoordinator.schedule(
             m_longRecordingSession,
@@ -2398,6 +2558,22 @@ private:
         }
     }
 
+    void showWindowsSpeechFailure(
+        const QString &errorCode,
+        const QString &message
+    )
+    {
+        if (m_windowsSpeechFailureShown) {
+            return;
+        }
+        m_windowsSpeechFailureShown = true;
+        if (m_access.showWindowsSpeechFailure) {
+            m_access.showWindowsSpeechFailure(errorCode, message);
+            return;
+        }
+        showFailure(message);
+    }
+
     void saveFailureHistory(
         const QString &modeId,
         const QString &error
@@ -2439,6 +2615,7 @@ private:
     bool m_streamingFinalizing = false;
     bool m_streamingTerminalHandled = false;
     bool m_streamingFallbackActive = false;
+    bool m_windowsSpeechFailureShown = false;
     bool m_recordingReceivedPcm = false;
     bool m_holdReleasePending = false;
     quint64 m_operationGeneration = 0;
@@ -2446,6 +2623,7 @@ private:
     QString m_modeId;
     QString m_coordinatorModeId;
     QString m_classicEffectiveTriggerMode;
+    QString m_activeSpeechLanguage = QStringLiteral("follow-windows");
 };
 
 VoiceRecordingWorkflowController::VoiceRecordingWorkflowController(

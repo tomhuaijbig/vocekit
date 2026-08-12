@@ -1,166 +1,245 @@
 param(
-    [string]$PackageName = "vocekit-test"
+    [string]$PackageName = "vocekit-test",
+    [ValidateSet("", "privacy", "archive")]
+    [string]$ValidationOnly = "",
+    [string]$ValidationPath = "",
+    [string]$ValidationHelperPath = ""
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$projectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $releaseDir = Join-Path $projectRoot "release"
 $distDir = Join-Path $projectRoot "dist"
 $packageDir = Join-Path $distDir $PackageName
 $zipPath = Join-Path $distDir "$PackageName.zip"
 $runtimeVerifier = Join-Path $PSScriptRoot "verify-runtime.ps1"
+$stagingDir = Join-Path $distDir (".staging-" + [Guid]::NewGuid().ToString("N"))
+$temporaryZip = Join-Path $distDir (".archive-" + [Guid]::NewGuid().ToString("N") + ".zip")
 
 function Assert-ChildPath {
-    param(
-        [string]$BasePath,
-        [string]$TargetPath
-    )
-
-    $baseFull = [System.IO.Path]::GetFullPath($BasePath).TrimEnd("\") + "\"
-    $targetFull = [System.IO.Path]::GetFullPath($TargetPath)
-    if (-not $targetFull.StartsWith($baseFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+    param([string]$BasePath, [string]$TargetPath)
+    $baseFull = [IO.Path]::GetFullPath($BasePath).TrimEnd("\") + "\"
+    $targetFull = [IO.Path]::GetFullPath($TargetPath)
+    if (-not $targetFull.StartsWith($baseFull, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to modify a path outside the distribution directory: $targetFull"
     }
 }
 
+function Get-NormalizedRelativePath {
+    param([string]$BasePath, [string]$FullName)
+    $baseFull = [IO.Path]::GetFullPath($BasePath).TrimEnd("\")
+    return $FullName.Substring($baseFull.Length).TrimStart("\").Replace("\", "/")
+}
+
+function Assert-PackagePrivacy {
+    param([Parameter(Mandatory = $true)][string]$RootPath)
+
+    $allowedJson = @("config/secrets.json", "config/settings.json")
+    $allowedText = @(
+        "prompts/asr.txt", "prompts/lexicon.txt", "prompts/qa.txt",
+        "prompts/translate.txt", "ocr/rapidocr/models/ppocr_keys_v1.txt"
+        , "ocr/rapidocr/license-rapidocronnx.txt"
+    )
+    $forbiddenExtensions = @(
+        ".o", ".obj", ".cpp", ".h", ".cs", ".csproj", ".pro", ".log",
+        ".tmp", ".pdb", ".ilk", ".pcm", ".wav", ".mp3", ".m4a", ".aac",
+        ".flac", ".ogg", ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif",
+        ".jsonl", ".bak", ".old"
+    )
+    $forbiddenSegments = @("records", "history", "logs", "screenshots", "captures", "temp", "tmp", "userdata", "user-data")
+    $violations = New-Object Collections.Generic.List[string]
+    foreach ($file in Get-ChildItem -LiteralPath $RootPath -Recurse -File) {
+        $relative = Get-NormalizedRelativePath -BasePath $RootPath -FullName $file.FullName
+        $lower = $relative.ToLowerInvariant()
+        $segments = $lower.Split('/')
+        if (@($segments | Where-Object { $forbiddenSegments -contains $_ }).Count -gt 0) {
+            $violations.Add("forbidden user-data path: $relative")
+        }
+        $extension = $file.Extension.ToLowerInvariant()
+        if ($forbiddenExtensions -contains $extension) {
+            $violations.Add("forbidden extension: $relative")
+        }
+        if ($extension -eq ".json" -and $allowedJson -notcontains $lower) {
+            $violations.Add("non-whitelisted JSON: $relative")
+        }
+        if ($extension -eq ".txt" -and $allowedText -notcontains $lower) {
+            $violations.Add("non-whitelisted text: $relative")
+        }
+        if ($file.Name -in @("secrets.example.json", "settings.example.json", "1.txt")) {
+            $violations.Add("development file: $relative")
+        }
+    }
+    if ($violations.Count -gt 0) {
+        throw "Package privacy validation failed:`n$($violations -join "`n")"
+    }
+
+    $secrets = Get-Content -LiteralPath (Join-Path $RootPath "config\secrets.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $nonBlankSecrets = @($secrets.PSObject.Properties | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_.Value) -and $_.Name -ne "custom_models"
+    })
+    if ($nonBlankSecrets.Count -ne 0 -or @($secrets.custom_models).Count -ne 0) {
+        throw "The generated package contains non-empty API credentials or custom endpoints."
+    }
+
+    $textFiles = @(Get-ChildItem -LiteralPath $RootPath -Recurse -File | Where-Object {
+        $_.Extension.ToLowerInvariant() -in @(".json", ".md", ".txt", ".qm")
+    })
+    $secretSignature = '(?i)(api[_-]?key|api[_-]?secret|access[_-]?token|client[_-]?secret|authorization|bearer)\s*["''=: ]+\s*[A-Za-z0-9_\-]{16,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}'
+    $privateUrlSignature = '(?i)(url|endpoint)\s*["''=: ]+\s*https?://[^\s"'']+'
+    $absolutePathSignature = '(?i)(?<![A-Za-z0-9])([A-Z]:\\|\\\\[^\s\\]+\\[^\s\\]+)'
+    foreach ($textFile in $textFiles) {
+        $content = Get-Content -LiteralPath $textFile.FullName -Raw -Encoding UTF8
+        $relativeTextPath = Get-NormalizedRelativePath -BasePath $RootPath -FullName $textFile.FullName
+        if ($relativeTextPath -notlike "ocr/rapidocr/LICENSE-*" -and $content -match $secretSignature) {
+            throw "Possible credential, token, or private URL found in package text: $($textFile.FullName)"
+        }
+        if ($relativeTextPath -notlike "ocr/rapidocr/LICENSE-*" -and $content -match $privateUrlSignature) {
+            throw "Private endpoint URL found in package text: $($textFile.FullName)"
+        }
+        if ($content -match $absolutePathSignature) {
+            throw "Developer absolute path found in package text: $($textFile.FullName)"
+        }
+    }
+}
+
+function Get-StreamSha256 {
+    param([Parameter(Mandatory = $true)][IO.Stream]$Stream)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($Stream))).Replace("-", "") }
+    finally { $sha.Dispose() }
+}
+
+function Assert-PackageArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [Parameter(Mandatory = $true)][string]$ExpectedHelperPath
+    )
+    $archive = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
+    $extractionRoot = Join-Path ([IO.Path]::GetTempPath()) `
+        ("vocekit-archive-validation-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        $files = @($archive.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) })
+        $normalized = @($files | ForEach-Object { $_.FullName.Replace("\", "/").TrimStart("/") })
+        foreach ($required in @("vocekit.exe", "speech/windows/vocekit-windows-speech.exe")) {
+            if (@($normalized | Where-Object { $_ -ieq $required }).Count -ne 1 -or
+                @($normalized | Where-Object { $_ -ceq $required }).Count -ne 1) {
+                throw "Archive must contain exactly one '$required'."
+            }
+        }
+        foreach ($entryPath in $normalized) {
+            if ($entryPath.Contains("../") -or [IO.Path]::IsPathRooted($entryPath)) {
+                throw "Archive contains an unsafe entry path: $entryPath"
+            }
+        }
+        $helperIndex = [Array]::IndexOf($normalized, "speech/windows/vocekit-windows-speech.exe")
+        $helperEntry = $files[$helperIndex]
+        $entryStream = $helperEntry.Open()
+        try { $archiveHash = Get-StreamSha256 -Stream $entryStream } finally { $entryStream.Dispose() }
+        $packageHash = (Get-FileHash -LiteralPath $ExpectedHelperPath -Algorithm SHA256).Hash
+        if ($archiveHash -cne $packageHash) {
+            throw "Archive Windows speech helper hash does not match the verified package helper."
+        }
+        [void][IO.Directory]::CreateDirectory($extractionRoot)
+        [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $extractionRoot)
+        Assert-PackagePrivacy -RootPath $extractionRoot
+    } finally {
+        $archive.Dispose()
+        if ([IO.Directory]::Exists($extractionRoot)) {
+            [IO.Directory]::Delete($extractionRoot, $true)
+        }
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($ValidationOnly)) {
+    if ([string]::IsNullOrWhiteSpace($ValidationPath)) {
+        throw "ValidationPath is required with ValidationOnly."
+    }
+    if ($ValidationOnly -eq "privacy") {
+        Assert-PackagePrivacy -RootPath ([IO.Path]::GetFullPath($ValidationPath))
+    } else {
+        if ([string]::IsNullOrWhiteSpace($ValidationHelperPath)) {
+            throw "ValidationHelperPath is required for archive validation."
+        }
+        Assert-PackageArchive `
+            -ArchivePath ([IO.Path]::GetFullPath($ValidationPath)) `
+            -ExpectedHelperPath ([IO.Path]::GetFullPath($ValidationHelperPath))
+    }
+    Write-Host "$ValidationOnly validation passed."
+    exit 0
+}
+
+Assert-ChildPath -BasePath $distDir -TargetPath $packageDir
+Assert-ChildPath -BasePath $distDir -TargetPath $zipPath
+Assert-ChildPath -BasePath $distDir -TargetPath $stagingDir
+Assert-ChildPath -BasePath $distDir -TargetPath $temporaryZip
+
 $releaseExe = Join-Path $releaseDir "vocekit.exe"
-if (-not (Test-Path -LiteralPath $releaseExe)) {
+if (-not (Test-Path -LiteralPath $releaseExe -PathType Leaf)) {
     throw "Release executable not found. Build and deploy the release version first: $releaseExe"
 }
-if (-not (Test-Path -LiteralPath $runtimeVerifier)) {
+if (-not (Test-Path -LiteralPath $runtimeVerifier -PathType Leaf)) {
     throw "Runtime verifier not found: $runtimeVerifier"
 }
 & $runtimeVerifier -Configuration release -RuntimeDir $releaseDir
 
-$windowsOcrHelper = Join-Path $releaseDir "ocr\windows\vocekit-windows-ocr.exe"
-if (-not (Test-Path -LiteralPath $windowsOcrHelper)) {
-    throw "Windows OCR helper is missing from release. Run scripts\deploy.ps1 after building OCR helpers."
-}
-$rapidOcrHelper = Join-Path $releaseDir "ocr\rapidocr\vocekit-rapidocr.exe"
-$rapidOcrModels = Join-Path $releaseDir "ocr\rapidocr\models"
-if (-not (Test-Path -LiteralPath $rapidOcrHelper)) {
-    throw "RapidOCR helper is missing from release. Run scripts\deploy.ps1 after building OCR helpers."
-}
-if (-not (Test-Path -LiteralPath $rapidOcrModels)) {
-    throw "RapidOCR models are missing from release. Run scripts\deploy.ps1 after building OCR helpers."
-}
-$windowsSpeechHelper = Join-Path $releaseDir "speech\windows\vocekit-windows-speech.exe"
-if (-not (Test-Path -LiteralPath $windowsSpeechHelper -PathType Leaf)) {
-    throw "Windows speech helper is missing from release. Run scripts\build-runtime-helpers.ps1, then scripts\deploy.ps1."
-}
-
-New-Item -ItemType Directory -Path $distDir -Force | Out-Null
-Assert-ChildPath -BasePath $distDir -TargetPath $packageDir
-Assert-ChildPath -BasePath $distDir -TargetPath $zipPath
-
-if (Test-Path -LiteralPath $packageDir) {
-    Remove-Item -LiteralPath $packageDir -Recurse -Force
-}
-if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force
-}
-
-New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
-
-$releaseFull = [System.IO.Path]::GetFullPath($releaseDir).TrimEnd("\")
-$excludedExtensions = @(".o", ".obj", ".cpp", ".h", ".cs", ".csproj", ".pro", ".log", ".tmp", ".pdb", ".ilk", ".pcm", ".wav")
-$runtimeFiles = Get-ChildItem -LiteralPath $releaseDir -Recurse -File | Where-Object {
-    $excludedExtensions -notcontains $_.Extension.ToLowerInvariant()
-}
-
-foreach ($file in $runtimeFiles) {
-    $relativePath = $file.FullName.Substring($releaseFull.Length).TrimStart("\")
-    $destination = Join-Path $packageDir $relativePath
-    New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
-}
-
-$configDir = Join-Path $packageDir "config"
-$promptsDir = Join-Path $packageDir "prompts"
-$recordsDir = Join-Path $packageDir "records"
-New-Item -ItemType Directory -Path $configDir, $promptsDir, $recordsDir -Force | Out-Null
-$historyBackupName = -join ([char]0x5907, [char]0x4efd, [char]0x6587, [char]0x4ef6)
-$historyAllAudioName = -join ([char]0x603b, [char]0x5f55, [char]0x97f3, [char]0x6587, [char]0x4ef6)
-$historyAllTextName = -join ([char]0x603b, [char]0x6587, [char]0x672c, [char]0x6587, [char]0x4ef6)
-$historyAllDetailName = -join ([char]0x603b, [char]0x8be6, [char]0x7ec6, [char]0x8bb0, [char]0x5f55, [char]0x6587, [char]0x4ef6)
-New-Item -ItemType Directory -Path `
-    (Join-Path $recordsDir $historyBackupName), `
-    (Join-Path $recordsDir $historyAllAudioName), `
-    (Join-Path $recordsDir $historyAllTextName), `
-    (Join-Path $recordsDir $historyAllDetailName) `
-    -Force | Out-Null
-
-Copy-Item -LiteralPath (Join-Path $projectRoot "config\secrets.example.json") `
-    -Destination (Join-Path $configDir "secrets.json") -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "config\settings.example.json") `
-    -Destination (Join-Path $configDir "settings.json") -Force
-Copy-Item -Path (Join-Path $projectRoot "prompts\*") -Destination $promptsDir -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "docs\TESTING.md") `
-    -Destination (Join-Path $packageDir "TESTING.md") -Force
-
-if (-not (Test-Path -LiteralPath (Join-Path $packageDir "ocr\windows\vocekit-windows-ocr.exe"))) {
-    throw "The generated package is missing the Windows OCR helper."
-}
-$packagedRapidHelper = Join-Path $packageDir "ocr\rapidocr\vocekit-rapidocr.exe"
-if (-not (Test-Path -LiteralPath $packagedRapidHelper)) {
-    throw "The generated package is missing the RapidOCR helper."
-}
-$requiredRapidModels = @(
-    "ch_PP-OCRv3_det_infer.onnx",
-    "ch_PP-OCRv3_rec_infer.onnx",
-    "ch_ppocr_mobile_v2.0_cls_infer.onnx",
-    "ppocr_keys_v1.txt"
+# Whitelist only runtime files. Build output and user-created data never become input.
+$runtimeRootFiles = @(
+    "vocekit.exe", "Qt5Core.dll", "Qt5Gui.dll", "Qt5Widgets.dll", "Qt5Network.dll",
+    "Qt5Multimedia.dll", "Qt5Svg.dll", "Qt5WebSockets.dll", "D3Dcompiler_47.dll",
+    "libEGL.dll", "libGLESV2.dll", "opengl32sw.dll", "libgcc_s_dw2-1.dll",
+    "libstdc++-6.dll", "libwinpthread-1.dll", "libeay32.dll", "ssleay32.dll"
 )
-foreach ($modelName in $requiredRapidModels) {
-    $modelPath = Join-Path $packageDir "ocr\rapidocr\models\$modelName"
-    if (-not (Test-Path -LiteralPath $modelPath)) {
-        throw "The generated package is missing a RapidOCR model: $modelName"
+$runtimeDirectories = @("audio", "bearer", "iconengines", "imageformats", "mediaservice", "platforms", "playlistformats", "translations", "ocr", "speech")
+$createdStage = $false
+try {
+    [void][IO.Directory]::CreateDirectory($stagingDir)
+    $createdStage = $true
+    foreach ($name in $runtimeRootFiles) {
+        $source = Join-Path $releaseDir $name
+        if (Test-Path -LiteralPath $source -PathType Leaf) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $stagingDir $name) -Force
+        }
     }
+    foreach ($name in $runtimeDirectories) {
+        $source = Join-Path $releaseDir $name
+        if (Test-Path -LiteralPath $source -PathType Container) {
+            Copy-Item -LiteralPath $source -Destination $stagingDir -Recurse -Force
+        }
+    }
+
+    foreach ($directory in @("config", "prompts")) {
+        [void][IO.Directory]::CreateDirectory((Join-Path $stagingDir $directory))
+    }
+    Copy-Item -LiteralPath (Join-Path $projectRoot "config\secrets.example.json") -Destination (Join-Path $stagingDir "config\secrets.json") -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot "config\settings.example.json") -Destination (Join-Path $stagingDir "config\settings.json") -Force
+    foreach ($name in @("asr.txt", "lexicon.txt", "qa.txt", "translate.txt")) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot "prompts\$name") -Destination (Join-Path $stagingDir "prompts\$name") -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $projectRoot "docs\TESTING.md") -Destination (Join-Path $stagingDir "TESTING.md") -Force
+
+    Assert-PackagePrivacy -RootPath $stagingDir
+    & $runtimeVerifier -Configuration release -RuntimeDir $stagingDir
+    [IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $temporaryZip, [IO.Compression.CompressionLevel]::Optimal, $false)
+    Assert-PackageArchive -ArchivePath $temporaryZip -ExpectedHelperPath (Join-Path $stagingDir "speech\windows\vocekit-windows-speech.exe")
+
+    if (Test-Path -LiteralPath $packageDir) { [IO.Directory]::Delete($packageDir, $true) }
+    if (Test-Path -LiteralPath $zipPath) { [IO.File]::Delete($zipPath) }
+    [IO.Directory]::Move($stagingDir, $packageDir)
+    $createdStage = $false
+    [IO.File]::Move($temporaryZip, $zipPath)
+
+    $packageSize = (Get-ChildItem -LiteralPath $packageDir -Recurse -File | Measure-Object -Property Length -Sum).Sum
+    Write-Host "Test package created:"
+    Write-Host "  Folder: $packageDir"
+    Write-Host "  Archive: $zipPath"
+    Write-Host "  Package bytes: $packageSize"
+    Write-Host "  Archive bytes: $((Get-Item -LiteralPath $zipPath).Length)"
 }
-
-$packagedSpeechHelper = Join-Path $packageDir "speech\windows\vocekit-windows-speech.exe"
-if (-not (Test-Path -LiteralPath $packagedSpeechHelper -PathType Leaf)) {
-    throw "The generated package is missing the Windows speech helper."
+finally {
+    if ($createdStage -and [IO.Directory]::Exists($stagingDir)) { [IO.Directory]::Delete($stagingDir, $true) }
+    if ([IO.File]::Exists($temporaryZip)) { [IO.File]::Delete($temporaryZip) }
 }
-$speechSelfTestOutput = & $packagedSpeechHelper --self-test --run-id package-verify 2>&1
-if ($LASTEXITCODE -ne 0 -or ($speechSelfTestOutput -join "`n") -notmatch '"type":"self-test"') {
-    throw "Packaged Windows speech helper self-test failed.`n$($speechSelfTestOutput -join "`n")"
-}
-
-$secretConfig = Get-Content -LiteralPath (Join-Path $configDir "secrets.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-$nonBlankSecrets = @($secretConfig.PSObject.Properties | Where-Object {
-    -not [string]::IsNullOrWhiteSpace([string]$_.Value)
-})
-if ($nonBlankSecrets.Count -ne 0) {
-    throw "The generated package contains non-empty API credentials."
-}
-
-$forbiddenFiles = @(Get-ChildItem -LiteralPath $packageDir -Recurse -File | Where-Object {
-    $_.Extension.ToLowerInvariant() -in @(".o", ".obj", ".cpp", ".h", ".cs", ".csproj", ".pro", ".log", ".tmp", ".pdb", ".ilk", ".pcm", ".wav") -or
-    $_.Name -eq "1.txt" -or
-    $_.Name -eq "secrets.example.json" -or
-    $_.Name -eq "settings.example.json"
-})
-if ($forbiddenFiles.Count -ne 0) {
-    throw "Forbidden development or personal files were found in the generated package."
-}
-
-$keyLikeText = @(Get-ChildItem -LiteralPath $packageDir -Recurse -File | Where-Object {
-    $_.Extension.ToLowerInvariant() -in @(".json", ".md", ".txt")
-} | Select-String -Pattern "sk-[A-Za-z0-9_-]{20,}" -ErrorAction Stop)
-if ($keyLikeText.Count -ne 0) {
-    throw "A possible API key was found in the generated package."
-}
-
-& $runtimeVerifier -Configuration release -RuntimeDir $packageDir
-
-Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath -CompressionLevel Optimal -Force
-
-$packageSize = (Get-ChildItem -LiteralPath $packageDir -Recurse -File | Measure-Object -Property Length -Sum).Sum
-$zipSize = (Get-Item -LiteralPath $zipPath).Length
-Write-Host "Test package created:"
-Write-Host "  Folder: $packageDir"
-Write-Host "  Archive: $zipPath"
-Write-Host "  Package bytes: $packageSize"
-Write-Host "  Archive bytes: $zipSize"

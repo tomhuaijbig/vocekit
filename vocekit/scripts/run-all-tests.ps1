@@ -6,6 +6,7 @@ param(
     [string]$Configuration = "debug"
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -132,11 +133,6 @@ function Invoke-CapturedCommand {
                 continue
             }
 
-            if ($target -in @("fake_ocr_helper", "fake_windows_speech_helper")) {
-                ++$standalonePrograms
-                continue
-            }
-
             $executable = Join-Path (
                 Join-Path $project.DirectoryName $Configuration
             ) "$target.exe"
@@ -145,6 +141,11 @@ function Invoke-CapturedCommand {
             }
             if (-not (Test-Path -LiteralPath $executable)) {
                 $failures.Add("$target`: executable not found after build")
+                continue
+            }
+
+            if ($target -in @("fake_ocr_helper", "fake_windows_speech_helper")) {
+                ++$standalonePrograms
                 continue
             }
 

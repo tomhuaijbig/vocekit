@@ -71,18 +71,19 @@ Windows 可能因为程序暂未签名而显示安全提醒。请确认压缩包
 
 ## 自动测试
 
-Windows 本地语音识别由独立的 x64 子进程提供；Qt 主程序仍可使用 x86 构建。两者通过标准输入输出通信，因此不要要求 helper 的 PE 架构与 Qt 可执行文件相同。
+Windows 本地语音识别由独立的 x64 子进程提供；Qt 主程序仍可使用 x86 构建。两者通过标准输入输出通信，因此不要要求 helper 的 PE 架构与 Qt 可执行文件相同。人工测试时在“设置 -> 接口”选择“Windows 本地语音识别”，选择语言后运行自检，再分别验证短录音、流式听写、取消和缺少语言包时的提示。
 
 构建并部署完整 Release 运行时：
 
 ```powershell
+$env:QT_BIN = '<QtBin>'
+$env:MINGW_BIN = '<MingwBin>'
+$env:OPENSSL_BIN = '<OpenSslBin>'
 .\scripts\build-runtime-helpers.ps1
-& 'D:\QQQQQT0001\5.9\mingw53_32\bin\qmake.exe' vocekit.pro -spec win32-g++ 'CONFIG+=release'
-& 'D:\QQQQQT0001\Tools\mingw530_32\bin\mingw32-make.exe' -j2
+& (Join-Path $env:QT_BIN 'qmake.exe') vocekit.pro -spec win32-g++ 'CONFIG+=release'
+& (Join-Path $env:MINGW_BIN 'mingw32-make.exe') -j2
 .\scripts\deploy.ps1 -Configuration release `
-  -QtBin 'D:\QQQQQT0001\5.9\mingw53_32\bin' `
-  -MingwBin 'D:\QQQQQT0001\Tools\mingw530_32\bin' `
-  -OpenSslBin 'D:\QQQQQT0001\Tools\mingw530_32\opt\bin'
+  -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN -OpenSslBin $env:OPENSSL_BIN
 .\scripts\package-test.ps1 -PackageName vocekit-windows-speech-test
 ```
 

@@ -6,6 +6,7 @@ param(
     [string]$OpenSslBin = $env:OPENSSL_BIN
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($QtBin)) {
@@ -27,6 +28,9 @@ $rapidOcrHelperSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "
 $rapidOcrModelsSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "bin", "models")
 $rapidOcrLicenseSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "bin", "LICENSE-RapidOcrOnnx.txt")
 $windowsSpeechHelperSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "bin", "vocekit-windows-speech.exe")
+$qtRoot = Split-Path -Parent $QtBin
+$sourceTranslation = Join-Path $qtRoot "translations\qt_zh_CN.qm"
+$runtimeVerifier = Join-Path $PSScriptRoot "verify-runtime.ps1"
 
 if (-not (Test-Path -LiteralPath $executable)) {
     throw "Executable not found: $executable. Build the $Configuration version first."
@@ -39,6 +43,32 @@ if (-not (Test-Path -LiteralPath $MingwBin)) {
 }
 if (-not (Test-Path -LiteralPath $OpenSslBin)) {
     throw "OpenSSL runtime directory not found: $OpenSslBin"
+}
+
+# Validate every source before windeployqt or any copy can mutate the runtime.
+$requiredDeploymentSources = @(
+    @{ Path = $windowsOcrHelperSourcePath; Hint = "Run scripts\build-ocr-helpers.ps1 first." },
+    @{ Path = $rapidOcrHelperSourcePath; Hint = "Run scripts\build-ocr-helpers.ps1 first." },
+    @{ Path = $rapidOcrModelsSourcePath; Hint = "Run scripts\build-ocr-helpers.ps1 first." },
+    @{ Path = $rapidOcrLicenseSourcePath; Hint = "Run scripts\build-ocr-helpers.ps1 first." },
+    @{ Path = $windowsSpeechHelperSourcePath; Hint = "Run scripts\build-runtime-helpers.ps1 first." },
+    @{ Path = (Join-Path $OpenSslBin "libeay32.dll"); Hint = "Provide the OpenSSL 1.0.x runtime." },
+    @{ Path = (Join-Path $OpenSslBin "ssleay32.dll"); Hint = "Provide the OpenSSL 1.0.x runtime." },
+    @{ Path = $sourceTranslation; Hint = "Provide the Qt Chinese translation." },
+    @{ Path = $runtimeVerifier; Hint = "Restore scripts\verify-runtime.ps1." }
+)
+foreach ($modelName in @(
+    "ch_PP-OCRv3_det_infer.onnx", "ch_PP-OCRv3_rec_infer.onnx",
+    "ch_ppocr_mobile_v2.0_cls_infer.onnx", "ppocr_keys_v1.txt")) {
+    $requiredDeploymentSources += @{
+        Path = Join-Path $rapidOcrModelsSourcePath $modelName
+        Hint = "Run scripts\build-ocr-helpers.ps1 first."
+    }
+}
+foreach ($source in $requiredDeploymentSources) {
+    if (-not (Test-Path -LiteralPath $source.Path)) {
+        throw "Required runtime source not found: $($source.Path). $($source.Hint)"
+    }
 }
 
 # Add the compiler, Qt, and OpenSSL directories for deployment dependency discovery.
@@ -62,32 +92,15 @@ foreach ($dllName in $openSslDlls) {
     Copy-Item -LiteralPath $sourceDll -Destination (Join-Path $executableDir $dllName) -Force
 }
 
-$qtRoot = Split-Path -Parent $QtBin
-$sourceTranslation = Join-Path $qtRoot "translations\qt_zh_CN.qm"
 $targetTranslations = Join-Path $executableDir "translations"
-if (-not (Test-Path -LiteralPath $sourceTranslation)) {
-    throw "Qt Chinese translation not found: $sourceTranslation"
-}
 New-Item -ItemType Directory -Path $targetTranslations -Force | Out-Null
 Copy-Item -LiteralPath $sourceTranslation -Destination (Join-Path $targetTranslations "qt_zh_CN.qm") -Force
 
 # The Windows OCR helper is required in every deployed build.
 $windowsOcrTargetDir = Join-Path $executableDir "ocr\windows"
-if (-not (Test-Path -LiteralPath $windowsOcrHelperSourcePath)) {
-    throw "Windows OCR helper not found: $windowsOcrHelperSourcePath. Run scripts\build-ocr-helpers.ps1 first."
-}
 New-Item -ItemType Directory -Path $windowsOcrTargetDir -Force | Out-Null
 Copy-Item -LiteralPath $windowsOcrHelperSourcePath -Destination (Join-Path $windowsOcrTargetDir "vocekit-windows-ocr.exe") -Force
 
-if (-not (Test-Path -LiteralPath $rapidOcrHelperSourcePath)) {
-    throw "RapidOCR helper not found: $rapidOcrHelperSourcePath. Run scripts\build-ocr-helpers.ps1 first."
-}
-if (-not (Test-Path -LiteralPath $rapidOcrModelsSourcePath)) {
-    throw "RapidOCR models not found: $rapidOcrModelsSourcePath. Run scripts\build-ocr-helpers.ps1 first."
-}
-if (-not (Test-Path -LiteralPath $rapidOcrLicenseSourcePath)) {
-    throw "RapidOCR license not found: $rapidOcrLicenseSourcePath. Run scripts\build-ocr-helpers.ps1 first."
-}
 $rapidOcrTargetDir = Join-Path $executableDir "ocr\rapidocr"
 $rapidOcrModelsTargetDir = Join-Path $rapidOcrTargetDir "models"
 New-Item -ItemType Directory -Path $rapidOcrModelsTargetDir -Force | Out-Null
@@ -96,17 +109,10 @@ Copy-Item -Path (Join-Path $rapidOcrModelsSourcePath "*") -Destination $rapidOcr
 Copy-Item -LiteralPath $rapidOcrLicenseSourcePath -Destination (Join-Path $rapidOcrTargetDir "LICENSE-RapidOcrOnnx.txt") -Force
 
 $windowsSpeechTargetDir = Join-Path $executableDir "speech\windows"
-if (-not (Test-Path -LiteralPath $windowsSpeechHelperSourcePath -PathType Leaf)) {
-    throw "Windows speech helper not found: $windowsSpeechHelperSourcePath. Run scripts\build-runtime-helpers.ps1 first."
-}
 New-Item -ItemType Directory -Path $windowsSpeechTargetDir -Force | Out-Null
 Copy-Item -LiteralPath $windowsSpeechHelperSourcePath `
     -Destination (Join-Path $windowsSpeechTargetDir "vocekit-windows-speech.exe") -Force
 
-$runtimeVerifier = Join-Path $PSScriptRoot "verify-runtime.ps1"
-if (-not (Test-Path -LiteralPath $runtimeVerifier)) {
-    throw "Runtime verifier not found: $runtimeVerifier"
-}
 & $runtimeVerifier -Configuration $Configuration -RuntimeDir $executableDir
 
 Write-Host "Runtime dependencies deployed to: $executableDir"

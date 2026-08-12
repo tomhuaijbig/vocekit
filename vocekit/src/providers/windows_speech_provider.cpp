@@ -81,6 +81,11 @@ QString languageSummary(const WindowsSpeechHelperResult &helper)
 
 } // namespace
 
+qint64 windowsSpeechPcmDurationMs(qint64 pcmByteCount)
+{
+    return qMax<qint64>(0, pcmByteCount) * qint64(1000) / qint64(32000);
+}
+
 WindowsSpeechProvider::WindowsSpeechProvider()
     : WindowsSpeechProvider(
           [](const WindowsSpeechBatchRequest &request) {
@@ -199,7 +204,7 @@ SpeechRecognitionResult WindowsSpeechProvider::recognize(
         QStringLiteral("provider=") + id()
             + QStringLiteral(", language=") + batch.language
             + QStringLiteral(", durationMs=")
-            + QString::number(batch.pcm.size() * 1000 / 32000)
+            + QString::number(windowsSpeechPcmDurationMs(batch.pcm.size()))
     );
     const WindowsSpeechHelperResult helper = m_batch(batch);
     result.durationMs = timer.elapsed();

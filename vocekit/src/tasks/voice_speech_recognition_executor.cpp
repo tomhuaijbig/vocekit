@@ -28,6 +28,11 @@ QString cancelledError()
     );
 }
 
+QString cancelledErrorCode()
+{
+    return QStringLiteral("operation.cancelled");
+}
+
 QString failureLogDetail(const QString &modeId, const QString &error)
 {
     return textUtf8("\xE9\x98\xB6\xE6\xAE\xB5=\xE8\xAF\xAD\xE9\x9F\xB3\xE8\xAF\x86\xE5\x88\xAB\xEF\xBC\x8C\xE5\x8A\x9F\xE8\x83\xBD=")
@@ -57,6 +62,7 @@ VoiceSpeechRecognitionResult VoiceSpeechRecognitionExecutor::run(
     if (request.cancellation.isCancellationRequested()) {
         result.cancelled = true;
         result.error = cancelledError();
+        result.errorCode = cancelledErrorCode();
         result.logCategory = textUtf8("\xE5\x8A\x9F\xE8\x83\xBD");
         result.logAction = textUtf8("\xE5\xA4\xB1\xE8\xB4\xA5");
         result.logDetail = failureLogDetail(request.modeId, result.error);
@@ -93,6 +99,7 @@ VoiceSpeechRecognitionResult VoiceSpeechRecognitionExecutor::run(
     if (request.cancellation.isCancellationRequested()) {
         result.cancelled = true;
         result.error = cancelledError();
+        result.errorCode = cancelledErrorCode();
         result.logCategory = textUtf8("\xE5\x8A\x9F\xE8\x83\xBD");
         result.logAction = textUtf8("\xE5\xA4\xB1\xE8\xB4\xA5");
         result.logDetail = failureLogDetail(request.modeId, result.error);

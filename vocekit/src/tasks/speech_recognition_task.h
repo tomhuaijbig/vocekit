@@ -2,6 +2,7 @@
 #define VOCEKIT_SPEECH_RECOGNITION_TASK_H
 
 #include "cancellation_token.h"
+#include "../providers/provider_types.h"
 
 #include <QByteArray>
 #include <QString>
@@ -54,5 +55,22 @@ SpeechRecognitionTaskResult runSpeechRecognitionProviderTask(
 QString speechRecognitionProviderConfigurationError(
     const QString &provider
 );
+
+inline SpeechRecognitionTaskResult
+speechRecognitionTaskResultFromProviderResult(
+    int index,
+    const SpeechRecognitionResult &providerResult,
+    qint64 fallbackElapsedMs)
+{
+    SpeechRecognitionTaskResult result;
+    result.index = index;
+    result.text = providerResult.text;
+    result.error = providerResult.error.message;
+    result.errorCode = providerResult.error.code;
+    result.elapsedMs = providerResult.durationMs >= 0
+        ? providerResult.durationMs
+        : fallbackElapsedMs;
+    return result;
+}
 
 #endif // VOCEKIT_SPEECH_RECOGNITION_TASK_H

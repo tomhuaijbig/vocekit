@@ -8,6 +8,8 @@
 
 #include <functional>
 
+qint64 windowsSpeechPcmDurationMs(qint64 pcmByteCount);
+
 class WindowsSpeechProvider : public ISpeechProvider
 {
 public:

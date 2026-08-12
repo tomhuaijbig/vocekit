@@ -38,9 +38,6 @@ SpeechRecognitionTaskResult runSpeechRecognitionProviderTask(
     const SpeechRecognitionProviderTaskRequest &request
 )
 {
-    SpeechRecognitionTaskResult result;
-    result.index = request.index;
-
     QElapsedTimer timer;
     timer.start();
 
@@ -68,11 +65,9 @@ SpeechRecognitionTaskResult runSpeechRecognitionProviderTask(
     const SpeechRecognitionResult providerResult =
         provider->recognize(providerRequest, cancellation);
 
-    result.text = providerResult.text;
-    result.error = providerResult.error.message;
-    result.errorCode = providerResult.error.code;
-    result.elapsedMs = providerResult.durationMs >= 0
-        ? providerResult.durationMs
-        : timer.elapsed();
-    return result;
+    return speechRecognitionTaskResultFromProviderResult(
+        request.index,
+        providerResult,
+        timer.elapsed()
+    );
 }

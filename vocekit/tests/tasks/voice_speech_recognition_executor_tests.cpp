@@ -11,6 +11,7 @@
 #include "../../src/tasks/voice_long_recording_recognition_coordinator.h"
 #include "../../src/tasks/voice_recording_completion_executor.h"
 #include "../../src/tasks/voice_speech_recognition_executor.h"
+#include "../../src/providers/provider_types.h"
 
 class VoiceSpeechRecognitionExecutorTests : public QObject
 {
@@ -743,6 +744,73 @@ private slots:
         QVERIFY(result.logDetail.contains(result.error));
     }
 
+    void cancellationOverridesReturnedProviderErrorCode()
+    {
+        CancellationSource cancellation;
+        VoiceSpeechRecognitionRequest request;
+        request.modeId = QStringLiteral("dictate");
+        request.cancellation = cancellation.token();
+
+        VoiceSpeechRecognitionHandlers handlers;
+        handlers.recognizeProvider = [&cancellation](
+            const SpeechRecognitionProviderTaskRequest &
+        ) {
+            cancellation.cancel();
+            SpeechRecognitionTaskResult result;
+            result.error = QStringLiteral("recognizer missing");
+            result.errorCode = QStringLiteral(
+                "speech.windows.recognizer_missing"
+            );
+            return result;
+        };
+
+        const VoiceSpeechRecognitionResult result =
+            VoiceSpeechRecognitionExecutor::run(request, handlers);
+
+        QVERIFY(result.cancelled);
+        QVERIFY(result.error.contains(QString::fromUtf8("取消")));
+        QCOMPARE(result.errorCode, QStringLiteral("operation.cancelled"));
+    }
+
+    void preCancelledRecognitionUsesCancellationErrorCode()
+    {
+        CancellationSource cancellation;
+        cancellation.cancel();
+        VoiceSpeechRecognitionRequest request;
+        request.cancellation = cancellation.token();
+
+        const VoiceSpeechRecognitionResult result =
+            VoiceSpeechRecognitionExecutor::run(
+                request,
+                VoiceSpeechRecognitionHandlers()
+            );
+
+        QVERIFY(result.cancelled);
+        QCOMPARE(result.errorCode, QStringLiteral("operation.cancelled"));
+    }
+
+    void mapsProviderResultIntoTaskResult()
+    {
+        SpeechRecognitionResult providerResult;
+        providerResult.text = QStringLiteral("provider text");
+        providerResult.error.code = QStringLiteral("speech.test.code");
+        providerResult.error.message = QStringLiteral("provider error");
+        providerResult.durationMs = 27;
+
+        const SpeechRecognitionTaskResult result =
+            speechRecognitionTaskResultFromProviderResult(
+                8,
+                providerResult,
+                99
+            );
+
+        QCOMPARE(result.index, 8);
+        QCOMPARE(result.text, providerResult.text);
+        QCOMPARE(result.error, providerResult.error.message);
+        QCOMPARE(result.errorCode, providerResult.error.code);
+        QCOMPARE(result.elapsedMs, qint64(27));
+    }
+
     void buildsLongRecordingResultInSegmentOrder()
     {
         SegmentedRecordingState state;
@@ -862,7 +930,9 @@ private slots:
             ++recognitionCalls;
             SpeechRecognitionTaskResult result;
             result.error = QStringLiteral("recognition failed");
-            result.errorCode = QStringLiteral("speech.windows.local");
+            result.errorCode = recognitionCalls == 1
+                ? QStringLiteral("speech.windows.recognizer_missing")
+                : QStringLiteral("speech.windows.local");
             result.elapsedMs = 6;
             return result;
         };

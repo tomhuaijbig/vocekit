@@ -8,6 +8,14 @@ class WindowsSpeechProviderTests : public QObject
     Q_OBJECT
 
 private slots:
+    void calculatesLargePcmDurationWithoutIntegerOverflow()
+    {
+        QCOMPARE(
+            windowsSpeechPcmDurationMs(2147483646LL),
+            qint64(67108863)
+        );
+    }
+
     void speechRequestDefaultsToFollowingWindows()
     {
         const SpeechRecognitionRequest request;

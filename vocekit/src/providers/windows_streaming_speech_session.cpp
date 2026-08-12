@@ -3,6 +3,7 @@
 #include "windows_speech_helper_protocol.h"
 
 #include <QFileInfo>
+#include <QPointer>
 
 namespace {
 
@@ -72,7 +73,8 @@ WindowsStreamingSpeechSession::WindowsStreamingSpeechSession(
             this,
             &WindowsStreamingSpeechSession::onReadyReadStandardOutput);
     connect(&m_process, &QProcess::readyReadStandardError,
-            this, [this]() { m_process.readAllStandardError(); });
+            this,
+            &WindowsStreamingSpeechSession::onReadyReadStandardError);
     connect(&m_process, &QProcess::bytesWritten,
             this, &WindowsStreamingSpeechSession::onBytesWritten);
     connect(
@@ -164,7 +166,11 @@ bool WindowsStreamingSpeechSession::pushAudio(const QByteArray &pcm)
         return false;
     }
     m_audioQueue.append(pcm);
+    QPointer<WindowsStreamingSpeechSession> lifetimeGuard(this);
     pumpAudio();
+    if (lifetimeGuard.isNull()) {
+        return false;
+    }
     return true;
 }
 
@@ -177,7 +183,11 @@ void WindowsStreamingSpeechSession::finish()
     }
     m_finishRequested = true;
     m_state = StreamingSpeechState::Finalizing;
+    QPointer<WindowsStreamingSpeechSession> lifetimeGuard(this);
     pumpAudio();
+    if (lifetimeGuard.isNull()) {
+        return;
+    }
     closeInputIfDrained();
 }
 
@@ -206,6 +216,11 @@ void WindowsStreamingSpeechSession::onReadyReadStandardOutput()
     consumeOutput();
 }
 
+void WindowsStreamingSpeechSession::onReadyReadStandardError()
+{
+    consumeStandardError();
+}
+
 void WindowsStreamingSpeechSession::onBytesWritten(qint64 bytes)
 {
     if (m_cleaningUp || isTerminal() || bytes <= 0) {
@@ -216,7 +231,11 @@ void WindowsStreamingSpeechSession::onBytesWritten(qint64 bytes)
         m_audioQueue.remove(0, static_cast<int>(confirmed));
         m_pendingWriteBytes -= confirmed;
     }
+    QPointer<WindowsStreamingSpeechSession> lifetimeGuard(this);
     pumpAudio();
+    if (lifetimeGuard.isNull()) {
+        return;
+    }
     closeInputIfDrained();
 }
 
@@ -227,7 +246,11 @@ void WindowsStreamingSpeechSession::onFinished(
     if (m_cleaningUp || isTerminal()) {
         return;
     }
+    QPointer<WindowsStreamingSpeechSession> lifetimeGuard(this);
     consumeOutput();
+    if (lifetimeGuard.isNull()) {
+        return;
+    }
     if (isTerminal()) {
         return;
     }
@@ -281,8 +304,12 @@ void WindowsStreamingSpeechSession::consumeOutput()
     if (m_cleaningUp || isTerminal()) {
         return;
     }
+    QPointer<WindowsStreamingSpeechSession> lifetimeGuard(this);
+    consumeStandardError();
+    if (lifetimeGuard.isNull()) {
+        return;
+    }
     const QByteArray bytes = m_process.readAllStandardOutput();
-    m_process.readAllStandardError();
     m_stdoutBytes += bytes.size();
     if (m_stdoutBytes > MaximumOutputBytes) {
         fail(
@@ -301,11 +328,29 @@ void WindowsStreamingSpeechSession::consumeOutput()
             line.chop(1);
         }
         consumeLine(line);
+        if (lifetimeGuard.isNull()) {
+            return;
+        }
     }
     if (!isTerminal() && m_stdoutBuffer.size() > MaximumLineBytes) {
         fail(
             QStringLiteral("INVALID_RESPONSE"),
             tr8("Windows 本地语音组件返回了无效数据。")
+        );
+    }
+}
+
+void WindowsStreamingSpeechSession::consumeStandardError()
+{
+    if (m_cleaningUp || isTerminal()) {
+        return;
+    }
+    const QByteArray bytes = m_process.readAllStandardError();
+    m_stderrBytes += bytes.size();
+    if (m_stderrBytes > MaximumOutputBytes) {
+        fail(
+            QStringLiteral("INVALID_RESPONSE"),
+            tr8("Windows 本地语音组件返回的数据过多。")
         );
     }
 }
@@ -330,7 +375,7 @@ void WindowsStreamingSpeechSession::consumeLine(const QByteArray &line)
     }
 
     switch (event.type) {
-    case WindowsSpeechHelperEventType::Ready:
+    case WindowsSpeechHelperEventType::Ready: {
         if (m_ready) {
             fail(
                 QStringLiteral("INVALID_RESPONSE"),
@@ -342,9 +387,14 @@ void WindowsStreamingSpeechSession::consumeLine(const QByteArray &line)
         m_startupTimer.stop();
         m_state = m_finishRequested ? StreamingSpeechState::Finalizing
                                     : StreamingSpeechState::Streaming;
+        QPointer<WindowsStreamingSpeechSession> lifetimeGuard(this);
         pumpAudio();
+        if (lifetimeGuard.isNull()) {
+            return;
+        }
         closeInputIfDrained();
         return;
+    }
     case WindowsSpeechHelperEventType::Hypothesis:
         if (!m_ready) {
             fail(QStringLiteral("INVALID_RESPONSE"),

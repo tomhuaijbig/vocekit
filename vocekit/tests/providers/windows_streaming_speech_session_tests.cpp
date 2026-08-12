@@ -3,6 +3,8 @@
 #include "../../src/providers/windows_streaming_speech_session.h"
 
 #include <QFile>
+#include <QPointer>
+#include <QSharedPointer>
 #include <QTemporaryDir>
 
 #ifdef Q_OS_WIN
@@ -196,6 +198,59 @@ private slots:
         QCOMPARE(session.state(), StreamingSpeechState::Completed);
     }
 
+    void transcriptAndCompletedCallbacksMayDestroySession()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString pidPath = directory.path() + QStringLiteral("/pid.txt");
+        int transcriptCount = 0;
+        QSharedPointer<WindowsStreamingSpeechSession> session;
+        StreamingSpeechCallbacks callbacks;
+        callbacks.transcriptUpdated = [&](const StreamingTranscriptSnapshot &) {
+            ++transcriptCount;
+            session.clear();
+        };
+        session.reset(new WindowsStreamingSpeechSession(
+            fakeHelperPath(),
+            scenarioArguments(
+                QStringLiteral("hypothesis-replacement"),
+                QStringList() << QStringLiteral("--pid-file") << pidPath
+            ),
+            requestFor(QStringLiteral("destroy-transcript-1")),
+            callbacks,
+            fastTiming()
+        ));
+        QPointer<WindowsStreamingSpeechSession> guard(session.data());
+        QVERIFY(session->start(nullptr));
+        QTRY_VERIFY(QFile::exists(pidPath));
+        const qint64 pid = readPid(pidPath);
+        QVERIFY(pid > 0);
+        QTRY_VERIFY(guard.isNull());
+        QCOMPARE(transcriptCount, 1);
+        QTRY_VERIFY(!processIsRunning(pid));
+
+        int completedCount = 0;
+        QSharedPointer<WindowsStreamingSpeechSession> completedSession;
+        StreamingSpeechCallbacks completedCallbacks;
+        completedCallbacks.completed = [&](const QString &) {
+            ++completedCount;
+            completedSession.clear();
+        };
+        completedSession.reset(new WindowsStreamingSpeechSession(
+            fakeHelperPath(), scenarioArguments(QStringLiteral("ready-final")),
+            requestFor(QStringLiteral("destroy-completed-1")),
+            completedCallbacks,
+            fastTiming()
+        ));
+        QPointer<WindowsStreamingSpeechSession> completedGuard(
+            completedSession.data()
+        );
+        QVERIFY(completedSession->start(nullptr));
+        completedSession->finish();
+        QTRY_VERIFY(completedGuard.isNull());
+        QCOMPARE(completedCount, 1);
+    }
+
     void finishClosesInputAfterQueueDrains()
     {
         QStringList completed;
@@ -251,6 +306,64 @@ private slots:
             QVERIFY(session.start(nullptr));
             QTRY_COMPARE(degraded.size(), 1);
             QCOMPARE(session.state(), StreamingSpeechState::Degraded);
+        }
+    }
+
+    void degradedCallbackMayDestroySessionExactlyOnce()
+    {
+        int degradedCount = 0;
+        QSharedPointer<WindowsStreamingSpeechSession> session;
+        StreamingSpeechCallbacks callbacks;
+        callbacks.degraded = [&](const QString &) {
+            ++degradedCount;
+            session.clear();
+        };
+        session.reset(new WindowsStreamingSpeechSession(
+            fakeHelperPath(), scenarioArguments(QStringLiteral("invalid-json")),
+            requestFor(QStringLiteral("destroy-degraded-1")),
+            callbacks,
+            fastTiming()
+        ));
+        QPointer<WindowsStreamingSpeechSession> guard(session.data());
+        QVERIFY(session->start(nullptr));
+        QTRY_VERIFY(guard.isNull());
+        QCOMPARE(degradedCount, 1);
+    }
+
+    void capsStandardErrorBeforeAndAfterReady()
+    {
+        struct Case { QString scenario; bool startup; };
+        const QVector<Case> cases = {
+            {QStringLiteral("oversize-stderr"), true},
+            {QStringLiteral("ready-oversize-stderr"), false}
+        };
+        for (const Case &item : cases) {
+            int configurationCount = 0;
+            int degradedCount = 0;
+            QString failureMessage;
+            StreamingSpeechCallbacks callbacks;
+            callbacks.configurationFailed = [&](const QString &,
+                                                  const QString &message) {
+                ++configurationCount;
+                failureMessage = message;
+            };
+            callbacks.degraded = [&](const QString &message) {
+                ++degradedCount;
+                failureMessage = message;
+            };
+            WindowsStreamingSpeechSession session(
+                fakeHelperPath(), scenarioArguments(item.scenario),
+                requestFor(item.scenario), callbacks, fastTiming()
+            );
+            QVERIFY(session.start(nullptr));
+            if (item.startup) {
+                QTRY_COMPARE(configurationCount, 1);
+                QCOMPARE(degradedCount, 0);
+            } else {
+                QTRY_COMPARE(degradedCount, 1);
+                QCOMPARE(configurationCount, 0);
+            }
+            QVERIFY(failureMessage.contains(QString::fromUtf8("数据过多")));
         }
     }
 
@@ -328,6 +441,28 @@ private slots:
         QTRY_COMPARE(codes.size(), 1);
         QCOMPARE(codes.first(), QStringLiteral("speech.windows.program_missing"));
         QVERIFY(degraded.isEmpty());
+    }
+
+    void configurationCallbackMayDestroySessionExactlyOnce()
+    {
+        int configurationCount = 0;
+        QSharedPointer<WindowsStreamingSpeechSession> session;
+        StreamingSpeechCallbacks callbacks;
+        callbacks.configurationFailed = [&](const QString &, const QString &) {
+            ++configurationCount;
+            session.clear();
+        };
+        session.reset(new WindowsStreamingSpeechSession(
+            fakeHelperPath(),
+            scenarioArguments(QStringLiteral("startup-invalid-json")),
+            requestFor(QStringLiteral("destroy-configuration-1")),
+            callbacks,
+            fastTiming()
+        ));
+        QPointer<WindowsStreamingSpeechSession> guard(session.data());
+        QVERIFY(session->start(nullptr));
+        QTRY_VERIFY(guard.isNull());
+        QCOMPARE(configurationCount, 1);
     }
 
     void existingButUnstartableProgramIsConfigurationFailure()

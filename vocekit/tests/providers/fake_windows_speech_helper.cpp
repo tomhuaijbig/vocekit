@@ -209,6 +209,11 @@ int main(int argc, char *argv[])
         QThread::msleep(75);
         std::abort();
     }
+    if (scenario == QStringLiteral("ready-oversize-stderr")) {
+        writeErrorBytes(QByteArray(1024 * 1024 + 1, 'e'));
+        QThread::msleep(1000);
+        return 0;
+    }
     if (scenario == QStringLiteral("hypothesis-replacement")) {
         writeEvent(
             QStringLiteral("hypothesis"),

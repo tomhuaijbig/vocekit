@@ -51,10 +51,12 @@ public:
 private:
     void onStarted();
     void onReadyReadStandardOutput();
+    void onReadyReadStandardError();
     void onBytesWritten(qint64 bytes);
     void onFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void onProcessError(QProcess::ProcessError error);
     void consumeOutput();
+    void consumeStandardError();
     void consumeLine(const QByteArray &line);
     void pumpAudio();
     void closeInputIfDrained();
@@ -74,6 +76,7 @@ private:
     QTimer m_finalTimer;
     QByteArray m_stdoutBuffer;
     qint64 m_stdoutBytes = 0;
+    qint64 m_stderrBytes = 0;
     QByteArray m_audioQueue;
     qint64 m_pendingWriteBytes = 0;
     QString m_committedText;

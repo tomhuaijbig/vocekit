@@ -35,6 +35,7 @@ private slots:
     void exposesOneTypedPageController();
     void hubWindowDelegatesUtilityPages();
     void promptMutationsUseOneSettingsRefreshRoute();
+    void controllerAdaptsRealFloatingBarPreview();
 };
 
 void HubUtilityPagesControllerTests::exposesOneTypedPageController()
@@ -43,6 +44,21 @@ void HubUtilityPagesControllerTests::exposesOneTypedPageController()
         HubUtilityPagesController,
         const HubUtilityPagesControllerAccess &
     >::value));
+}
+
+void HubUtilityPagesControllerTests::controllerAdaptsRealFloatingBarPreview()
+{
+    const QString path = QFINDTESTDATA(
+        "../../src/ui/hub_utility_pages_controller.cpp"
+    );
+    QVERIFY(!path.isEmpty());
+    QFile source(path);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray contents = source.readAll();
+    QVERIFY(contents.contains("dependencies.previewFloatingBarStyle"));
+    QVERIFY(contents.contains("floatingBar->setStyle"));
+    QVERIFY(contents.contains("floatingBar->setStage"));
+    QVERIFY(contents.contains("floatingBar->hideLater(5000)"));
 }
 
 void HubUtilityPagesControllerTests::hubWindowDelegatesUtilityPages()

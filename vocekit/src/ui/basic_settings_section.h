@@ -20,6 +20,8 @@ struct BasicSettingsSnapshot
     bool vocabularyOnlyForVoiceInput = false;
     int vocabularyPromptEntryLimit = 16;
     bool floatingBarEnabled = true;
+    QString floatingBarStyle = QStringLiteral("statusPill");
+    bool writeFailurePopupFallbackEnabled = true;
     bool streamingSpeechRecognitionEnabled = true;
     bool preRecordCountdownEnabled = false;
     bool recordingBeepEnabled = false;
@@ -27,7 +29,7 @@ struct BasicSettingsSnapshot
     bool useSystemProxy = false;
 };
 
-// 设置页中的基础分区：常用设置、词库、语音录音和网络。
+// 设置页中的基础分区：常用设置、词库、语音录音、写入和网络。
 class BasicSettingsSection : public QWidget
 {
 public:
@@ -36,6 +38,7 @@ public:
         General,
         Vocabulary,
         Voice,
+        Write,
         Network
     };
 
@@ -45,6 +48,7 @@ public:
         std::function<void(const BasicSettingsSnapshot &)> applySnapshot;
         std::function<void()> saveAndRefresh;
         std::function<void(const QString &, const QString &)> showDetail;
+        std::function<void(const QString &)> previewFloatingBarStyle;
     };
 
     explicit BasicSettingsSection(
@@ -63,6 +67,7 @@ private:
     void addGeneralRows(QVBoxLayout *layout);
     void addVocabularyRows(QVBoxLayout *layout);
     void addVoiceRows(QVBoxLayout *layout);
+    void addWriteRows(QVBoxLayout *layout);
     void addNetworkRows(QVBoxLayout *layout);
 
     QWidget *toggleRow(
@@ -104,6 +109,8 @@ private:
     Callbacks m_callbacks;
     QCheckBox *m_autoStartBox = nullptr;
     QCheckBox *m_strongSelectionBox = nullptr;
+    class FloatingBarStyleSelector *m_floatingBarStyleSelector = nullptr;
+    QCheckBox *m_writeFailurePopupFallbackBox = nullptr;
 };
 
 #endif // VOCEKIT_BASIC_SETTINGS_SECTION_H

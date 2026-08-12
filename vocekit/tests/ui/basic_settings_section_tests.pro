@@ -14,6 +14,7 @@ SOURCES += \
     ../../src/platform/windows_autostart.cpp \
     ../../src/ui/attention_message.cpp \
     ../../src/ui/basic_settings_section.cpp \
+    ../../src/ui/floating_bar_style_selector.cpp \
     ../../src/ui/ui_style.cpp
 
 HEADERS += \
@@ -21,4 +22,5 @@ HEADERS += \
     ../../src/platform/windows_autostart.h \
     ../../src/ui/attention_message.h \
     ../../src/ui/basic_settings_section.h \
+    ../../src/ui/floating_bar_style_selector.h \
     ../../src/ui/ui_style.h

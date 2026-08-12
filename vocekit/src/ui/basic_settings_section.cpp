@@ -1,6 +1,7 @@
 #include "basic_settings_section.h"
 
 #include "attention_message.h"
+#include "floating_bar_style_selector.h"
 #include "ui_style.h"
 
 #include "../config/app_settings_defaults.h"
@@ -41,6 +42,22 @@ void BasicSettingsSection::refreshFromSettings()
         m_strongSelectionBox->blockSignals(true);
         m_strongSelectionBox->setChecked(current.strongSelectionEnabled);
         m_strongSelectionBox->blockSignals(false);
+    }
+    if (m_floatingBarStyleSelector
+        && m_floatingBarStyleSelector->currentStyle()
+            != current.floatingBarStyle) {
+        m_floatingBarStyleSelector->setCurrentStyle(
+            current.floatingBarStyle
+        );
+    }
+    if (m_writeFailurePopupFallbackBox
+        && m_writeFailurePopupFallbackBox->isChecked()
+            != current.writeFailurePopupFallbackEnabled) {
+        m_writeFailurePopupFallbackBox->blockSignals(true);
+        m_writeFailurePopupFallbackBox->setChecked(
+            current.writeFailurePopupFallbackEnabled
+        );
+        m_writeFailurePopupFallbackBox->blockSignals(false);
     }
 }
 
@@ -83,6 +100,8 @@ void BasicSettingsSection::buildRows()
         addVocabularyRows(layout);
     } else if (m_kind == Voice) {
         addVoiceRows(layout);
+    } else if (m_kind == Write) {
+        addWriteRows(layout);
     } else if (m_kind == Network) {
         addNetworkRows(layout);
     }
@@ -174,6 +193,51 @@ void BasicSettingsSection::addVoiceRows(QVBoxLayout *layout)
             applyAndRefresh(next);
         }
     ));
+    auto *styleCard = new QFrame;
+    styleCard->setObjectName(QStringLiteral("card"));
+    styleCard->setStyleSheet(cardStyle());
+    auto *styleLayout = new QVBoxLayout(styleCard);
+    styleLayout->setContentsMargins(16, 14, 16, 14);
+    styleLayout->setSpacing(10);
+    auto *styleTitle = new QLabel(bssTr8("漂浮窗样式"));
+    styleTitle->setFont(appFont(11, QFont::DemiBold));
+    auto *styleHint = new QLabel(
+        bssTr8("状态胶囊更简洁；实时文字卡片可查看正在识别的文字。")
+    );
+    styleHint->setWordWrap(true);
+    styleHint->setStyleSheet(QStringLiteral("color:#667085;"));
+    FloatingBarStyleSelector::Options selectorOptions;
+    m_floatingBarStyleSelector = new FloatingBarStyleSelector(
+        selectorOptions,
+        styleCard
+    );
+    m_floatingBarStyleSelector->setObjectName(
+        QStringLiteral("globalFloatingBarStyleSelector")
+    );
+    m_floatingBarStyleSelector->setCurrentStyle(current.floatingBarStyle);
+    m_floatingBarStyleSelector->setStyleChangedCallback(
+        [this](const QString &style) {
+            BasicSettingsSnapshot next = snapshot();
+            next.floatingBarStyle = style;
+            applyAndRefresh(next);
+        }
+    );
+    auto *preview = new QPushButton(bssTr8("预览所选样式"), styleCard);
+    preview->setObjectName(QStringLiteral("previewFloatingBarStyleButton"));
+    preview->setMinimumHeight(qMax(40, QFontMetrics(preview->font()).height() + 16));
+    connect(preview, &QPushButton::clicked, this, [this]() {
+        if (m_callbacks.previewFloatingBarStyle
+            && m_floatingBarStyleSelector) {
+            m_callbacks.previewFloatingBarStyle(
+                m_floatingBarStyleSelector->currentStyle()
+            );
+        }
+    });
+    styleLayout->addWidget(styleTitle);
+    styleLayout->addWidget(styleHint);
+    styleLayout->addWidget(m_floatingBarStyleSelector);
+    styleLayout->addWidget(preview, 0, Qt::AlignLeft);
+    layout->addWidget(styleCard);
     QWidget *streamingRow = toggleRow(
         bssTr8("实时识别"),
         bssTr8("开启后，讯飞和百度会在录音时实时显示文字；不可用时自动使用停止后识别。"),
@@ -222,6 +286,28 @@ void BasicSettingsSection::addVoiceRows(QVBoxLayout *layout)
             applyAndRefresh(next);
         }
     ));
+}
+
+void BasicSettingsSection::addWriteRows(QVBoxLayout *layout)
+{
+    const BasicSettingsSnapshot current = snapshot();
+    QWidget *row = toggleRow(
+        bssTr8("写入失败时弹出结果小框"),
+        bssTr8("仅在没有有效目标窗口、目标无法激活、剪贴板不可用或系统输入注入失败时生效。用户取消、识别失败和 AI 失败不属于写入失败。"),
+        current.writeFailurePopupFallbackEnabled,
+        [this](bool enabled) {
+            BasicSettingsSnapshot next = snapshot();
+            next.writeFailurePopupFallbackEnabled = enabled;
+            applyAndRefresh(next);
+        }
+    );
+    m_writeFailurePopupFallbackBox = row->findChild<QCheckBox *>();
+    if (m_writeFailurePopupFallbackBox) {
+        m_writeFailurePopupFallbackBox->setObjectName(
+            QStringLiteral("writeFailurePopupFallbackToggle")
+        );
+    }
+    layout->addWidget(row);
 }
 
 void BasicSettingsSection::addNetworkRows(QVBoxLayout *layout)

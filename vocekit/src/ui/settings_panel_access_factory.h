@@ -10,6 +10,7 @@ struct SettingsPanelAccessFactoryDependencies
 {
     HubSettingsState *settings = nullptr;
     std::function<void()> notifySettingsChanged;
+    std::function<void(const QString &)> previewFloatingBarStyle;
 };
 
 struct SettingsPanelAssembly

@@ -15,6 +15,8 @@ SettingsPanelAssembly createSettingsPanelAssembly(
     assembly.access.applyAndSave = [settings](const AppSettingsData &data) {
         return settings ? settings->replaceAndSave(data) : false;
     };
+    assembly.access.previewFloatingBarStyle =
+        dependencies.previewFloatingBarStyle;
 
     const auto notifySettingsChanged = dependencies.notifySettingsChanged;
     assembly.onChanged = [notifySettingsChanged]() {

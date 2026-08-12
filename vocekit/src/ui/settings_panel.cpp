@@ -169,6 +169,7 @@ QString normalizedRecordDirectorySetting(const QString &path)
         m_tabs->addTab(generalTab(), settingsPanelTr8("常用设置"));
         m_tabs->addTab(vocabularySettingsTab(), settingsPanelTr8("词库"));
         m_tabs->addTab(voiceSettingsTab(), settingsPanelTr8("语音录音"));
+        m_tabs->addTab(writeSettingsTab(), settingsPanelTr8("写入"));
         m_tabs->addTab(networkSettingsTab(), settingsPanelTr8("网络"));
         m_tabs->addTab(historySettingsTab(), settingsPanelTr8("历史记录"));
         m_tabs->addTab(shortcutsTab(), settingsPanelTr8("快捷键"));
@@ -381,6 +382,12 @@ QString normalizedRecordDirectorySetting(const QString &path)
         return m_networkSettingsSection;
     }
 
+    QWidget *SettingsPanel::writeSettingsTab()
+    {
+        m_writeSettingsSection = newBasicSettingsSection(BasicSettingsSection::Write);
+        return m_writeSettingsSection;
+    }
+
     BasicSettingsSection *SettingsPanel::newBasicSettingsSection(BasicSettingsSection::Kind kind)
     {
         BasicSettingsSection::Callbacks callbacks;
@@ -397,6 +404,9 @@ QString normalizedRecordDirectorySetting(const QString &path)
             snapshot.vocabularyPromptEntryLimit =
                 settings.vocabularyPromptEntryLimit;
             snapshot.floatingBarEnabled = settings.floatingBarEnabled;
+            snapshot.floatingBarStyle = settings.floatingBarStyle;
+            snapshot.writeFailurePopupFallbackEnabled =
+                settings.writeFailurePopupFallbackEnabled;
             snapshot.streamingSpeechRecognitionEnabled =
                 settings.streamingSpeechRecognitionEnabled;
             snapshot.preRecordCountdownEnabled =
@@ -419,6 +429,9 @@ QString normalizedRecordDirectorySetting(const QString &path)
                 settings.vocabularyPromptEntryLimit =
                     snapshot.vocabularyPromptEntryLimit;
                 settings.floatingBarEnabled = snapshot.floatingBarEnabled;
+                settings.floatingBarStyle = snapshot.floatingBarStyle;
+                settings.writeFailurePopupFallbackEnabled =
+                    snapshot.writeFailurePopupFallbackEnabled;
                 settings.streamingSpeechRecognitionEnabled =
                     snapshot.streamingSpeechRecognitionEnabled;
                 settings.preRecordCountdownEnabled =
@@ -435,6 +448,8 @@ QString normalizedRecordDirectorySetting(const QString &path)
         callbacks.showDetail = [this](const QString &title, const QString &detail) {
             showSettingDetail(title, detail);
         };
+        callbacks.previewFloatingBarStyle =
+            m_access.previewFloatingBarStyle;
         return new BasicSettingsSection(kind, callbacks, this);
     }
 
@@ -538,6 +553,7 @@ QString normalizedRecordDirectorySetting(const QString &path)
             << m_generalSettingsSection
             << m_vocabularySettingsSection
             << m_voiceSettingsSection
+            << m_writeSettingsSection
             << m_networkSettingsSection;
         for (BasicSettingsSection *section : sections) {
             if (section) {

@@ -19,6 +19,7 @@ struct SettingsPanelAccess
 {
     std::function<AppSettingsData()> snapshotProvider;
     std::function<bool(const AppSettingsData &)> applyAndSave;
+    std::function<void(const QString &)> previewFloatingBarStyle;
 };
 
 // 设置页总面板：只负责组装各个设置分区，具体分区逻辑放到独立类里。
@@ -43,6 +44,7 @@ private:
     QWidget *generalTab();
     QWidget *vocabularySettingsTab();
     QWidget *voiceSettingsTab();
+    QWidget *writeSettingsTab();
     QWidget *networkSettingsTab();
     BasicSettingsSection *newBasicSettingsSection(BasicSettingsSection::Kind kind);
     QWidget *historySettingsTab();
@@ -69,6 +71,7 @@ private:
     BasicSettingsSection *m_generalSettingsSection = nullptr;
     BasicSettingsSection *m_vocabularySettingsSection = nullptr;
     BasicSettingsSection *m_voiceSettingsSection = nullptr;
+    BasicSettingsSection *m_writeSettingsSection = nullptr;
     BasicSettingsSection *m_networkSettingsSection = nullptr;
     ApiSettingsSection *m_apiSettingsSection = nullptr;
     HistorySettingsSection *m_historySettingsSection = nullptr;

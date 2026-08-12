@@ -9,6 +9,7 @@
 #include "prompts_panel.h"
 #include "settings_panel.h"
 #include "settings_panel_access_factory.h"
+#include "floating_bar.h"
 
 #include "../config/app_paths.h"
 #include "../config/secret_config.h"
@@ -111,6 +112,25 @@ QWidget *HubUtilityPagesController::settingsPage()
     SettingsPanelAccessFactoryDependencies dependencies;
     dependencies.settings = m_impl->access.settings;
     dependencies.notifySettingsChanged = m_impl->access.notifySettingsChanged;
+    FloatingBar *floatingBar = m_impl->access.floatingBar;
+    dependencies.previewFloatingBarStyle = [floatingBar](
+        const QString &style) {
+        if (!floatingBar) {
+            return;
+        }
+        floatingBar->setActions(FloatingBarActions());
+        floatingBar->setStyle(style);
+        floatingBar->setStage(
+            FloatingBarStage::Recording,
+            QString::fromUtf8("正在聆听")
+        );
+        floatingBar->setWaveformVisible(true);
+        floatingBar->setStatus(
+            QString::fromUtf8("正在聆听"),
+            QString::fromUtf8("样式预览，不会开始录音")
+        );
+        floatingBar->hideLater(5000);
+    };
     const SettingsPanelAssembly assembly =
         createSettingsPanelAssembly(dependencies);
     m_impl->settingsPanel = new SettingsPanel(

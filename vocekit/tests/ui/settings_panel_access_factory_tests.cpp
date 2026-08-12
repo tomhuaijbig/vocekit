@@ -15,6 +15,7 @@ private slots:
     void publishesOneSettingsChange();
     void handlesMissingDependencies();
     void utilityControllerUsesIndependentFactory();
+    void forwardsFloatingBarPreviewCallback();
 };
 
 void SettingsPanelAccessFactoryTests::providesSnapshotAndPersistsSettings()
@@ -127,6 +128,20 @@ void SettingsPanelAccessFactoryTests::utilityControllerUsesIndependentFactory()
 
     QVERIFY(contents.contains("createSettingsPanelAssembly(dependencies)"));
     QVERIFY(!contents.contains("SettingsPanelAccess access;"));
+}
+
+void SettingsPanelAccessFactoryTests::forwardsFloatingBarPreviewCallback()
+{
+    QStringList styles;
+    SettingsPanelAccessFactoryDependencies dependencies;
+    dependencies.previewFloatingBarStyle = [&](const QString &style) {
+        styles.append(style);
+    };
+    const SettingsPanelAssembly assembly =
+        createSettingsPanelAssembly(dependencies);
+    QVERIFY(assembly.access.previewFloatingBarStyle);
+    assembly.access.previewFloatingBarStyle(QStringLiteral("statusPill"));
+    QCOMPARE(styles, QStringList() << QStringLiteral("statusPill"));
 }
 
 QTEST_APPLESS_MAIN(SettingsPanelAccessFactoryTests)

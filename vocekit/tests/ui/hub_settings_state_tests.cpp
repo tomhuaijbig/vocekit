@@ -18,6 +18,7 @@ private slots:
     void savesFunctionScopedOutputOrder();
     void prefersNonFlowSaveAndReportsStructuredErrors();
     void updatingCustomFunctionPreservesItsEntireFlowState();
+    void preservesAndNormalizesCustomFloatingBarStyleOverride();
     void nextCustomFunctionIdDoesNotReuseOrphanOrOrderedIds();
     void staleReplaceReloadsLatestStateWithoutReplayingEdits();
 };
@@ -404,6 +405,50 @@ updatingCustomFunctionPreservesItsEntireFlowState()
         saved.flow.retainedValues
             .value(QStringLiteral("future")).toInt(),
         9
+    );
+}
+
+void HubSettingsStateTests::
+preservesAndNormalizesCustomFloatingBarStyleOverride()
+{
+    CustomFunctionDef source;
+    source.id = QStringLiteral("custom_1");
+    source.name = QString::fromUtf8("润色");
+    source.floatingBarStyleOverride =
+        QStringLiteral("liveTranscriptCard");
+
+    const FunctionSettings settings =
+        functionSettingsFromCustomFunction(source);
+    QCOMPARE(
+        settings.output.floatingBarStyleOverride,
+        QStringLiteral("liveTranscriptCard")
+    );
+
+    AppSettingsData data;
+    data.functions.append(settings);
+    HubWindowAccess access;
+    access.settingsSnapshotProvider = [data]() { return data; };
+    HubSettingsState state(access);
+    QCOMPARE(
+        state.customFunctions().first().floatingBarStyleOverride,
+        QStringLiteral("liveTranscriptCard")
+    );
+    QCOMPARE(
+        state.floatingBarStyleOverrideFor(QStringLiteral("custom_1")),
+        QStringLiteral("liveTranscriptCard")
+    );
+
+    state.setFloatingBarStyleOverrideFor(
+        QStringLiteral("custom_1"),
+        QStringLiteral("unknown-style")
+    );
+    QCOMPARE(
+        state.floatingBarStyleOverrideFor(QStringLiteral("custom_1")),
+        QStringLiteral("inherit")
+    );
+    QCOMPARE(
+        state.customFunctions().first().floatingBarStyleOverride,
+        QStringLiteral("inherit")
     );
 }
 

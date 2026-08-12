@@ -5,6 +5,7 @@
 #include "../../src/ui/function_canvas_scene.h"
 #include "../../src/ui/function_canvas_view.h"
 #include "../../src/ui/hub_settings_state.h"
+#include "../../src/ui/floating_bar_style_selector.h"
 #include "../../src/ui/shortcut_display.h"
 
 #include <QPointer>
@@ -165,6 +166,7 @@ struct PageEnvironment
     QScopedPointer<HubSettingsState> settings;
     FunctionCommandPageAccess pageAccess;
     int reportedErrors = 0;
+    int saves = 0;
 
     PageEnvironment()
     {
@@ -192,6 +194,7 @@ struct PageEnvironment
         pageAccess.operationFailed = [this](const OperationError &) {
             ++reportedErrors;
         };
+        pageAccess.saveSettings = [this]() { ++saves; };
     }
 };
 
@@ -288,7 +291,64 @@ private slots:
     void failedSaveKeepsTheUserOnTheCanvas();
     void failedFunctionSwitchKeepsPageAndEditorIdsAligned();
     void canvasOnlyRefreshDoesNotRebuildTheSettingsForm();
+    void customFunctionPersistsFloatingBarStyleOverride();
+    void builtInFunctionHasNoFloatingBarStyleOverride();
 };
+
+void FunctionCommandPageTests::
+customFunctionPersistsFloatingBarStyleOverride()
+{
+    PageEnvironment environment;
+    FunctionCommandPage page(environment.pageAccess);
+    QVERIFY(page.setFunctionId(QStringLiteral("custom_1")));
+    showPage(&page);
+    auto *selector = page.findChild<FloatingBarStyleSelector *>(
+        QStringLiteral("functionFloatingBarStyleSelector")
+    );
+    QVERIFY(selector);
+    QCOMPARE(selector->currentStyle(), QStringLiteral("inherit"));
+    QAbstractButton *card = selector->findChild<QAbstractButton *>(
+        QStringLiteral("floatingBarStyleCard_liveTranscriptCard")
+    );
+    QVERIFY(card);
+    card->click();
+    QCOMPARE(
+        environment.settings->floatingBarStyleOverrideFor(
+            QStringLiteral("custom_1")
+        ),
+        QStringLiteral("liveTranscriptCard")
+    );
+    QCOMPARE(environment.saves, 1);
+
+    page.refresh();
+    QCoreApplication::processEvents();
+    selector = page.findChild<FloatingBarStyleSelector *>(
+        QStringLiteral("functionFloatingBarStyleSelector")
+    );
+    QVERIFY(selector);
+    QCOMPARE(selector->currentStyle(),
+             QStringLiteral("liveTranscriptCard"));
+    QCOMPARE(environment.saves, 1);
+}
+
+void FunctionCommandPageTests::
+builtInFunctionHasNoFloatingBarStyleOverride()
+{
+    PageEnvironment environment;
+    FunctionSettings builtIn = pageFunction(
+        QStringLiteral("dictate"),
+        QString::fromUtf8("听写")
+    );
+    builtIn.builtIn = true;
+    environment.data.functions.append(builtIn);
+    environment.settings->load();
+    FunctionCommandPage page(environment.pageAccess);
+    QVERIFY(page.setFunctionId(QStringLiteral("dictate")));
+    showPage(&page);
+    QVERIFY(!page.findChild<FloatingBarStyleSelector *>(
+        QStringLiteral("functionFloatingBarStyleSelector")
+    ));
+}
 
 void FunctionCommandPageTests::
 longHeaderTextWrapsWithoutPushingControlsOffscreen()

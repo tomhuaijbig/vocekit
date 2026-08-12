@@ -30,6 +30,8 @@ CustomFunctionDef toCustomFunction(const FunctionSettings &source)
     function.shortcut = settings.shortcut;
     function.model = settings.modelId;
     function.outputMode = settings.output.outputMode;
+    function.floatingBarStyleOverride =
+        settings.output.floatingBarStyleOverride;
     function.outputOrder = settings.output.order;
     function.resultTemplate = settings.output.resultTemplate;
     function.useSelection = settings.input.useSelection;
@@ -81,6 +83,10 @@ FunctionSettings buildFunctionSettingsFromCustomFunction(
     settings.recording.beepEnabled = source.recordingBeepEnabled;
     settings.recording.beepPath = source.recordingBeepPath;
     settings.output.outputMode = source.outputMode;
+    settings.output.floatingBarStyleOverride =
+        normalizeFunctionFloatingBarStyle(
+            source.floatingBarStyleOverride
+        );
     settings.output.order = source.outputOrder;
     settings.output.resultTemplate = source.resultTemplate;
     settings.output.resultActions = source.resultActions;
@@ -541,6 +547,26 @@ QString HubSettingsState::outputModeFor(const QString &id) const
 void HubSettingsState::setOutputModeFor(const QString &id, const QString &mode)
 {
     mutableFunction(id)->output.outputMode = normalizeOutputMode(mode, defaultOutputModeForFunction(id));
+    refreshCustomFunctions();
+}
+
+QString HubSettingsState::floatingBarStyleOverrideFor(
+    const QString &id) const
+{
+    const FunctionSettings *settings = findFunction(id);
+    return normalizeFunctionFloatingBarStyle(
+        settings
+            ? settings->output.floatingBarStyleOverride
+            : QString()
+    );
+}
+
+void HubSettingsState::setFloatingBarStyleOverrideFor(
+    const QString &id,
+    const QString &style)
+{
+    mutableFunction(id)->output.floatingBarStyleOverride =
+        normalizeFunctionFloatingBarStyle(style);
     refreshCustomFunctions();
 }
 

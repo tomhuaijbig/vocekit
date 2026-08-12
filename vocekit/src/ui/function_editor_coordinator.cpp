@@ -45,6 +45,10 @@ FunctionSummaryViewData summaryData(
         actions.settings->resultTemplateFor(id)
     );
     data.floatingBarSeconds = actions.settings->floatingBarSecondsFor(id);
+    data.floatingBarStyleTitle = floatingBarStyleTitle(
+        actions.settings->floatingBarStyleOverrideFor(id),
+        true
+    );
     data.resultPopupSeconds = actions.settings->resultPopupSecondsFor(id);
     data.countdownSeconds = actions.settings->countdownSecondsFor(id);
     data.recordingBeepEnabled = actions.settings->recordingBeepEnabledFor(id);

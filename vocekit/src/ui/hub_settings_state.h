@@ -80,6 +80,11 @@ public:
     void setModelFor(const QString &id, const QString &model);
     QString outputModeFor(const QString &id) const;
     void setOutputModeFor(const QString &id, const QString &mode);
+    QString floatingBarStyleOverrideFor(const QString &id) const;
+    void setFloatingBarStyleOverrideFor(
+        const QString &id,
+        const QString &style
+    );
     QStringList outputOrderFor(const QString &id) const;
     void setOutputOrderFor(const QString &id, const QStringList &order);
     QString resultTemplateFor(const QString &id) const;

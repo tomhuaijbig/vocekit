@@ -36,6 +36,7 @@ SOURCES += \
     ../../src/ui/function_canvas_visual_style.cpp \
     ../../src/ui/function_canvas_view.cpp \
     ../../src/ui/function_command_page.cpp \
+    ../../src/ui/floating_bar_style_selector.cpp \
     ../../src/ui/hub_settings_state.cpp \
     ../../src/ui/prompt_settings_adapter.cpp \
     ../../src/ui/reorderable_card_column.cpp \
@@ -57,5 +58,6 @@ HEADERS += \
     ../../src/ui/function_canvas_visual_style.h \
     ../../src/ui/function_canvas_view.h \
     ../../src/ui/function_command_page.h \
+    ../../src/ui/floating_bar_style_selector.h \
     ../../src/ui/function_flow_settings_access.h \
     ../../src/ui/hub_settings_state.h

@@ -3,6 +3,7 @@
 #include "attention_message.h"
 #include "command_center_shell.h"
 #include "function_canvas_editor.h"
+#include "floating_bar_style_selector.h"
 #include "history_row_frame.h"
 #include "hub_settings_state.h"
 #include "reorderable_card_column.h"
@@ -1244,6 +1245,50 @@ void FunctionCommandPage::refresh()
     };
 
     const QString currentOutput = m_access.settings->outputModeFor(id);
+
+    if (custom) {
+        auto *styleCard = new QFrame;
+        styleCard->setObjectName(
+            QStringLiteral("functionFloatingBarStyleCard")
+        );
+        styleCard->setStyleSheet(commandCenterSectionStyle());
+        auto *styleLayout = new QVBoxLayout(styleCard);
+        styleLayout->setContentsMargins(18, 14, 18, 16);
+        styleLayout->setSpacing(10);
+        auto *styleTitle = new QLabel(text8("漂浮窗样式"));
+        styleTitle->setFont(appFont(11, QFont::DemiBold));
+        auto *styleHint = new QLabel(
+            text8("仅覆盖当前自定义功能；跟随全局时使用语音录音设置中的样式。")
+        );
+        styleHint->setWordWrap(true);
+        styleHint->setObjectName(QStringLiteral("commandMuted"));
+        FloatingBarStyleSelector::Options options;
+        options.allowInherit = true;
+        auto *styleSelector = new FloatingBarStyleSelector(
+            options,
+            styleCard
+        );
+        styleSelector->setObjectName(
+            QStringLiteral("functionFloatingBarStyleSelector")
+        );
+        styleSelector->setCurrentStyle(
+            m_access.settings->floatingBarStyleOverrideFor(id)
+        );
+        styleSelector->setStyleChangedCallback(
+            [this, id](const QString &style) {
+                m_access.settings->setFloatingBarStyleOverrideFor(
+                    id,
+                    style
+                );
+                saveSettings();
+            }
+        );
+        styleLayout->addWidget(styleTitle);
+        styleLayout->addWidget(styleHint);
+        styleLayout->addWidget(styleSelector);
+        m_contentLayout->addWidget(styleCard);
+    }
+
     QHash<QString, QWidget *> outputCards;
     outputCards.insert(
         functionOutputAiId(),

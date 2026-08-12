@@ -45,6 +45,7 @@ void FunctionSummaryFormatterTests::formatsCompleteFunctionSummary()
     data.outputModeTitle = QString::fromUtf8("结果小框");
     data.resultTemplateTitle = QString::fromUtf8("简洁");
     data.floatingBarSeconds = 0;
+    data.floatingBarStyleTitle = QString::fromUtf8("实时文字卡片");
     data.resultPopupSeconds = 0;
     data.countdownSeconds = 3;
     data.recordingBeepEnabled = false;
@@ -60,6 +61,7 @@ void FunctionSummaryFormatterTests::formatsCompleteFunctionSummary()
             " · 展现：结果小框"
             " · 模板：简洁"
             " · 浮动条：不调用"
+            " · 漂浮窗：实时文字卡片"
             " · 结果小框：手动关闭"
             " · 倒计时：3 秒"
             " · 提示音：关闭"

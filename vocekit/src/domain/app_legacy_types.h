@@ -24,6 +24,7 @@ struct CustomFunctionDef
     QString shortcut;
     QString model;
     QString outputMode;
+    QString floatingBarStyleOverride = QStringLiteral("inherit");
     QStringList outputOrder = QStringList()
         << QStringLiteral("ai")
         << QStringLiteral("autoWrite")

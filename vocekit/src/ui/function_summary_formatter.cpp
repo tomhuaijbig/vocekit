@@ -41,6 +41,7 @@ QString functionSummaryText(const FunctionSummaryViewData &data)
         + text8(" · 展现：") + data.outputModeTitle
         + text8(" · 模板：") + data.resultTemplateTitle
         + text8(" · 浮动条：") + secondsText(data.floatingBarSeconds, "不调用")
+        + text8(" · 漂浮窗：") + data.floatingBarStyleTitle
         + text8(" · 结果小框：") + secondsText(data.resultPopupSeconds, "手动关闭")
         + text8(" · 倒计时：") + secondsText(data.countdownSeconds, "不调用")
         + text8(" · 提示音：") + (data.recordingBeepEnabled ? text8("开启") : text8("关闭"))

@@ -14,6 +14,7 @@ struct FunctionSummaryViewData
     QString outputModeTitle;
     QString resultTemplateTitle;
     int floatingBarSeconds = 0;
+    QString floatingBarStyleTitle;
     int resultPopupSeconds = 0;
     int countdownSeconds = 0;
     bool recordingBeepEnabled = false;

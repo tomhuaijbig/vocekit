@@ -17,6 +17,16 @@ StreamingSpeechSessionCreation createStreamingSpeechSession(
 {
     StreamingSpeechSessionCreation result;
     const QString provider = request.provider.trimmed().toLower();
+    if (provider == QStringLiteral("windows-local")) {
+        if (!dependencies.createWindows) {
+            result.unavailableReason = tr8(
+                "Windows 本地实时语音组件不可用。"
+            );
+            return result;
+        }
+        result.session = dependencies.createWindows(request, callbacks);
+        return result;
+    }
     if (provider != QStringLiteral("xfyun")
         && provider != QStringLiteral("baidu")) {
         result.unavailableReason = tr8(

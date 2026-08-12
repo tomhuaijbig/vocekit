@@ -39,11 +39,18 @@ SecretConfig completeSecrets()
 StreamingSpeechSessionFactoryDependencies dependenciesFor(
     const SecretConfig &secrets,
     int *xfyunCount,
-    int *baiduCount
+    int *baiduCount,
+    int *windowsCount = nullptr,
+    int *secretLoadCount = nullptr
 )
 {
     StreamingSpeechSessionFactoryDependencies dependencies;
-    dependencies.loadSecrets = [secrets]() { return secrets; };
+    dependencies.loadSecrets = [secrets, secretLoadCount]() {
+        if (secretLoadCount) {
+            ++*secretLoadCount;
+        }
+        return secrets;
+    };
     dependencies.createXfyun = [xfyunCount](
         const SecretConfig &,
         const StreamingSpeechSessionRequest &,
@@ -62,6 +69,17 @@ StreamingSpeechSessionFactoryDependencies dependenciesFor(
         ++*baiduCount;
         return QSharedPointer<IStreamingSpeechSession>(
             new StubStreamingSpeechSession(QStringLiteral("baidu"))
+        );
+    };
+    dependencies.createWindows = [windowsCount](
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &
+    ) {
+        if (windowsCount) {
+            ++*windowsCount;
+        }
+        return QSharedPointer<IStreamingSpeechSession>(
+            new StubStreamingSpeechSession(QStringLiteral("windows-local"))
         );
     };
     return dependencies;
@@ -165,6 +183,58 @@ private slots:
         QVERIFY(result.session.isNull());
         QVERIFY(result.unavailableReason.contains(QString::fromUtf8("AppID")));
         QCOMPARE(baiduCount, 1);
+    }
+
+    void windowsLocalDoesNotLoadSecrets()
+    {
+        int xfyunCount = 0;
+        int baiduCount = 0;
+        int windowsCount = 0;
+        int secretLoadCount = 0;
+        StreamingSpeechSessionRequest request;
+        request.provider = QStringLiteral(" WINDOWS-LOCAL ");
+
+        const StreamingSpeechSessionCreation result =
+            createStreamingSpeechSession(
+                request,
+                StreamingSpeechCallbacks(),
+                dependenciesFor(
+                    SecretConfig(), &xfyunCount, &baiduCount,
+                    &windowsCount, &secretLoadCount
+                )
+            );
+
+        QVERIFY(!result.session.isNull());
+        QCOMPARE(windowsCount, 1);
+        QCOMPARE(secretLoadCount, 0);
+        QCOMPARE(
+            static_cast<StubStreamingSpeechSession *>(result.session.data())
+                ->providerKind,
+            QStringLiteral("windows-local")
+        );
+    }
+
+    void missingWindowsFactoryReportsLocalComponent()
+    {
+        int xfyunCount = 0;
+        int baiduCount = 0;
+        StreamingSpeechSessionFactoryDependencies dependencies =
+            dependenciesFor(completeSecrets(), &xfyunCount, &baiduCount);
+        dependencies.createWindows =
+            StreamingSpeechSessionFactoryDependencies::LocalProviderFactory();
+        StreamingSpeechSessionRequest request;
+        request.provider = QStringLiteral("windows-local");
+
+        const StreamingSpeechSessionCreation result =
+            createStreamingSpeechSession(
+                request,
+                StreamingSpeechCallbacks(),
+                dependencies
+            );
+
+        QVERIFY(result.session.isNull());
+        QVERIFY(result.unavailableReason.contains(QString::fromUtf8("本地")));
+        QVERIFY(result.unavailableReason.contains(QString::fromUtf8("组件")));
     }
 };
 

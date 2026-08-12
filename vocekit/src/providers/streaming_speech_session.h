@@ -33,6 +33,8 @@ struct StreamingTranscriptSnapshot
 struct StreamingSpeechSessionRequest
 {
     QString provider;
+    QString language = QStringLiteral("follow-windows");
+    QString runId;
     QString networkPolicy = QStringLiteral("inherit");
     bool useSystemProxy = false;
     int sampleRate = 16000;
@@ -46,6 +48,8 @@ struct StreamingSpeechCallbacks
         transcriptUpdated;
     std::function<void(const QString &)> degraded;
     std::function<void(const QString &)> completed;
+    std::function<void(const QString &, const QString &)>
+        configurationFailed;
 };
 
 class IStreamingSpeechSession

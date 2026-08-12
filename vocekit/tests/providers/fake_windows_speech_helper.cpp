@@ -111,6 +111,26 @@ int main(int argc, char *argv[])
         QThread::msleep(5000);
         return 0;
     }
+    if (scenario == QStringLiteral("startup-error")) {
+        const QString errorCode = argumentValue(
+            arguments,
+            QStringLiteral("--error-code"),
+            QStringLiteral("RECOGNIZER_MISSING")
+        );
+        QJsonObject fields;
+        fields.insert(QStringLiteral("ok"), false);
+        fields.insert(QStringLiteral("errorCode"), errorCode);
+        fields.insert(
+            QStringLiteral("message"),
+            QStringLiteral("Recognizer missing.")
+        );
+        writeEvent(QStringLiteral("error"), runId, fields);
+        return 4;
+    }
+    if (scenario == QStringLiteral("startup-invalid-json")) {
+        writeBytes(QByteArray("{not-json}\n"));
+        return 0;
+    }
     if (scenario == QStringLiteral("oversize-output")) {
         writeBytes(QByteArray(1024 * 1024 + 1, 'x'));
         QThread::msleep(1000);
@@ -165,6 +185,9 @@ int main(int argc, char *argv[])
                     {QStringLiteral("resolvedLanguage"),
                      QStringLiteral("zh-CN")}}
     );
+    if (scenario == QStringLiteral("delayed-ready")) {
+        QThread::msleep(75);
+    }
     if (scenario == QStringLiteral("split-lines")) {
         writeBytes(ready.left(ready.size() / 2));
         QThread::msleep(20);
@@ -173,12 +196,50 @@ int main(int argc, char *argv[])
         writeBytes(ready);
     }
 
+    if (scenario == QStringLiteral("wrong-after-ready")) {
+        writeEvent(
+            QStringLiteral("hypothesis"),
+            runId + QStringLiteral("-wrong"),
+            QJsonObject{{QStringLiteral("ok"), true},
+                        {QStringLiteral("text"), QStringLiteral("wrong")}}
+        );
+        return 0;
+    }
+    if (scenario == QStringLiteral("ready-crash")) {
+        QThread::msleep(75);
+        std::abort();
+    }
+    if (scenario == QStringLiteral("hypothesis-replacement")) {
+        writeEvent(
+            QStringLiteral("hypothesis"),
+            runId,
+            QJsonObject{{QStringLiteral("ok"), true},
+                        {QStringLiteral("text"), QString::fromUtf8("你")}}
+        );
+        writeEvent(
+            QStringLiteral("hypothesis"),
+            runId,
+            QJsonObject{{QStringLiteral("ok"), true},
+                        {QStringLiteral("text"), QString::fromUtf8("你好")}}
+        );
+        writeEvent(
+            QStringLiteral("recognized"),
+            runId,
+            QJsonObject{{QStringLiteral("ok"), true},
+                        {QStringLiteral("text"), QString::fromUtf8("你好")}}
+        );
+    }
+
     if (scenario == QStringLiteral("slow-read")
         || scenario == QStringLiteral("backpressure")) {
         QThread::msleep(5000);
     }
 
     const QByteArray pcm = readStandardInput();
+    if (scenario == QStringLiteral("final-timeout")) {
+        QThread::msleep(5000);
+        return 0;
+    }
     if (scenario == QStringLiteral("no-final")) {
         return 0;
     }
@@ -191,7 +252,17 @@ int main(int argc, char *argv[])
         QStringLiteral("text"),
         scenario == QStringLiteral("empty-final")
             ? QString()
-            : QString::fromUtf8("你好")
+            : scenario == QStringLiteral("partial-write")
+                ? QStringLiteral("bytes:") + QString::number(pcm.size())
+                : scenario == QStringLiteral("hypothesis-replacement")
+                    ? QString::fromUtf8(" 你好 世界 ")
+                    : scenario == QStringLiteral("echo-language")
+                        ? argumentValue(
+                            arguments,
+                            QStringLiteral("--language"),
+                            QStringLiteral("missing")
+                        )
+                    : QString::fromUtf8("你好")
     );
 
     if (scenario == QStringLiteral("ready-final")

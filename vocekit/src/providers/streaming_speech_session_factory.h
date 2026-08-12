@@ -23,10 +23,17 @@ struct StreamingSpeechSessionFactoryDependencies
             const StreamingSpeechCallbacks &
         )
     >;
+    using LocalProviderFactory = std::function<
+        QSharedPointer<IStreamingSpeechSession>(
+            const StreamingSpeechSessionRequest &,
+            const StreamingSpeechCallbacks &
+        )
+    >;
 
     std::function<SecretConfig()> loadSecrets;
     ProviderFactory createXfyun;
     ProviderFactory createBaidu;
+    LocalProviderFactory createWindows;
 };
 
 StreamingSpeechSessionCreation createStreamingSpeechSession(

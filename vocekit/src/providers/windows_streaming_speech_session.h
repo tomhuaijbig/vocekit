@@ -18,7 +18,7 @@ public:
     {
         Timing()
             : startupTimeoutMs(5000),
-              finalTimeoutMs(15000),
+              finalTimeoutMs(8000),
               killTimeoutMs(250),
               writeChunkBytes(32 * 1024),
               queueLimitBytes(64000)

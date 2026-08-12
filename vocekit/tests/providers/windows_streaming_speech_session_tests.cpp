@@ -89,6 +89,12 @@ private slots:
         QVERIFY2(QFile::exists(fakeHelperPath()), qPrintable(fakeHelperPath()));
     }
 
+    void defaultsToEightSecondFinalDeadline()
+    {
+        const WindowsStreamingSpeechSession::Timing timing;
+        QCOMPARE(timing.finalTimeoutMs, 8000);
+    }
+
     void startsAsynchronouslyAndReachesReady()
     {
         WindowsStreamingSpeechSession session(

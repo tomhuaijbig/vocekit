@@ -3,7 +3,9 @@ param(
     [ValidateSet("", "privacy", "archive")]
     [string]$ValidationOnly = "",
     [string]$ValidationPath = "",
-    [string]$ValidationHelperPath = ""
+    [string]$ValidationHelperPath = "",
+    [ValidateSet("", "after-directory-move")]
+    [string]$PublishFailureInjection = ""
 )
 
 Set-StrictMode -Version Latest
@@ -19,6 +21,9 @@ $zipPath = Join-Path $distDir "$PackageName.zip"
 $runtimeVerifier = Join-Path $PSScriptRoot "verify-runtime.ps1"
 $stagingDir = Join-Path $distDir (".staging-" + [Guid]::NewGuid().ToString("N"))
 $temporaryZip = Join-Path $distDir (".archive-" + [Guid]::NewGuid().ToString("N") + ".zip")
+$publishId = [Guid]::NewGuid().ToString("N")
+$backupPackageDir = Join-Path $distDir (".backup-$publishId-package")
+$backupZipPath = Join-Path $distDir (".backup-$publishId-package.zip")
 
 function Assert-ChildPath {
     param([string]$BasePath, [string]$TargetPath)
@@ -176,6 +181,8 @@ Assert-ChildPath -BasePath $distDir -TargetPath $packageDir
 Assert-ChildPath -BasePath $distDir -TargetPath $zipPath
 Assert-ChildPath -BasePath $distDir -TargetPath $stagingDir
 Assert-ChildPath -BasePath $distDir -TargetPath $temporaryZip
+Assert-ChildPath -BasePath $distDir -TargetPath $backupPackageDir
+Assert-ChildPath -BasePath $distDir -TargetPath $backupZipPath
 
 $releaseExe = Join-Path $releaseDir "vocekit.exe"
 if (-not (Test-Path -LiteralPath $releaseExe -PathType Leaf)) {
@@ -195,6 +202,10 @@ $runtimeRootFiles = @(
 )
 $runtimeDirectories = @("audio", "bearer", "iconengines", "imageformats", "mediaservice", "platforms", "playlistformats", "translations", "ocr", "speech")
 $createdStage = $false
+$backedUpPackage = $false
+$backedUpZip = $false
+$publishedPackage = $false
+$publishedZip = $false
 try {
     [void][IO.Directory]::CreateDirectory($stagingDir)
     $createdStage = $true
@@ -226,11 +237,52 @@ try {
     [IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $temporaryZip, [IO.Compression.CompressionLevel]::Optimal, $false)
     Assert-PackageArchive -ArchivePath $temporaryZip -ExpectedHelperPath (Join-Path $stagingDir "speech\windows\vocekit-windows-speech.exe")
 
-    if (Test-Path -LiteralPath $packageDir) { [IO.Directory]::Delete($packageDir, $true) }
-    if (Test-Path -LiteralPath $zipPath) { [IO.File]::Delete($zipPath) }
-    [IO.Directory]::Move($stagingDir, $packageDir)
-    $createdStage = $false
-    [IO.File]::Move($temporaryZip, $zipPath)
+    try {
+        if ([IO.Directory]::Exists($packageDir)) {
+            [IO.Directory]::Move($packageDir, $backupPackageDir)
+            $backedUpPackage = $true
+        }
+        if ([IO.File]::Exists($zipPath)) {
+            [IO.File]::Move($zipPath, $backupZipPath)
+            $backedUpZip = $true
+        }
+        [IO.Directory]::Move($stagingDir, $packageDir)
+        $createdStage = $false
+        $publishedPackage = $true
+        if ($PublishFailureInjection -eq "after-directory-move") {
+            throw "Injected package archive publication failure."
+        }
+        [IO.File]::Move($temporaryZip, $zipPath)
+        $publishedZip = $true
+
+        if ($backedUpPackage) {
+            [IO.Directory]::Delete($backupPackageDir, $true)
+            $backedUpPackage = $false
+        }
+        if ($backedUpZip) {
+            [IO.File]::Delete($backupZipPath)
+            $backedUpZip = $false
+        }
+    }
+    catch {
+        if ($publishedZip -and [IO.File]::Exists($zipPath)) {
+            [IO.File]::Delete($zipPath)
+            $publishedZip = $false
+        }
+        if ($publishedPackage -and [IO.Directory]::Exists($packageDir)) {
+            [IO.Directory]::Delete($packageDir, $true)
+            $publishedPackage = $false
+        }
+        if ($backedUpPackage -and [IO.Directory]::Exists($backupPackageDir)) {
+            [IO.Directory]::Move($backupPackageDir, $packageDir)
+            $backedUpPackage = $false
+        }
+        if ($backedUpZip -and [IO.File]::Exists($backupZipPath)) {
+            [IO.File]::Move($backupZipPath, $zipPath)
+            $backedUpZip = $false
+        }
+        throw
+    }
 
     $packageSize = (Get-ChildItem -LiteralPath $packageDir -Recurse -File | Measure-Object -Property Length -Sum).Sum
     Write-Host "Test package created:"
@@ -242,4 +294,6 @@ try {
 finally {
     if ($createdStage -and [IO.Directory]::Exists($stagingDir)) { [IO.Directory]::Delete($stagingDir, $true) }
     if ([IO.File]::Exists($temporaryZip)) { [IO.File]::Delete($temporaryZip) }
+    # Backup deletion is intentionally not done here. A backup is deleted only
+    # after both new artifacts publish, or moved back by the catch rollback.
 }

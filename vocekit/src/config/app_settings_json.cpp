@@ -132,6 +132,11 @@ void applyCommonFunctionJson(
         settings->output.floatingBarSeconds =
             display.value(QStringLiteral("floatingBarSeconds")).toInt();
     }
+    if (display.contains(QStringLiteral("floatingBarStyleOverride"))) {
+        settings->output.floatingBarStyleOverride =
+            display.value(QStringLiteral("floatingBarStyleOverride"))
+                .toString();
+    }
     if (display.contains(QStringLiteral("resultPopupSeconds"))) {
         settings->output.resultPopupSeconds =
             display.value(QStringLiteral("resultPopupSeconds")).toInt();
@@ -200,6 +205,10 @@ QJsonObject displayJson(const FunctionSettings &settings)
     object.insert(
         QStringLiteral("floatingBarSeconds"),
         settings.output.floatingBarSeconds
+    );
+    object.insert(
+        QStringLiteral("floatingBarStyleOverride"),
+        settings.output.floatingBarStyleOverride
     );
     object.insert(
         QStringLiteral("resultPopupSeconds"),
@@ -335,6 +344,12 @@ AppSettingsData appSettingsDataFromJson(
         root.value(QStringLiteral("strongSelectionEnabled")).toBool(false);
     data.floatingBarEnabled =
         root.value(QStringLiteral("floatingBarEnabled")).toBool(true);
+    data.floatingBarStyle = normalizeGlobalFloatingBarStyle(
+        root.value(QStringLiteral("floatingBarStyle")).toString()
+    );
+    data.writeFailurePopupFallbackEnabled = root
+        .value(QStringLiteral("writeFailurePopupFallbackEnabled"))
+        .toBool(true);
     data.streamingSpeechRecognitionEnabled = root
         .value(QStringLiteral("streamingSpeechRecognitionEnabled"))
         .toBool(true);
@@ -759,6 +774,14 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
     root.insert(
         QStringLiteral("floatingBarEnabled"),
         data.floatingBarEnabled
+    );
+    root.insert(
+        QStringLiteral("floatingBarStyle"),
+        normalizeGlobalFloatingBarStyle(data.floatingBarStyle)
+    );
+    root.insert(
+        QStringLiteral("writeFailurePopupFallbackEnabled"),
+        data.writeFailurePopupFallbackEnabled
     );
     root.insert(
         QStringLiteral("streamingSpeechRecognitionEnabled"),

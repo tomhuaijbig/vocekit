@@ -15,6 +15,17 @@ QString normalizeOutputMode(const QString &value, const QString &fallback = QStr
 QString defaultOutputModeForFunction(const QString &id);
 QString outputModeTitle(const QString &mode);
 
+QString floatingBarStyleStatusPill();
+QString floatingBarStyleLiveTranscriptCard();
+QString floatingBarStyleInherit();
+QString normalizeGlobalFloatingBarStyle(const QString &value);
+QString normalizeFunctionFloatingBarStyle(const QString &value);
+QString resolveFloatingBarStyle(
+    const QString &overrideValue,
+    const QString &globalValue
+);
+QString floatingBarStyleTitle(const QString &value, bool allowInherit);
+
 QString resultTemplateSimple();
 QString resultTemplateDetail();
 QString resultTemplateCompare();

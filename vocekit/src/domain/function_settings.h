@@ -70,6 +70,7 @@ struct FunctionOutputSettings
     QString resultTemplate = QStringLiteral("simple");
     QStringList resultActions = defaultResultActionIds();
     int floatingBarSeconds = 2;
+    QString floatingBarStyleOverride = QStringLiteral("inherit");
     int resultPopupSeconds = 0;
 };
 

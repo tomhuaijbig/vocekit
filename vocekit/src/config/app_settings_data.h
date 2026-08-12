@@ -31,6 +31,8 @@ struct AppSettingsData
     bool autoStartEnabled = false;
     bool strongSelectionEnabled = false;
     bool floatingBarEnabled = true;
+    QString floatingBarStyle = QStringLiteral("statusPill");
+    bool writeFailurePopupFallbackEnabled = true;
     bool streamingSpeechRecognitionEnabled = true;
     bool promptLocked = false;
     bool dictatePolishEnabled = false;

@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "../../src/config/app_settings_data.h"
+#include "../../src/config/app_settings_defaults.h"
 #include "../../src/config/app_settings_json.h"
 #include "../../src/config/app_settings_store.h"
 
@@ -47,6 +48,83 @@ private slots:
         );
 
         QVERIFY(!restored.streamingSpeechRecognitionEnabled);
+    }
+
+    void missingFloatingPreferencesUseMigrationSafeDefaults()
+    {
+        const AppSettingsData restored = appSettingsDataFromJson(
+            QJsonObject()
+        );
+
+        QCOMPARE(
+            restored.floatingBarStyle,
+            floatingBarStyleStatusPill()
+        );
+        QVERIFY(restored.writeFailurePopupFallbackEnabled);
+        QCOMPARE(
+            restored.function(QStringLiteral("dictate"))
+                .output.floatingBarStyleOverride,
+            floatingBarStyleInherit()
+        );
+    }
+
+    void floatingPreferencesRoundTripWithoutChangingOtherOutputFields()
+    {
+        AppSettingsData original = appSettingsDataFromJson(
+            readFixture("../fixtures/settings/current_settings.json")
+        );
+        original.floatingBarStyle =
+            floatingBarStyleLiveTranscriptCard();
+        original.writeFailurePopupFallbackEnabled = false;
+        const int customIndex =
+            original.functionIndex(QStringLiteral("custom_1"));
+        QVERIFY(customIndex >= 0);
+        const QString oldOutputMode =
+            original.functions.at(customIndex).output.outputMode;
+        const QJsonObject oldFlow = appSettingsDataToJson(original)
+            .value(QStringLiteral("functionFlows"))
+            .toObject()
+            .value(QStringLiteral("custom_1"))
+            .toObject();
+        original.functions[customIndex]
+            .output.floatingBarStyleOverride =
+                floatingBarStyleStatusPill();
+
+        const QJsonObject written = appSettingsDataToJson(original);
+        const AppSettingsData restored = appSettingsDataFromJson(written);
+
+        QCOMPARE(
+            written.value(QStringLiteral("floatingBarStyle")).toString(),
+            floatingBarStyleLiveTranscriptCard()
+        );
+        QCOMPARE(
+            written.value(
+                QStringLiteral("writeFailurePopupFallbackEnabled")
+            ).toBool(true),
+            false
+        );
+        QCOMPARE(
+            restored.floatingBarStyle,
+            floatingBarStyleLiveTranscriptCard()
+        );
+        QVERIFY(!restored.writeFailurePopupFallbackEnabled);
+        QCOMPARE(
+            restored.function(QStringLiteral("custom_1"))
+                .output.floatingBarStyleOverride,
+            floatingBarStyleStatusPill()
+        );
+        QCOMPARE(
+            restored.function(QStringLiteral("custom_1"))
+                .output.outputMode,
+            oldOutputMode
+        );
+        QCOMPARE(
+            written.value(QStringLiteral("functionFlows"))
+                .toObject()
+                .value(QStringLiteral("custom_1"))
+                .toObject(),
+            oldFlow
+        );
     }
 
     void loadsCurrentSettingsShape()

@@ -82,6 +82,63 @@ QString outputModeTitle(const QString &mode)
     return trText("结果小框");
 }
 
+QString floatingBarStyleStatusPill()
+{
+    return QStringLiteral("statusPill");
+}
+
+QString floatingBarStyleLiveTranscriptCard()
+{
+    return QStringLiteral("liveTranscriptCard");
+}
+
+QString floatingBarStyleInherit()
+{
+    return QStringLiteral("inherit");
+}
+
+QString normalizeGlobalFloatingBarStyle(const QString &value)
+{
+    const QString normalized = value.trimmed();
+    return normalized == floatingBarStyleLiveTranscriptCard()
+        ? floatingBarStyleLiveTranscriptCard()
+        : floatingBarStyleStatusPill();
+}
+
+QString normalizeFunctionFloatingBarStyle(const QString &value)
+{
+    const QString normalized = value.trimmed();
+    if (normalized == floatingBarStyleStatusPill()
+        || normalized == floatingBarStyleLiveTranscriptCard()) {
+        return normalized;
+    }
+    return floatingBarStyleInherit();
+}
+
+QString resolveFloatingBarStyle(
+    const QString &overrideValue,
+    const QString &globalValue)
+{
+    const QString normalizedOverride =
+        normalizeFunctionFloatingBarStyle(overrideValue);
+    return normalizedOverride == floatingBarStyleInherit()
+        ? normalizeGlobalFloatingBarStyle(globalValue)
+        : normalizedOverride;
+}
+
+QString floatingBarStyleTitle(const QString &value, bool allowInherit)
+{
+    if (allowInherit
+        && normalizeFunctionFloatingBarStyle(value)
+            == floatingBarStyleInherit()) {
+        return trText("跟随全局");
+    }
+    return normalizeGlobalFloatingBarStyle(value)
+            == floatingBarStyleLiveTranscriptCard()
+        ? trText("实时文字卡片")
+        : trText("状态胶囊");
+}
+
 QString resultTemplateSimple()
 {
     return QStringLiteral("simple");

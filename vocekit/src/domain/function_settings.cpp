@@ -43,6 +43,16 @@ QString normalizeResultTemplateValue(const QString &value)
     return QStringLiteral("simple");
 }
 
+QString normalizeFloatingBarStyleOverrideValue(const QString &value)
+{
+    const QString normalized = value.trimmed();
+    if (normalized == QStringLiteral("statusPill")
+        || normalized == QStringLiteral("liveTranscriptCard")) {
+        return normalized;
+    }
+    return QStringLiteral("inherit");
+}
+
 } // namespace
 
 QString functionExecutionModeId(FunctionExecutionMode mode)
@@ -207,6 +217,10 @@ FunctionSettings normalizeFunctionSettings(
         normalizeResultActionIds(normalized.output.resultActions);
     normalized.output.floatingBarSeconds =
         qBound(0, normalized.output.floatingBarSeconds, 60);
+    normalized.output.floatingBarStyleOverride =
+        normalizeFloatingBarStyleOverrideValue(
+            normalized.output.floatingBarStyleOverride
+        );
     normalized.output.resultPopupSeconds =
         qBound(0, normalized.output.resultPopupSeconds, 600);
 

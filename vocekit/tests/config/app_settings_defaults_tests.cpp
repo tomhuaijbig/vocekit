@@ -71,6 +71,52 @@ private slots:
         QCOMPARE(normalizeVocabularyAddMode(QStringLiteral("manual")), vocabularyAddModeManual());
         QCOMPARE(normalizeVocabularyAddMode(QStringLiteral("bad")), vocabularyAddModeAsk());
     }
+
+    void normalizesFloatingBarStylesAndResolvesInheritance()
+    {
+        QCOMPARE(
+            floatingBarStyleStatusPill(),
+            QStringLiteral("statusPill")
+        );
+        QCOMPARE(
+            floatingBarStyleLiveTranscriptCard(),
+            QStringLiteral("liveTranscriptCard")
+        );
+        QCOMPARE(floatingBarStyleInherit(), QStringLiteral("inherit"));
+        QCOMPARE(
+            normalizeGlobalFloatingBarStyle(QStringLiteral("bad")),
+            floatingBarStyleStatusPill()
+        );
+        QCOMPARE(
+            normalizeFunctionFloatingBarStyle(QString()),
+            floatingBarStyleInherit()
+        );
+        QCOMPARE(
+            resolveFloatingBarStyle(
+                floatingBarStyleInherit(),
+                floatingBarStyleLiveTranscriptCard()
+            ),
+            floatingBarStyleLiveTranscriptCard()
+        );
+        QCOMPARE(
+            resolveFloatingBarStyle(
+                floatingBarStyleStatusPill(),
+                floatingBarStyleLiveTranscriptCard()
+            ),
+            floatingBarStyleStatusPill()
+        );
+        QCOMPARE(
+            floatingBarStyleTitle(
+                floatingBarStyleLiveTranscriptCard(),
+                false
+            ),
+            QStringLiteral("实时文字卡片")
+        );
+        QCOMPARE(
+            floatingBarStyleTitle(floatingBarStyleInherit(), true),
+            QStringLiteral("跟随全局")
+        );
+    }
 };
 
 QTEST_MAIN(AppSettingsDefaultsTests)

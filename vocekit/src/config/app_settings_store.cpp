@@ -1,8 +1,8 @@
 #include "app_settings_store.h"
 
 #include "app_settings_json.h"
+#include "app_paths.h"
 
-#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -15,8 +15,7 @@ namespace {
 
 QString defaultSettingsPath()
 {
-    return QDir(QCoreApplication::applicationDirPath())
-        .filePath(QStringLiteral("config/settings.json"));
+    return appConfigFilePath(QStringLiteral("settings.json"));
 }
 
 void clearError(OperationError *error)

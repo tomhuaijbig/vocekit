@@ -1,9 +1,8 @@
 #include "secret_store.h"
 
+#include "app_paths.h"
 #include "../file_utils.h"
 
-#include <QCoreApplication>
-#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -16,19 +15,9 @@ QString ssTr8(const char *text)
     return QString::fromUtf8(text);
 }
 
-QString defaultSecretBasePath()
-{
-    QDir dir(QCoreApplication::applicationDirPath());
-    const QString folder = dir.dirName().toLower();
-    if (folder == QStringLiteral("debug") || folder == QStringLiteral("release")) {
-        dir.cdUp();
-    }
-    return dir.absolutePath();
-}
-
 QString defaultSecretPath()
 {
-    return QDir(defaultSecretBasePath()).filePath(QStringLiteral("config/secrets.json"));
+    return appConfigFilePath(QStringLiteral("secrets.json"));
 }
 
 QVector<QJsonObject> customModelObjectsFromSecretsRoot(const QJsonObject &root)

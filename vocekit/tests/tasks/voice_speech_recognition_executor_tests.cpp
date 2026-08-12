@@ -71,6 +71,7 @@ private slots:
         VoiceLongRecordingRecognitionConfig config;
         config.modeId = QStringLiteral("dictate");
         config.provider = QStringLiteral("xfyun");
+        config.language = QStringLiteral("en-US");
         coordinator.reset();
         coordinator.schedule(session, config, recognition);
 
@@ -86,6 +87,37 @@ private slots:
             QStringLiteral("segment-2")
         );
         QVERIFY(!coordinator.isRunning());
+    }
+
+    void propagatesLongRecordingLanguage()
+    {
+        VoiceLongRecordingSession session;
+        session.begin(true, QString(), QStringLiteral("session"));
+        session.addCurrentSegment(QStringLiteral("one.wav"), QByteArray("pcm"));
+        QVERIFY(session.beginFinalizing());
+
+        QString capturedLanguage;
+        bool allFinished = false;
+        VoiceSpeechRecognitionHandlers recognition;
+        recognition.recognizeProvider = [&capturedLanguage](
+            const SpeechRecognitionProviderTaskRequest &request
+        ) {
+            capturedLanguage = request.language;
+            SpeechRecognitionTaskResult result;
+            result.text = QStringLiteral("recognized");
+            return result;
+        };
+        VoiceLongRecordingRecognitionCoordinator coordinator;
+        VoiceLongRecordingRecognitionCallbacks callbacks;
+        callbacks.allFinished = [&allFinished]() { allFinished = true; };
+        coordinator.setCallbacks(callbacks);
+        VoiceLongRecordingRecognitionConfig config;
+        config.provider = QStringLiteral("windows-local");
+        config.language = QStringLiteral("en-US");
+        coordinator.schedule(session, config, recognition);
+
+        QTRY_VERIFY(allFinished);
+        QCOMPARE(capturedLanguage, QStringLiteral("en-US"));
     }
 
     void completesLongRecordingAndSavesMergedAudio()
@@ -633,6 +665,7 @@ private slots:
         request.modeId = QStringLiteral("dictate");
         request.audioData = QByteArray("pcm");
         request.provider = QStringLiteral("iflytek");
+        request.language = QStringLiteral("en-US");
         request.networkPolicy = QStringLiteral("direct");
         request.useSystemProxy = true;
         request.sampleRate = 16000;
@@ -645,6 +678,7 @@ private slots:
             captured = providerRequest;
             SpeechRecognitionTaskResult result;
             result.text = QStringLiteral("recognized text");
+            result.errorCode = QStringLiteral("speech.test.code");
             result.elapsedMs = 42;
             return result;
         };
@@ -659,8 +693,10 @@ private slots:
         QCOMPARE(captured.index, 3);
         QCOMPARE(captured.audioData, QByteArray("pcm"));
         QCOMPARE(captured.provider, QStringLiteral("iflytek"));
+        QCOMPARE(captured.language, QStringLiteral("en-US"));
         QCOMPARE(captured.networkPolicy, QStringLiteral("direct"));
         QVERIFY(captured.useSystemProxy);
+        QCOMPARE(result.errorCode, QStringLiteral("speech.test.code"));
         QVERIFY(result.logDetail.contains(QStringLiteral("dictate")));
         QVERIFY(result.logDetail.contains(QString::number(result.text.size())));
     }
@@ -826,6 +862,7 @@ private slots:
             ++recognitionCalls;
             SpeechRecognitionTaskResult result;
             result.error = QStringLiteral("recognition failed");
+            result.errorCode = QStringLiteral("speech.windows.local");
             result.elapsedMs = 6;
             return result;
         };
@@ -837,6 +874,7 @@ private slots:
         QVERIFY(!result.cancelled);
         QCOMPARE(result.attempts, 2);
         QCOMPARE(result.elapsedMs, qint64(12));
+        QCOMPARE(result.errorCode, QStringLiteral("speech.windows.local"));
         QCOMPARE(recognitionCalls, 2);
 
         SegmentedRecordingState state;

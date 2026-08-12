@@ -39,9 +39,11 @@ VoiceLongRecordingSegmentResult VoiceLongRecordingSegmentExecutor::run(
 
         result.text = attempt.text;
         result.error = attempt.error;
+        result.errorCode = attempt.errorCode;
         if (attempt.ok) {
             result.ok = true;
             result.error.clear();
+            result.errorCode.clear();
             return result;
         }
     }

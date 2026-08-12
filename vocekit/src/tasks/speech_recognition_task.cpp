@@ -54,6 +54,7 @@ SpeechRecognitionTaskResult runSpeechRecognitionProviderTask(
     providerRequest.audioData = request.audioData;
     providerRequest.audioFormat = request.audioFormat;
     providerRequest.sampleRate = request.sampleRate;
+    providerRequest.language = request.language;
     providerRequest.network.globalUseSystemProxy = request.useSystemProxy;
     providerRequest.network.networkPolicy = request.networkPolicy;
 
@@ -69,6 +70,7 @@ SpeechRecognitionTaskResult runSpeechRecognitionProviderTask(
 
     result.text = providerResult.text;
     result.error = providerResult.error.message;
+    result.errorCode = providerResult.error.code;
     result.elapsedMs = providerResult.durationMs >= 0
         ? providerResult.durationMs
         : timer.elapsed();

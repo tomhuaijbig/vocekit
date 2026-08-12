@@ -77,6 +77,7 @@ VoiceSpeechRecognitionResult VoiceSpeechRecognitionExecutor::run(
     speechRequest.audioFormat = request.audioFormat;
     speechRequest.sampleRate = request.sampleRate;
     speechRequest.provider = request.provider;
+    speechRequest.language = request.language;
     speechRequest.useSystemProxy = request.useSystemProxy;
     speechRequest.networkPolicy = request.networkPolicy;
     speechRequest.cancellation = request.cancellation;
@@ -86,6 +87,7 @@ VoiceSpeechRecognitionResult VoiceSpeechRecognitionExecutor::run(
 
     result.text = speechResult.text;
     result.error = speechResult.error;
+    result.errorCode = speechResult.errorCode;
     result.elapsedMs = speechResult.elapsedMs;
 
     if (request.cancellation.isCancellationRequested()) {

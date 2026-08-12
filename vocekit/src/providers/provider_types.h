@@ -52,7 +52,7 @@ struct SpeechRecognitionRequest
     QString audioPath;
     QString audioFormat = QStringLiteral("wav");
     int sampleRate = 16000;
-    QString language = QStringLiteral("zh-CN");
+    QString language = QStringLiteral("follow-windows");
     NetworkRequestOptions network;
 };
 

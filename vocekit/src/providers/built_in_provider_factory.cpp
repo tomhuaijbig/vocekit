@@ -7,6 +7,7 @@
 #include "../providers/custom_speech_provider.h"
 #include "../providers/deepseek_model_provider.h"
 #include "../providers/openai_compatible_model_provider.h"
+#include "../providers/windows_speech_provider.h"
 #include "../providers/xfyun_speech_provider.h"
 
 QSharedPointer<ISpeechProvider> createBuiltInSpeechProvider(
@@ -14,6 +15,9 @@ QSharedPointer<ISpeechProvider> createBuiltInSpeechProvider(
     bool useSystemProxy)
 {
     const QString normalized = normalizeSpeechProvider(providerId);
+    if (normalized == speechProviderWindowsLocal()) {
+        return createWindowsSpeechProvider();
+    }
     if (normalized == speechProviderBaidu()) {
         return createBaiduSpeechProvider(useSystemProxy);
     }
@@ -67,6 +71,12 @@ void registerBuiltInProviders(
     registry->addSpeechProvider(
         createBuiltInSpeechProvider(
             speechProviderCustom(),
+            useSystemProxy
+        )
+    );
+    registry->addSpeechProvider(
+        createBuiltInSpeechProvider(
+            speechProviderWindowsLocal(),
             useSystemProxy
         )
     );

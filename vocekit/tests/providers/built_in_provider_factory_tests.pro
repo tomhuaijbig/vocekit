@@ -24,6 +24,9 @@ SOURCES += \
     ../../src/providers/provider_network_transport.cpp \
     ../../src/providers/provider_websocket_transport.cpp \
     ../../src/providers/provider_registry.cpp \
+    ../../src/providers/windows_speech_helper_client.cpp \
+    ../../src/providers/windows_speech_helper_protocol.cpp \
+    ../../src/providers/windows_speech_provider.cpp \
     ../../src/providers/xfyun_speech_protocol.cpp \
     ../../src/providers/xfyun_speech_provider.cpp \
     ../../src/result_flow_config.cpp \
@@ -54,6 +57,9 @@ HEADERS += \
     ../../src/providers/provider_websocket_transport.h \
     ../../src/providers/provider_types.h \
     ../../src/providers/speech_provider.h \
+    ../../src/providers/windows_speech_helper_client.h \
+    ../../src/providers/windows_speech_helper_protocol.h \
+    ../../src/providers/windows_speech_provider.h \
     ../../src/providers/xfyun_speech_protocol.h \
     ../../src/providers/xfyun_speech_provider.h \
     ../../src/result_flow_config.h \

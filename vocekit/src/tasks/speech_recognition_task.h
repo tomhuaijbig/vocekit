@@ -25,6 +25,7 @@ struct SpeechRecognitionTaskResult
     int index = 0;
     QString text;
     QString error;
+    QString errorCode;
     qint64 elapsedMs = -1;
 };
 
@@ -35,6 +36,7 @@ struct SpeechRecognitionProviderTaskRequest
     QString audioFormat = QStringLiteral("pcm");
     int sampleRate = 16000;
     QString provider;
+    QString language = QStringLiteral("follow-windows");
     QString networkPolicy = QStringLiteral("inherit");
     bool useSystemProxy = false;
     CancellationToken cancellation;

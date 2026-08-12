@@ -11,6 +11,7 @@ struct VoiceSpeechRecognitionRequest
     QString modeId;
     QByteArray audioData;
     QString provider;
+    QString language = QStringLiteral("follow-windows");
     QString networkPolicy = QStringLiteral("inherit");
     bool useSystemProxy = false;
     QString audioFormat = QStringLiteral("pcm");
@@ -33,6 +34,7 @@ struct VoiceSpeechRecognitionResult
     bool cancelled = false;
     QString text;
     QString error;
+    QString errorCode;
     qint64 elapsedMs = -1;
     QString logCategory;
     QString logAction;

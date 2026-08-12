@@ -7,6 +7,7 @@
 #include "../../src/providers/custom_speech_provider.h"
 #include "../../src/providers/deepseek_model_provider.h"
 #include "../../src/providers/openai_compatible_model_provider.h"
+#include "../../src/providers/windows_speech_provider.h"
 #include "../../src/providers/xfyun_speech_provider.h"
 #include "../../src/tasks/cancellation_token.h"
 
@@ -26,6 +27,7 @@ private slots:
         QVERIFY(!registry.speechProvider(speechProviderBaidu()).isNull());
         QVERIFY(!registry.speechProvider(speechProviderXfyun()).isNull());
         QVERIFY(!registry.speechProvider(speechProviderCustom()).isNull());
+        QVERIFY(!registry.speechProvider(speechProviderWindowsLocal()).isNull());
         QVERIFY(!registry.modelProvider(QStringLiteral("deepseek")).isNull());
         QVERIFY(!registry.modelProvider(QStringLiteral("openai")).isNull());
         QVERIFY(!registry.modelProvider(QStringLiteral("claude")).isNull());
@@ -141,6 +143,17 @@ private slots:
 
         QVERIFY(
             dynamic_cast<XfyunSpeechProvider *>(provider.data()) != nullptr
+        );
+    }
+
+    void windowsSpeechFactoryUsesIndependentProvider()
+    {
+        const QSharedPointer<ISpeechProvider> provider =
+            createBuiltInSpeechProvider(speechProviderWindowsLocal());
+
+        QCOMPARE(provider->id(), speechProviderWindowsLocal());
+        QVERIFY(
+            dynamic_cast<WindowsSpeechProvider *>(provider.data()) != nullptr
         );
     }
 

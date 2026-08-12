@@ -23,6 +23,7 @@ struct VoiceLongRecordingSegmentResult
     int attempts = 0;
     QString text;
     QString error;
+    QString errorCode;
     qint64 elapsedMs = 0;
     QVector<VoiceSpeechRecognitionResult> attemptResults;
 };

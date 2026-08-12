@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include "../../src/config/app_settings_defaults.h"
 #include "../../src/providers/provider_configuration.h"
 
 class ProviderConfigurationTests : public QObject
@@ -41,6 +42,11 @@ private slots:
         QVERIFY(speechProviderConfigurationErrorForSecrets(
             secrets,
             QStringLiteral("custom")
+        ).isEmpty());
+
+        QVERIFY(speechProviderConfigurationErrorForSecrets(
+            SecretConfig(),
+            speechProviderWindowsLocal()
         ).isEmpty());
     }
 

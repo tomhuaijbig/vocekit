@@ -13,6 +13,7 @@ struct VoiceLongRecordingRecognitionConfig
 {
     QString modeId;
     QString provider;
+    QString language = QStringLiteral("follow-windows");
     QString networkPolicy = QStringLiteral("inherit");
     bool useSystemProxy = false;
     CancellationToken cancellation;

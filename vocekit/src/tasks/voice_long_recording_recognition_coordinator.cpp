@@ -104,6 +104,7 @@ void VoiceLongRecordingRecognitionCoordinator::processNext()
     request.speech.audioFormat = QStringLiteral("pcm");
     request.speech.sampleRate = 16000;
     request.speech.provider = m_config.provider;
+    request.speech.language = m_config.language;
     request.speech.useSystemProxy = m_config.useSystemProxy;
     request.speech.networkPolicy = m_config.networkPolicy;
     request.cancellation = m_effectiveCancellation.isValid()

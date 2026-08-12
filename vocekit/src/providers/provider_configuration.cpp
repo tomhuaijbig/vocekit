@@ -8,6 +8,9 @@ QString speechProviderConfigurationErrorForSecrets(
 )
 {
     const QString normalized = normalizeSpeechProvider(provider);
+    if (normalized == speechProviderWindowsLocal()) {
+        return QString();
+    }
     if (normalized == speechProviderXfyun()) {
         return secrets.hasXfyun()
             ? QString()

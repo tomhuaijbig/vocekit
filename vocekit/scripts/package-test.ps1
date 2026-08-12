@@ -4,7 +4,7 @@ param(
     [string]$ValidationOnly = "",
     [string]$ValidationPath = "",
     [string]$ValidationHelperPath = "",
-    [ValidateSet("", "after-directory-move")]
+    [ValidateSet("", "after-directory-move", "after-first-backup-cleanup")]
     [string]$PublishFailureInjection = ""
 )
 
@@ -206,6 +206,7 @@ $backedUpPackage = $false
 $backedUpZip = $false
 $publishedPackage = $false
 $publishedZip = $false
+$publishCommitted = $false
 try {
     [void][IO.Directory]::CreateDirectory($stagingDir)
     $createdStage = $true
@@ -254,15 +255,7 @@ try {
         }
         [IO.File]::Move($temporaryZip, $zipPath)
         $publishedZip = $true
-
-        if ($backedUpPackage) {
-            [IO.Directory]::Delete($backupPackageDir, $true)
-            $backedUpPackage = $false
-        }
-        if ($backedUpZip) {
-            [IO.File]::Delete($backupZipPath)
-            $backedUpZip = $false
-        }
+        $publishCommitted = $true
     }
     catch {
         if ($publishedZip -and [IO.File]::Exists($zipPath)) {
@@ -282,6 +275,27 @@ try {
             $backedUpZip = $false
         }
         throw
+    }
+
+    # Both new artifacts are committed. Backup cleanup is not part of the
+    # transaction: a cleanup failure must never remove or roll back the new pair.
+    if ($publishCommitted) {
+        try {
+            if ($backedUpPackage) {
+                [IO.Directory]::Delete($backupPackageDir, $true)
+                $backedUpPackage = $false
+            }
+            if ($PublishFailureInjection -eq "after-first-backup-cleanup") {
+                throw "Injected package backup cleanup failure."
+            }
+            if ($backedUpZip) {
+                [IO.File]::Delete($backupZipPath)
+                $backedUpZip = $false
+            }
+        }
+        catch {
+            Write-Warning "New package pair is committed, but an old package backup could not be removed: $($_.Exception.Message)"
+        }
     }
 
     $packageSize = (Get-ChildItem -LiteralPath $packageDir -Recurse -File | Measure-Object -Property Length -Sum).Sum

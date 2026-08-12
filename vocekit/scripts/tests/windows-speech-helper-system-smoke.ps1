@@ -69,8 +69,10 @@ function Invoke-HelperWithChunkedPcm {
     $startInfo.CreateNoWindow = $true
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $startInfo
+    $started = $false
     try {
         [void]$process.Start()
+        $started = $true
         $startedProcessIds.Add($process.Id)
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
@@ -126,11 +128,13 @@ function Invoke-HelperWithChunkedPcm {
 
         Write-Host ("System smoke {0}: bytes={1} events={2} terminal={3}" -f $Language, $Pcm.Length, $events.Count, $terminal.type)
     } finally {
-        if (-not $process.HasExited) {
-            $process.Kill()
-            [void]$process.WaitForExit(5000)
+        if ($started) {
+            if (-not $process.HasExited) {
+                $process.Kill()
+                [void]$process.WaitForExit(5000)
+            }
+            $process.Dispose()
         }
-        $process.Dispose()
     }
 }
 

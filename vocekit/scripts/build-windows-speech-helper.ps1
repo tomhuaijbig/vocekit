@@ -23,6 +23,16 @@ function Get-WindowsSpeechBuildDecision {
     return "Fail"
 }
 
+function Get-VisualStudioVsWhereArguments {
+    return @(
+        "-version", "[17.0,18.0)",
+        "-latest",
+        "-products", "*",
+        "-requires", "Microsoft.Component.MSBuild",
+        "-property", "installationPath"
+    )
+}
+
 function Resolve-VisualStudioToolchain {
     param(
         [string[]]$InstallationPaths
@@ -35,7 +45,8 @@ function Resolve-VisualStudioToolchain {
         $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
         $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
         if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
-            $located = @(& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
+            $vswhereArguments = @(Get-VisualStudioVsWhereArguments)
+            $located = @(& $vswhere @vswhereArguments)
             if ($LASTEXITCODE -ne 0) {
                 throw "Visual Studio Installer vswhere failed with exit code $LASTEXITCODE."
             }
@@ -58,9 +69,6 @@ function Resolve-VisualStudioToolchain {
             continue
         }
         $fullInstallationPath = [IO.Path]::GetFullPath($installationPath.Trim())
-        if ($fullInstallationPath -notmatch '[\\/]2022[\\/]') {
-            continue
-        }
         $msbuild = Join-Path $fullInstallationPath "MSBuild\Current\Bin\MSBuild.exe"
         $csc = Join-Path $fullInstallationPath "MSBuild\Current\Bin\Roslyn\csc.exe"
         if ((Test-Path -LiteralPath $msbuild -PathType Leaf) -and

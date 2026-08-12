@@ -28,6 +28,39 @@ try {
         }
     }
 
+    $customInstallation = Join-Path $testRoot "Dev Tools\Custom VS"
+    $customMsbuild = Join-Path $customInstallation "MSBuild\Current\Bin\MSBuild.exe"
+    $customCsc = Join-Path $customInstallation "MSBuild\Current\Bin\Roslyn\csc.exe"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $customCsc) -Force | Out-Null
+    New-Item -ItemType File -Path $customMsbuild -Force | Out-Null
+    New-Item -ItemType File -Path $customCsc -Force | Out-Null
+    $customFailure = $null
+    try {
+        $customToolchain = Resolve-VisualStudioToolchain -InstallationPaths @($customInstallation)
+        if ($customToolchain.MSBuild -ne $customMsbuild -or $customToolchain.Csc -ne $customCsc) {
+            $customFailure = "The Visual Studio locator returned the wrong custom vswhere toolchain."
+        }
+    } catch {
+        $customFailure = "The Visual Studio locator rejected a valid custom vswhere installation path: $($_.Exception.Message)"
+    }
+
+    $vswhereFailure = $null
+    try {
+        $vswhereArguments = @(Get-VisualStudioVsWhereArguments)
+        $versionIndex = [Array]::IndexOf($vswhereArguments, "-version")
+        if ($versionIndex -lt 0 -or $versionIndex + 1 -ge $vswhereArguments.Count -or
+            $vswhereArguments[$versionIndex + 1] -ne "[17.0,18.0)") {
+            $vswhereFailure = "The vswhere query must restrict results to Visual Studio 2022."
+        }
+        foreach ($requiredArgument in @("-latest", "-products", "*", "-requires", "Microsoft.Component.MSBuild", "-property", "installationPath")) {
+            if ($vswhereArguments -notcontains $requiredArgument) {
+                $vswhereFailure = "The vswhere query is missing required argument: $requiredArgument"
+            }
+        }
+    } catch {
+        $vswhereFailure = "The vswhere argument API is missing: $($_.Exception.Message)"
+    }
+
     $notFound = $false
     try {
         Resolve-VisualStudioToolchain -InstallationPaths @((Join-Path $testRoot "missing")) | Out-Null
@@ -53,6 +86,19 @@ try {
     if ([IO.Directory]::Exists($testRoot)) {
         [IO.Directory]::Delete($testRoot, $true)
     }
+}
+
+$smokeScript = Join-Path $PSScriptRoot "windows-speech-helper-system-smoke.ps1"
+$smokeText = Get-Content -LiteralPath $smokeScript -Raw
+$smokeFailure = $null
+if ($smokeText -notmatch '(?m)^\s*\$started\s*=\s*\$false\s*$' -or
+    $smokeText -notmatch '(?m)^\s*\$started\s*=\s*\$true\s*$' -or
+    $smokeText -notmatch '(?s)finally\s*\{\s*if\s*\(\$started\)\s*\{.*?\$process\.HasExited') {
+    $smokeFailure = "The System.Speech smoke cleanup can mask Process.Start failures."
+}
+$failures = @($customFailure, $vswhereFailure, $smokeFailure) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+if ($failures.Count -ne 0) {
+    throw ($failures -join " | ")
 }
 
 Write-Host "Windows speech helper build decision tests: PASS"

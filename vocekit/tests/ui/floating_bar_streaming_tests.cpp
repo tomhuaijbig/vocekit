@@ -6,6 +6,8 @@
 #include <QLabel>
 #include <QFont>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 
 class FloatingBarStreamingTests : public QObject
 {
@@ -21,7 +23,7 @@ private slots:
         bar.show();
 
         QVERIFY(bar.width() <= 420);
-        QVERIFY(bar.height() <= 90);
+        QVERIFY(bar.height() <= 180);
         QVERIFY(bar.findChild<QPushButton *>(
             QStringLiteral("floatingCancelButton")));
         QVERIFY(bar.findChild<QPushButton *>(
@@ -71,6 +73,8 @@ private slots:
         QVERIFY(provisional);
         QCOMPARE(committedLabel->text(), committed);
         QVERIFY(provisional->styleSheet().contains(QStringLiteral("#60a5fa")));
+        QVERIFY(QRect(provisional->mapTo(&bar, QPoint()), provisional->size())
+                    .intersects(bar.rect()));
         QVERIFY(bar.height() <= 240);
         QVERIFY(bar.findChild<QPushButton *>(
             QStringLiteral("floatingCancelButton"))->isVisible());
@@ -183,6 +187,64 @@ private slots:
         QVERIFY(cancel->geometry().right()
                 < confirm->geometry().left());
         QVERIFY(bar.height() <= 260);
+    }
+
+    void longTranscriptUsesBoundedScrollAreaWithoutClippingLabels()
+    {
+        FloatingBar bar;
+        bar.setStyle(floatingBarStyleLiveTranscriptCard());
+        bar.setStreamingTranscript(
+            QString(240, QChar(0x8bc6)),
+            QStringLiteral("a long provisional English transcript that wraps")
+        );
+        bar.show();
+        QCoreApplication::processEvents();
+
+        QScrollArea *scroll = bar.findChild<QScrollArea *>(
+            QStringLiteral("streamingTranscriptScrollArea"));
+        QLabel *committed = bar.findChild<QLabel *>(
+            QStringLiteral("streamingCommittedText"));
+        QLabel *provisional = bar.findChild<QLabel *>(
+            QStringLiteral("streamingProvisionalText"));
+        QVERIFY(scroll);
+        QVERIFY(committed);
+        QVERIFY(provisional);
+        QVERIFY(committed->height() >= committed->sizeHint().height());
+        QVERIFY(provisional->height() >= provisional->sizeHint().height());
+        QVERIFY(scroll->verticalScrollBar()->maximum() > 0);
+        QVERIFY(bar.height() <= 240);
+    }
+
+    void compactFailureDetailIsNotClipped()
+    {
+        FloatingBar bar;
+        QFont large = bar.font();
+        large.setPointSizeF(qMax(15.0, large.pointSizeF() * 1.5));
+        bar.setFont(large);
+        bar.setStyle(floatingBarStyleStatusPill());
+        bar.setStage(
+            FloatingBarStage::Failed,
+            QString::fromUtf8("识别失败"),
+            QString::fromUtf8("请检查 Windows 语言设置")
+        );
+        bar.show();
+        QCoreApplication::processEvents();
+        QLabel *detail = bar.findChild<QLabel *>(
+            QStringLiteral("floatingBarSubtitle"));
+        QLabel *title = bar.findChild<QLabel *>(
+            QStringLiteral("floatingBarTitle"));
+        QVERIFY(detail);
+        QVERIFY(title);
+        QVERIFY(detail->height() >= detail->sizeHint().height());
+        QVERIFY(title->height() >= title->sizeHint().height());
+        QVERIFY(bar.height() <= 180);
+    }
+
+    void floatingWindowDoesNotStealFocus()
+    {
+        FloatingBar bar;
+        QVERIFY(bar.testAttribute(Qt::WA_ShowWithoutActivating));
+        QVERIFY(bar.windowFlags().testFlag(Qt::WindowDoesNotAcceptFocus));
     }
 };
 

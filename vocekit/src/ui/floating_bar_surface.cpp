@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QPainter>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 #include <cmath>
@@ -175,18 +176,48 @@ public:
         outer->addWidget(m_detail);
 
         if (transcript) {
+            QScrollArea *transcriptArea = new QScrollArea(this);
+            transcriptArea->setObjectName(
+                QStringLiteral("streamingTranscriptScrollArea"));
+            transcriptArea->setWidgetResizable(true);
+            transcriptArea->setHorizontalScrollBarPolicy(
+                Qt::ScrollBarAlwaysOff);
+            transcriptArea->setFrameShape(QFrame::NoFrame);
+            transcriptArea->setStyleSheet(QStringLiteral(
+                "QScrollArea#streamingTranscriptScrollArea {"
+                " background:transparent; border:none; }"
+                "QScrollArea#streamingTranscriptScrollArea > QWidget > QWidget {"
+                " background:transparent; }"
+            ));
+            QWidget *transcriptContents = new QWidget(transcriptArea);
+            transcriptContents->setObjectName(
+                QStringLiteral("streamingTranscriptContents"));
+            QVBoxLayout *transcriptLayout =
+                new QVBoxLayout(transcriptContents);
+            transcriptLayout->setContentsMargins(0, 0, 0, 0);
+            transcriptLayout->setSpacing(4);
+            transcriptLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
             m_committed = new QLabel(this);
             m_committed->setObjectName(QStringLiteral("streamingCommittedText"));
             m_committed->setFont(appFont(9));
             m_committed->setWordWrap(true);
+            m_committed->setSizePolicy(
+                QSizePolicy::Preferred, QSizePolicy::Minimum);
             m_committed->setTextInteractionFlags(Qt::NoTextInteraction);
             m_provisional = new QLabel(this);
             m_provisional->setObjectName(QStringLiteral("streamingProvisionalText"));
             m_provisional->setFont(appFont(9));
             m_provisional->setWordWrap(true);
+            m_provisional->setSizePolicy(
+                QSizePolicy::Preferred, QSizePolicy::Minimum);
             m_provisional->setTextInteractionFlags(Qt::NoTextInteraction);
             m_provisional->setStyleSheet(QStringLiteral("color:#60a5fa;"));
-            outer->addWidget(m_committed);
+            transcriptLayout->addWidget(m_committed);
+            transcriptArea->setWidget(transcriptContents);
+            const int transcriptLine =
+                QFontMetrics(m_committed->font()).lineSpacing();
+            transcriptArea->setMaximumHeight(transcriptLine * 4 + 12);
+            outer->addWidget(transcriptArea);
             outer->addWidget(m_provisional);
         }
 
@@ -220,19 +251,34 @@ public:
         m_waveform->setPeak(state.waveformPeak);
         m_title->setText(state.title.isEmpty()
             ? defaultTitle(state.stage) : state.title);
+        m_title->setMinimumHeight(m_title->sizeHint().height());
         m_detail->setText(state.detail);
         m_detail->setVisible(!state.detail.isEmpty());
+        const int detailHeight = state.detail.isEmpty()
+            ? 0
+            : qMax(
+                  m_detail->sizeHint().height(),
+                  QFontMetrics(m_detail->font()).boundingRect(
+                      QRect(0, 0, 340, QWIDGETSIZE_MAX),
+                      Qt::TextWordWrap | Qt::AlignCenter,
+                      state.detail
+                  ).height() + 2
+              );
+        m_detail->setMinimumHeight(detailHeight);
+        m_detail->setFixedHeight(detailHeight);
         if (m_hasTranscript) {
             m_committed->setText(state.committedText);
             m_provisional->setText(state.provisionalText);
-            const int line = QFontMetrics(m_committed->font()).lineSpacing();
-            m_committed->setMaximumHeight(line * 4 + 4);
-            m_provisional->setMaximumHeight(line * 2 + 4);
+            m_committed->setMaximumHeight(QWIDGETSIZE_MAX);
+            m_provisional->setMaximumHeight(QWIDGETSIZE_MAX);
             m_committed->setVisible(!state.committedText.isEmpty());
             m_provisional->setVisible(!state.provisionalText.isEmpty());
+            m_committed->setMinimumHeight(m_committed->sizeHint().height());
+            m_provisional->setMinimumHeight(
+                m_provisional->sizeHint().height());
         }
         setFixedWidth(m_hasTranscript ? 440 : 360);
-        setMaximumHeight(m_hasTranscript ? 220 : 86);
+        setMaximumHeight(m_hasTranscript ? 240 : 180);
         adjustSize();
     }
 

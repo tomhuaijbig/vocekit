@@ -36,8 +36,10 @@ FloatingBar::FloatingBar(
 {
     setWindowFlags(
         Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint
+        | Qt::WindowDoesNotAcceptFocus
     );
     setAttribute(Qt::WA_TranslucentBackground);
+    setAttribute(Qt::WA_ShowWithoutActivating);
     rebuildSurface();
 }
 

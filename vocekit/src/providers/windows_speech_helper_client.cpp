@@ -59,6 +59,10 @@ void stopProcess(QProcess *process)
     if (!process->waitForFinished(TerminateWaitMs)) {
         process->kill();
         process->waitForFinished(TerminateWaitMs);
+        if (process->state() != QProcess::NotRunning) {
+            process->kill();
+            process->waitForFinished(TerminateWaitMs);
+        }
     }
 }
 

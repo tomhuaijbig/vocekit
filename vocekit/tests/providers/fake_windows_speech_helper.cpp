@@ -30,6 +30,14 @@ void writeBytes(const QByteArray &bytes)
     output.flush();
 }
 
+void writeErrorBytes(const QByteArray &bytes)
+{
+    QFile output;
+    output.open(stderr, QIODevice::WriteOnly);
+    output.write(bytes);
+    output.flush();
+}
+
 QByteArray eventBytes(
     const QString &type,
     const QString &runId,
@@ -105,6 +113,11 @@ int main(int argc, char *argv[])
     }
     if (scenario == QStringLiteral("oversize-output")) {
         writeBytes(QByteArray(1024 * 1024 + 1, 'x'));
+        QThread::msleep(1000);
+        return 0;
+    }
+    if (scenario == QStringLiteral("oversize-stderr")) {
+        writeErrorBytes(QByteArray(1024 * 1024 + 1, 'e'));
         QThread::msleep(1000);
         return 0;
     }

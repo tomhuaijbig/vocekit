@@ -189,6 +189,18 @@ private slots:
         QCOMPARE(result.errorCode, QStringLiteral("OUTPUT_TOO_LARGE"));
     }
 
+    void capsStandardErrorIndependently()
+    {
+        WindowsSpeechBatchRequest request = batchRequest(
+            QStringLiteral("oversize-stderr-1")
+        );
+        request.timeoutMs = 3000;
+        const WindowsSpeechHelperResult result =
+            clientFor(QStringLiteral("oversize-stderr")).recognize(request);
+        QVERIFY(!result.ok);
+        QCOMPARE(result.errorCode, QStringLiteral("OUTPUT_TOO_LARGE"));
+    }
+
     void reportsProcessCrash()
     {
         const WindowsSpeechHelperResult result =

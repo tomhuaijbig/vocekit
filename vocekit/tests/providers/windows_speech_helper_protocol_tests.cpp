@@ -2,6 +2,8 @@
 
 #include "../../src/providers/windows_speech_helper_protocol.h"
 
+#include <QFile>
+
 class WindowsSpeechHelperProtocolTests : public QObject
 {
     Q_OBJECT
@@ -183,6 +185,43 @@ private slots:
         for (const QByteArray &line : invalid) {
             QVERIFY2(!parseWindowsSpeechHelperEvent(line).valid, line.constData());
         }
+    }
+
+    void rejectsPcmByteCountsOutsideQint64Range()
+    {
+        const QList<QByteArray> invalid = QList<QByteArray>()
+            << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\","
+                          "\"type\":\"final\",\"text\":\"x\","
+                          "\"pcmBytes\":1e300}")
+            << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\","
+                          "\"type\":\"final\",\"text\":\"x\","
+                          "\"pcmBytes\":9223372036854775808}");
+
+        for (const QByteArray &line : invalid) {
+            QVERIFY2(!parseWindowsSpeechHelperEvent(line).valid, line.constData());
+        }
+    }
+
+    void validatesPcmByteCountBeforeIntegerConversion()
+    {
+        QFile source(QStringLiteral(
+            "../../src/providers/windows_speech_helper_protocol.cpp"
+        ));
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        const QByteArray contents = source.readAll();
+        const int finiteCheck = contents.indexOf("qIsFinite(number)");
+        const int integerCheck = contents.indexOf("std::floor(number)");
+        const int upperBoundCheck = contents.indexOf("qint64>::max");
+        const int conversion = contents.indexOf(
+            "static_cast<qint64>(number)"
+        );
+        QVERIFY(finiteCheck >= 0);
+        QVERIFY(integerCheck >= 0);
+        QVERIFY(upperBoundCheck >= 0);
+        QVERIFY(conversion >= 0);
+        QVERIFY(finiteCheck < conversion);
+        QVERIFY(integerCheck < conversion);
+        QVERIFY(upperBoundCheck < conversion);
     }
 
     void mapsStableOperationErrors()

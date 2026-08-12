@@ -7,6 +7,9 @@
 #include <QJsonParseError>
 #include <QTextCodec>
 
+#include <cmath>
+#include <limits>
+
 namespace {
 
 const int MaximumProtocolLineBytes = 64 * 1024;
@@ -102,10 +105,17 @@ bool parseOptionalPcmBytes(
         return false;
     }
     const double number = value.toDouble();
-    const qint64 integer = static_cast<qint64>(number);
-    if (number < 0.0 || number != static_cast<double>(integer)) {
+    const double maximumQint64Double = std::nextafter(
+        static_cast<double>(std::numeric_limits<qint64>::max()),
+        0.0
+    );
+    if (!qIsFinite(number)
+        || number < 0.0
+        || std::floor(number) != number
+        || number > maximumQint64Double) {
         return false;
     }
+    const qint64 integer = static_cast<qint64>(number);
     if (parsed) {
         *parsed = integer;
     }

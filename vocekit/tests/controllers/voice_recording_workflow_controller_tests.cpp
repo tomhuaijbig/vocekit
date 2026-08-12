@@ -18,10 +18,16 @@
 #include <QPushButton>
 #include <QMessageBox>
 #include <QLabel>
+#include <QUrl>
 
 #include <atomic>
 #include <thread>
 #include <type_traits>
+
+VoiceRecordingWorkflowAccess voiceControllerRecordingAccessForTests(
+    QWidget *parent,
+    const std::function<bool(const QUrl &)> &openUrl
+);
 
 namespace {
 
@@ -2575,20 +2581,21 @@ attentionActionRunsOnlyForItsActionButton()
 void VoiceRecordingWorkflowControllerTests::
 voiceControllerWindowsSpeechModalUsesRealRolesAndMapping()
 {
-    const QString voicePath = QFINDTESTDATA(
-        "../../src/controllers/voice_controller.cpp"
-    );
-    QVERIFY(!voicePath.isEmpty());
-    QFile voiceSource(voicePath);
-    QVERIFY(voiceSource.open(QIODevice::ReadOnly));
-    QVERIFY(voiceSource.readAll().contains(
-        "showWindowsSpeechFailureAttention"
-    ));
     setAttentionActionDialogCallbackForTests(
         AttentionActionDialogCallback()
     );
     int openUrlCount = 0;
     QString openedUrl;
+    VoiceRecordingWorkflowAccess mappingAccess =
+        voiceControllerRecordingAccessForTests(
+            nullptr,
+            [&openUrlCount, &openedUrl](const QUrl &url) {
+                openedUrl = url.toString();
+                ++openUrlCount;
+                return true;
+            }
+        );
+    QVERIFY(mappingAccess.showWindowsSpeechFailure);
     setAttentionMessageBoxClickCallbackForTests([](QWidget *widget) {
         QMessageBox *box = qobject_cast<QMessageBox *>(widget);
         QVERIFY(box);
@@ -2607,15 +2614,9 @@ voiceControllerWindowsSpeechModalUsesRealRolesAndMapping()
         }
         QFAIL("language settings ActionRole button was not found");
     });
-    showWindowsSpeechFailureAttention(
-        nullptr,
+    mappingAccess.showWindowsSpeechFailure(
         QStringLiteral("speech.windows.recognizer_missing"),
-        QStringLiteral("missing"),
-        [&openUrlCount, &openedUrl](const QUrl &url) {
-            openedUrl = url.toString();
-            ++openUrlCount;
-            return true;
-        }
+        QStringLiteral("missing")
     );
     QCOMPARE(openUrlCount, 1);
     QCOMPARE(openedUrl, QStringLiteral("ms-settings:regionlanguage"));
@@ -2627,14 +2628,9 @@ voiceControllerWindowsSpeechModalUsesRealRolesAndMapping()
         QAbstractButton *ok = box->button(QMessageBox::Ok);
         QVERIFY(ok);
     });
-    showWindowsSpeechFailureAttention(
-        nullptr,
+    mappingAccess.showWindowsSpeechFailure(
         QStringLiteral("speech.windows.recognizer_missing"),
-        QStringLiteral("missing"),
-        [&openUrlCount](const QUrl &) {
-            ++openUrlCount;
-            return true;
-        }
+        QStringLiteral("missing")
     );
     QCOMPARE(openUrlCount, 1);
 
@@ -2658,8 +2654,7 @@ voiceControllerWindowsSpeechModalUsesRealRolesAndMapping()
         QAbstractButton *ok = box->button(QMessageBox::Ok);
         QVERIFY(ok);
     });
-    showWindowsSpeechFailureAttention(
-        nullptr,
+    mappingAccess.showWindowsSpeechFailure(
         QStringLiteral("speech.windows.program_missing"),
         QStringLiteral("program missing")
     );

@@ -1,6 +1,8 @@
 #include "voice_controller.h"
 
 #include <QtWidgets>
+#include <QDesktopServices>
+#include <QUrl>
 
 static QString tr8(const char *text)
 {
@@ -37,6 +39,83 @@ static QString tr8(const char *text)
 #include "../ui/app_dialogs.h"
 #include "../ui/floating_bar.h"
 #include "../ui/vocabulary_quick_add_dialog.h"
+
+namespace {
+
+using VoiceControllerOpenUrl = std::function<bool(const QUrl &)>;
+
+void showVoiceControllerWindowsSpeechFailure(
+    QWidget *parent,
+    const QString &errorCode,
+    const QString &message,
+    const VoiceControllerOpenUrl &openUrl = VoiceControllerOpenUrl()
+)
+{
+    const QString text = message.trimmed().isEmpty()
+        ? tr8("Windows 本地语音识别不可用。")
+        : message;
+    const QString title = tr8("Windows 本地语音识别不可用");
+    if (!isWindowsSpeechConfigurationErrorCode(errorCode)) {
+        showAttentionWarning(parent, title, text);
+        return;
+    }
+    if (errorCode == QStringLiteral("speech.windows.program_missing")) {
+        showAttentionWarning(
+            parent,
+            title,
+            text + tr8("\n\n请重新安装软件，或完整解压发布包后再试。")
+        );
+        return;
+    }
+    showAttentionWarningWithAction(
+        parent,
+        title,
+        text,
+        tr8("打开 Windows 语言设置"),
+        [openUrl]() {
+            const QUrl url(QStringLiteral("ms-settings:regionlanguage"));
+            if (openUrl) {
+                openUrl(url);
+            } else {
+                QDesktopServices::openUrl(url);
+            }
+        }
+    );
+}
+
+VoiceRecordingWorkflowAccess voiceControllerRecordingAccess(
+    QWidget *parent,
+    const VoiceControllerOpenUrl &openUrl = VoiceControllerOpenUrl()
+)
+{
+    VoiceRecordingWorkflowAccess access;
+    access.showWindowsSpeechFailure = [parent, openUrl](
+        const QString &errorCode,
+        const QString &message
+    ) {
+        showVoiceControllerWindowsSpeechFailure(
+            parent,
+            errorCode,
+            message,
+            openUrl
+        );
+    };
+    return access;
+}
+
+} // namespace
+
+#ifdef VOCEKIT_TESTING
+VoiceRecordingWorkflowAccess voiceControllerRecordingAccessForTests(
+    QWidget *parent,
+    const std::function<bool(const QUrl &)> &openUrl
+)
+{
+    return voiceControllerRecordingAccess(parent, openUrl);
+}
+#endif
+
+#ifndef VOCEKIT_VOICE_ERROR_MAPPING_ONLY
 // VoiceController implementation: hotkeys, screenshot input, recording, recognition, model processing and output.
 class VoiceController::Impl : public QObject
 {
@@ -98,7 +177,8 @@ public:
             m_bar,
             this
         );
-        VoiceRecordingWorkflowAccess recordingAccess;
+        VoiceRecordingWorkflowAccess recordingAccess =
+            voiceControllerRecordingAccess(hostWidget());
         recordingAccess.elapsedMs = [this]() {
             return currentActionElapsedMs();
         };
@@ -110,16 +190,6 @@ public:
         };
         recordingAccess.showFailure = [this](const QString &message) {
             showError(message);
-        };
-        recordingAccess.showWindowsSpeechFailure = [this](
-            const QString &errorCode,
-            const QString &message
-        ) {
-            showWindowsSpeechFailureAttention(
-                hostWidget(),
-                errorCode,
-                message
-            );
         };
         recordingAccess.saveFailureHistory = [this](
             const QString &modeId,
@@ -1106,3 +1176,4 @@ void VoiceController::handleHotkey(const QString &id)
 {
     d->handleHotkey(id);
 }
+#endif

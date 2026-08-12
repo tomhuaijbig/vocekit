@@ -2,7 +2,7 @@ QT += core testlib widgets multimedia concurrent
 
 CONFIG += c++11 console testcase
 CONFIG -= app_bundle
-DEFINES += VOCEKIT_TESTING
+DEFINES += VOCEKIT_TESTING VOCEKIT_VOICE_ERROR_MAPPING_ONLY
 
 TEMPLATE = app
 TARGET = voice_recording_workflow_controller_tests
@@ -12,6 +12,7 @@ SOURCES += \
     ../../src/config/app_settings_defaults.cpp \
     ../../src/providers/windows_speech_helper_protocol.cpp \
     ../../src/controllers/voice_recording_workflow_controller.cpp \
+    ../../src/controllers/voice_controller.cpp \
     ../../src/domain/voice_run_session.cpp \
     ../../src/recording/segmented_recording.cpp \
     ../../src/recording/voice_long_recording_session.cpp \

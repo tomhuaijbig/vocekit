@@ -1,8 +1,6 @@
 #include "attention_message.h"
 
 #include <QtWidgets>
-#include <QDesktopServices>
-#include <QUrl>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -300,55 +298,6 @@ void showAttentionWarningWithAction(
         actionText,
         action
     );
-}
-
-void showWindowsSpeechFailureAttention(
-    QWidget *parent,
-    const QString &errorCode,
-    const QString &message,
-    const AttentionOpenUrlCallback &openUrl
-)
-{
-    const QString text = message.trimmed().isEmpty()
-        ? QString::fromUtf8("Windows 本地语音识别不可用。")
-        : message;
-    const QString title = QString::fromUtf8(
-        "Windows 本地语音识别不可用"
-    );
-    if (errorCode == QStringLiteral("speech.windows.program_missing")) {
-        showAttentionWarning(
-            parent,
-            title,
-            text + QString::fromUtf8(
-                "\n\n请重新安装软件，或完整解压发布包后再试。"
-            )
-        );
-        return;
-    }
-    if (errorCode == QStringLiteral("speech.windows.recognizer_missing")
-        || errorCode == QStringLiteral("speech.windows.runtime_missing")
-        || errorCode == QStringLiteral(
-            "speech.windows.grammar_load_failed"
-        )) {
-        showAttentionWarningWithAction(
-            parent,
-            title,
-            text,
-            QString::fromUtf8("打开 Windows 语言设置"),
-            [openUrl]() {
-                const QUrl url(QStringLiteral(
-                    "ms-settings:regionlanguage"
-                ));
-                if (openUrl) {
-                    openUrl(url);
-                } else {
-                    QDesktopServices::openUrl(url);
-                }
-            }
-        );
-        return;
-    }
-    showAttentionWarning(parent, title, text);
 }
 
 #ifdef VOCEKIT_TESTING

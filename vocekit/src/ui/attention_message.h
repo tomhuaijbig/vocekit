@@ -6,11 +6,9 @@
 #include <QString>
 
 class QWidget;
-class QUrl;
 
 using AttentionFaqCallback = std::function<void(const QString &)>;
 using AttentionActionCallback = std::function<void()>;
-using AttentionOpenUrlCallback = std::function<bool(const QUrl &)>;
 #ifdef VOCEKIT_TESTING
 using AttentionActionDialogCallback = std::function<bool(
     QWidget *,
@@ -30,12 +28,6 @@ void showAttentionWarningWithAction(
     const QString &text,
     const QString &actionText,
     const AttentionActionCallback &action
-);
-void showWindowsSpeechFailureAttention(
-    QWidget *parent,
-    const QString &errorCode,
-    const QString &message,
-    const AttentionOpenUrlCallback &openUrl = AttentionOpenUrlCallback()
 );
 #ifdef VOCEKIT_TESTING
 void setAttentionActionDialogCallbackForTests(

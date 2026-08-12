@@ -132,7 +132,7 @@ function Invoke-CapturedCommand {
                 continue
             }
 
-            if ($target -eq "fake_ocr_helper") {
+            if ($target -in @("fake_ocr_helper", "fake_windows_speech_helper")) {
                 ++$standalonePrograms
                 continue
             }

@@ -120,6 +120,10 @@ SOURCES += \
     src/providers/xfyun_speech_provider.cpp \
     src/providers/xfyun_speech_protocol.cpp \
     src/providers/xfyun_streaming_speech_session.cpp \
+    src/providers/windows_speech_helper_client.cpp \
+    src/providers/windows_speech_helper_protocol.cpp \
+    src/providers/windows_speech_provider.cpp \
+    src/providers/windows_streaming_speech_session.cpp \
     src/recording/segmented_recording.cpp \
     src/recording/voice_audio_recorder_adapter.cpp \
     src/recording/voice_long_recording_session.cpp \
@@ -210,6 +214,7 @@ SOURCES += \
     src/ui/history_page_access_factory.cpp \
     src/ui/history_page_controller.cpp \
     src/ui/api_settings_section.cpp \
+    src/ui/windows_speech_settings_card.cpp \
     src/ui/custom_model_dialog_support.cpp \
     src/ui/history_settings_section.cpp \
     src/ui/shortcut_settings_section.cpp \
@@ -391,6 +396,10 @@ HEADERS += \
     src/providers/xfyun_speech_protocol.h \
     src/providers/xfyun_speech_provider.h \
     src/providers/xfyun_streaming_speech_session.h \
+    src/providers/windows_speech_helper_client.h \
+    src/providers/windows_speech_helper_protocol.h \
+    src/providers/windows_speech_provider.h \
+    src/providers/windows_streaming_speech_session.h \
     src/recording/segmented_recording.h \
     src/recording/voice_audio_recorder_adapter.h \
     src/recording/voice_long_recording_session.h \
@@ -484,6 +493,7 @@ HEADERS += \
     src/ui/history_page_access_factory.h \
     src/ui/history_page_controller.h \
     src/ui/api_settings_section.h \
+    src/ui/windows_speech_settings_card.h \
     src/ui/custom_model_dialog_support.h \
     src/ui/history_settings_section.h \
     src/ui/shortcut_settings_section.h \

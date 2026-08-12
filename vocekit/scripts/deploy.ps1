@@ -26,6 +26,7 @@ $windowsOcrHelperSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers",
 $rapidOcrHelperSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "bin", "vocekit-rapidocr.exe")
 $rapidOcrModelsSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "bin", "models")
 $rapidOcrLicenseSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "bin", "LICENSE-RapidOcrOnnx.txt")
+$windowsSpeechHelperSourcePath = [System.IO.Path]::Combine($projectRoot, "helpers", "bin", "vocekit-windows-speech.exe")
 
 if (-not (Test-Path -LiteralPath $executable)) {
     throw "Executable not found: $executable. Build the $Configuration version first."
@@ -93,6 +94,14 @@ New-Item -ItemType Directory -Path $rapidOcrModelsTargetDir -Force | Out-Null
 Copy-Item -LiteralPath $rapidOcrHelperSourcePath -Destination (Join-Path $rapidOcrTargetDir "vocekit-rapidocr.exe") -Force
 Copy-Item -Path (Join-Path $rapidOcrModelsSourcePath "*") -Destination $rapidOcrModelsTargetDir -Force
 Copy-Item -LiteralPath $rapidOcrLicenseSourcePath -Destination (Join-Path $rapidOcrTargetDir "LICENSE-RapidOcrOnnx.txt") -Force
+
+$windowsSpeechTargetDir = Join-Path $executableDir "speech\windows"
+if (-not (Test-Path -LiteralPath $windowsSpeechHelperSourcePath -PathType Leaf)) {
+    throw "Windows speech helper not found: $windowsSpeechHelperSourcePath. Run scripts\build-runtime-helpers.ps1 first."
+}
+New-Item -ItemType Directory -Path $windowsSpeechTargetDir -Force | Out-Null
+Copy-Item -LiteralPath $windowsSpeechHelperSourcePath `
+    -Destination (Join-Path $windowsSpeechTargetDir "vocekit-windows-speech.exe") -Force
 
 $runtimeVerifier = Join-Path $PSScriptRoot "verify-runtime.ps1"
 if (-not (Test-Path -LiteralPath $runtimeVerifier)) {

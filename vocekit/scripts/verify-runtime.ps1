@@ -65,6 +65,7 @@ $requiredFiles = @(
     "mediaservice\dsengine.dll",
     "mediaservice\qtmedia_audioengine.dll",
     "translations\qt_zh_CN.qm",
+    "speech\windows\vocekit-windows-speech.exe",
     "ocr\windows\vocekit-windows-ocr.exe",
     "ocr\rapidocr\vocekit-rapidocr.exe",
     "ocr\rapidocr\LICENSE-RapidOcrOnnx.txt",
@@ -92,7 +93,8 @@ if ($missingFiles.Count -gt 0) {
     throw "Runtime verification failed. Missing files:$([Environment]::NewLine)$details"
 }
 
-# Check the architecture of DLLs loaded directly by the Qt application.
+# Check only DLLs loaded directly by the Qt application. The Windows speech
+# helper is an x64 child process and may intentionally differ from the x86 Qt app.
 # This catches accidental deployment of a 64-bit OpenSSL runtime beside an x86 build.
 $mainExecutable = Join-Path $RuntimeDir "vocekit.exe"
 $expectedMachine = Get-PeMachine -Path $mainExecutable
@@ -124,6 +126,12 @@ foreach ($relativePath in $loadedDlls) {
 if ($wrongArchitecture.Count -gt 0) {
     $details = ($wrongArchitecture | ForEach-Object { "  - $_" }) -join [Environment]::NewLine
     throw "Runtime verification failed. Architecture mismatch:$([Environment]::NewLine)$details"
+}
+
+$speechHelper = Join-Path $RuntimeDir "speech\windows\vocekit-windows-speech.exe"
+$selfTestOutput = & $speechHelper --self-test --run-id runtime-verify 2>&1
+if ($LASTEXITCODE -ne 0 -or ($selfTestOutput -join "`n") -notmatch '"type":"self-test"') {
+    throw "Windows speech helper self-test failed.`n$($selfTestOutput -join "`n")"
 }
 
 $architecture = switch ($expectedMachine) {

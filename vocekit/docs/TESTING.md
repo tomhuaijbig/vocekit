@@ -71,6 +71,23 @@ Windows 可能因为程序暂未签名而显示安全提醒。请确认压缩包
 
 ## 自动测试
 
+Windows 本地语音识别由独立的 x64 子进程提供；Qt 主程序仍可使用 x86 构建。两者通过标准输入输出通信，因此不要要求 helper 的 PE 架构与 Qt 可执行文件相同。
+
+构建并部署完整 Release 运行时：
+
+```powershell
+.\scripts\build-runtime-helpers.ps1
+& 'D:\QQQQQT0001\5.9\mingw53_32\bin\qmake.exe' vocekit.pro -spec win32-g++ 'CONFIG+=release'
+& 'D:\QQQQQT0001\Tools\mingw530_32\bin\mingw32-make.exe' -j2
+.\scripts\deploy.ps1 -Configuration release `
+  -QtBin 'D:\QQQQQT0001\5.9\mingw53_32\bin' `
+  -MingwBin 'D:\QQQQQT0001\Tools\mingw530_32\bin' `
+  -OpenSslBin 'D:\QQQQQT0001\Tools\mingw530_32\opt\bin'
+.\scripts\package-test.ps1 -PackageName vocekit-windows-speech-test
+```
+
+部署和打包验证会运行 `speech\windows\vocekit-windows-speech.exe --self-test`，该检查不依赖安装中文或英文语音包。语言包可用性请在设置页自检或使用 `--probe` 单独验证。
+
 运行全部测试工程：
 
 ```powershell

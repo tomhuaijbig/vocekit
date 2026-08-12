@@ -45,6 +45,10 @@ if (-not (Test-Path -LiteralPath $rapidOcrHelper)) {
 if (-not (Test-Path -LiteralPath $rapidOcrModels)) {
     throw "RapidOCR models are missing from release. Run scripts\deploy.ps1 after building OCR helpers."
 }
+$windowsSpeechHelper = Join-Path $releaseDir "speech\windows\vocekit-windows-speech.exe"
+if (-not (Test-Path -LiteralPath $windowsSpeechHelper -PathType Leaf)) {
+    throw "Windows speech helper is missing from release. Run scripts\build-runtime-helpers.ps1, then scripts\deploy.ps1."
+}
 
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 Assert-ChildPath -BasePath $distDir -TargetPath $packageDir
@@ -60,7 +64,7 @@ if (Test-Path -LiteralPath $zipPath) {
 New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
 
 $releaseFull = [System.IO.Path]::GetFullPath($releaseDir).TrimEnd("\")
-$excludedExtensions = @(".o", ".obj", ".cpp", ".h", ".pro", ".log", ".tmp", ".pdb", ".ilk")
+$excludedExtensions = @(".o", ".obj", ".cpp", ".h", ".cs", ".csproj", ".pro", ".log", ".tmp", ".pdb", ".ilk", ".pcm", ".wav")
 $runtimeFiles = Get-ChildItem -LiteralPath $releaseDir -Recurse -File | Where-Object {
     $excludedExtensions -notcontains $_.Extension.ToLowerInvariant()
 }
@@ -115,6 +119,15 @@ foreach ($modelName in $requiredRapidModels) {
     }
 }
 
+$packagedSpeechHelper = Join-Path $packageDir "speech\windows\vocekit-windows-speech.exe"
+if (-not (Test-Path -LiteralPath $packagedSpeechHelper -PathType Leaf)) {
+    throw "The generated package is missing the Windows speech helper."
+}
+$speechSelfTestOutput = & $packagedSpeechHelper --self-test --run-id package-verify 2>&1
+if ($LASTEXITCODE -ne 0 -or ($speechSelfTestOutput -join "`n") -notmatch '"type":"self-test"') {
+    throw "Packaged Windows speech helper self-test failed.`n$($speechSelfTestOutput -join "`n")"
+}
+
 $secretConfig = Get-Content -LiteralPath (Join-Path $configDir "secrets.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $nonBlankSecrets = @($secretConfig.PSObject.Properties | Where-Object {
     -not [string]::IsNullOrWhiteSpace([string]$_.Value)
@@ -124,7 +137,7 @@ if ($nonBlankSecrets.Count -ne 0) {
 }
 
 $forbiddenFiles = @(Get-ChildItem -LiteralPath $packageDir -Recurse -File | Where-Object {
-    $_.Extension.ToLowerInvariant() -in @(".o", ".obj", ".cpp", ".h", ".pro", ".log", ".tmp", ".wav") -or
+    $_.Extension.ToLowerInvariant() -in @(".o", ".obj", ".cpp", ".h", ".cs", ".csproj", ".pro", ".log", ".tmp", ".pdb", ".ilk", ".pcm", ".wav") -or
     $_.Name -eq "1.txt" -or
     $_.Name -eq "secrets.example.json" -or
     $_.Name -eq "settings.example.json"

@@ -8,6 +8,7 @@ struct DiagnosticsSettingsSnapshot
 {
     bool useSystemProxy = false;
     QString ocrEngine = QStringLiteral("automatic");
+    QString windowsSpeechLanguage = QStringLiteral("follow-windows");
     int ocrTimeoutMs = 45000;
     bool floatingBarEnabled = true;
     int dictateFloatingBarSeconds = 2;

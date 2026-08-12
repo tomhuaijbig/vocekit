@@ -7,6 +7,14 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
+typedef std::function<QStringList(
+    const QString &,
+    const QString &,
+    const CancellationToken &
+)> WindowsSpeechSelfCheckProbe;
+
 struct InterfaceSelfCheckRequest
 {
     bool useSystemProxy = false;
@@ -14,6 +22,9 @@ struct InterfaceSelfCheckRequest
     QString ocrEngine;
     int ocrTimeoutMs = 45000;
     QString applicationBasePath;
+    QString applicationDirPath;
+    QString windowsSpeechLanguage;
+    WindowsSpeechSelfCheckProbe windowsSpeechProbe;
     SecretConfig secrets;
     CancellationToken cancellation;
 };

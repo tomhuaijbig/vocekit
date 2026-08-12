@@ -150,6 +150,8 @@ public:
     void resetRecordDirectory();
     QString speechProvider() const;
     void setSpeechProvider(const QString &provider);
+    QString windowsSpeechLanguage() const;
+    void setWindowsSpeechLanguage(const QString &language);
     QString ocrEngine() const;
     void setOcrEngine(const QString &engine);
 

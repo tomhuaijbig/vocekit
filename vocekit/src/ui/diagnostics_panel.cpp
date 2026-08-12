@@ -9,6 +9,7 @@
 #include "ui_style.h"
 
 #include <QtWidgets>
+#include <QCoreApplication>
 
 static QString tr8(const char *text)
 {
@@ -128,8 +129,12 @@ void DiagnosticsPanel::addDefaultCards(const DiagnosticsPanelDefaultCards &cards
     m_interfaceSelfCheckCard = new InterfaceSelfCheckCard(
         [settingsProvider]() { return settingsProvider().useSystemProxy; },
         [settingsProvider]() { return settingsProvider().ocrEngine; },
+        [settingsProvider]() {
+            return settingsProvider().windowsSpeechLanguage;
+        },
         [settingsProvider]() { return settingsProvider().ocrTimeoutMs; },
         appBasePathProvider,
+        []() { return QCoreApplication::applicationDirPath(); },
         secretsProvider
     );
     addTestCard(m_interfaceSelfCheckCard);

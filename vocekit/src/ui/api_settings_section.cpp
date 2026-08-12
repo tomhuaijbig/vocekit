@@ -5,10 +5,13 @@
 #include "custom_model_dialog_support.h"
 #include "history_row_frame.h"
 #include "ui_style.h"
+#include "windows_speech_settings_card.h"
 
 #include "../config/app_settings_defaults.h"
 #include "../config/baidu_sample_parser.h"
 #include "../providers/openai_compatible_model_provider.h"
+#include "../providers/windows_speech_helper_client.h"
+#include "../providers/windows_speech_helper_protocol.h"
 
 #include <QtConcurrent>
 #include <QtWidgets>
@@ -38,6 +41,11 @@ void ApiSettingsSection::refreshFromSettings()
 {
     const ApiSettingsSnapshot current = snapshot();
     setComboCurrentData(m_speechProviderBox, current.speechProvider);
+    if (m_windowsSpeechSettingsCard) {
+        m_windowsSpeechSettingsCard->setLanguage(
+            current.windowsSpeechLanguage
+        );
+    }
     updateSpeechSecretRows();
     setComboCurrentData(m_ocrProviderBox, current.ocrEngine);
     updateOcrSecretRows();
@@ -236,6 +244,40 @@ void ApiSettingsSection::buildUi()
 
         QVector<QWidget *> voiceRows;
         voiceRows.append(speechProviderRow());
+        WindowsSpeechSettingsCardCallbacks windowsCallbacks;
+        windowsCallbacks.probe = [](
+            const QString &language,
+            const CancellationToken &cancellation
+        ) {
+            WindowsSpeechHelperClient client(
+                windowsSpeechHelperPathForApplicationDir(
+                    QCoreApplication::applicationDirPath()
+                )
+            );
+            WindowsSpeechProbeRequest request;
+            request.runId = QUuid::createUuid().toString();
+            request.language = normalizeWindowsSpeechLanguage(language);
+            request.cancellation = cancellation;
+            const WindowsSpeechHelperResult result = client.probe(request);
+            if (!result.ok) {
+                return QStringList()
+                    << result.errorCode
+                    << QStringLiteral("requestedLanguage=") + request.language
+                    << result.errorMessage;
+            }
+            return QStringList()
+                << QStringLiteral("OK")
+                << QStringLiteral("resolvedLanguage=") + result.resolvedLanguage
+                << QStringLiteral("installedLanguages=")
+                    + result.installedLanguages.join(QStringLiteral(","));
+        };
+        m_windowsSpeechSettingsCard = new WindowsSpeechSettingsCard(
+            windowsCallbacks
+        );
+        m_windowsSpeechSettingsCard->setLanguage(
+            snapshot().windowsSpeechLanguage
+        );
+        voiceRows.append(m_windowsSpeechSettingsCard);
         m_baiduSampleCodeImportRow = baiduSampleCodeImportRow();
         m_baiduApiKeyRow = secretInputRow(apiTr8("百度接口密钥（API Key）"), apiTr8("语音转文字时使用"), m_baiduApiKeyEdit);
         m_baiduSecretKeyRow = secretInputRow(apiTr8("百度安全密钥（Secret Key）"), apiTr8("用于获取语音识别访问令牌"), m_baiduSecretKeyEdit);
@@ -394,9 +436,12 @@ QWidget *ApiSettingsSection::speechProviderRow()
         labels->addWidget(name);
 
         m_speechProviderBox = new QComboBox;
-        m_speechProviderBox->addItem(apiTr8("百度语音识别"), speechProviderBaidu());
-        m_speechProviderBox->addItem(apiTr8("讯飞语音听写"), speechProviderXfyun());
-        m_speechProviderBox->addItem(apiTr8("自定义语音接口"), speechProviderCustom());
+        for (const QString &provider : supportedSpeechProviderIds()) {
+            m_speechProviderBox->addItem(
+                speechProviderTitle(provider),
+                provider
+            );
+        }
         const int index = m_speechProviderBox->findData(snapshot().speechProvider);
         m_speechProviderBox->setCurrentIndex(index >= 0 ? index : 0);
         m_speechProviderBox->setMinimumWidth(240);
@@ -527,6 +572,12 @@ void ApiSettingsSection::updateSpeechSecretRows()
         const bool showBaidu = provider == speechProviderBaidu();
         const bool showXfyun = provider == speechProviderXfyun();
         const bool showCustom = provider == speechProviderCustom();
+        const bool showWindows = provider == speechProviderWindowsLocal();
+
+        if (m_windowsSpeechSettingsCard) {
+            m_windowsSpeechSettingsCard->setVisible(showWindows);
+            m_windowsSpeechSettingsCard->setEnabled(showWindows);
+        }
 
         const QVector<QWidget *> baiduRows = QVector<QWidget *>()
             << m_baiduSampleCodeImportRow
@@ -1075,8 +1126,17 @@ bool ApiSettingsSection::saveSecretsFromUi(bool showConfirmation)
         const QString ocrEngine = m_ocrProviderBox
             ? m_ocrProviderBox->currentData().toString()
             : snapshot().ocrEngine;
+        const QString windowsSpeechLanguage = m_windowsSpeechSettingsCard
+            ? m_windowsSpeechSettingsCard->language()
+            : normalizeWindowsSpeechLanguage(
+                snapshot().windowsSpeechLanguage
+            );
         if (m_callbacks.saveRuntimeSettings
-            && !m_callbacks.saveRuntimeSettings(speechProvider, ocrEngine)) {
+            && !m_callbacks.saveRuntimeSettings(
+                speechProvider,
+                ocrEngine,
+                windowsSpeechLanguage
+            )) {
             showAttentionWarning(this, apiTr8("保存失败"), apiTr8("接口密钥已保存，但无法写入语音识别服务选择。"));
             return false;
         }

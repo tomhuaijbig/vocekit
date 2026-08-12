@@ -21,7 +21,22 @@ private slots:
     void preservesAndNormalizesCustomFloatingBarStyleOverride();
     void nextCustomFunctionIdDoesNotReuseOrphanOrOrderedIds();
     void staleReplaceReloadsLatestStateWithoutReplayingEdits();
+    void normalizesWindowsSpeechLanguage();
 };
+
+void HubSettingsStateTests::normalizesWindowsSpeechLanguage()
+{
+    AppSettingsData source;
+    source.windowsSpeechLanguage = QStringLiteral(" EN-us ");
+    HubWindowAccess access;
+    access.settingsSnapshotProvider = [source]() { return source; };
+    HubSettingsState state(access);
+    QCOMPARE(state.windowsSpeechLanguage(), QStringLiteral("en-US"));
+    state.setWindowsSpeechLanguage(QStringLiteral(" ZH-cn "));
+    QCOMPARE(state.windowsSpeechLanguage(), QStringLiteral("zh-CN"));
+    state.setWindowsSpeechLanguage(QStringLiteral("legacy-value"));
+    QCOMPARE(state.windowsSpeechLanguage(), QStringLiteral("follow-windows"));
+}
 
 void HubSettingsStateTests::
 reloadFunctionFlowStateSynchronizesOnlyModeAndFlow()

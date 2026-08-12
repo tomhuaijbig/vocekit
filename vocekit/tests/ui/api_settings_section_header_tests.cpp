@@ -61,6 +61,7 @@ private slots:
     void wiresDeleteButtonSizing();
     void wiresCancelButtonSizing();
     void wiresSaveButtonSizing();
+    void carriesAndPersistsWindowsSpeechLanguage();
 };
 
 void ApiSettingsSectionHeaderTests::constructsFromCallbacksOnly()
@@ -194,6 +195,29 @@ void ApiSettingsSectionHeaderTests::wiresSaveButtonSizing()
         QStringLiteral("buttons->addWidget(cancel);"),
         QStringLiteral("applyCustomModelDialogButtonSizing(save);")
     ));
+}
+
+void ApiSettingsSectionHeaderTests::carriesAndPersistsWindowsSpeechLanguage()
+{
+    ApiSettingsSnapshot snapshot;
+    snapshot.windowsSpeechLanguage = QStringLiteral("zh-CN");
+    QCOMPARE(snapshot.windowsSpeechLanguage, QStringLiteral("zh-CN"));
+
+    const QString header = withoutWhitespace(
+        sourceText("../../src/ui/api_settings_section.h")
+    );
+    const QString source = withoutWhitespace(
+        sourceText("../../src/ui/api_settings_section.cpp")
+    );
+    QVERIFY(header.contains(QStringLiteral("QStringwindowsSpeechLanguage;")));
+    QVERIFY(header.contains(QStringLiteral(
+        "std::function<bool(constQString&,constQString&,constQString&)>saveRuntimeSettings;"
+    )));
+    QVERIFY(source.contains(QStringLiteral("supportedSpeechProviderIds()")));
+    QVERIFY(source.contains(QStringLiteral("speechProviderWindowsLocal()")));
+    QVERIFY(source.contains(QStringLiteral(
+        "saveRuntimeSettings(speechProvider,ocrEngine,windowsSpeechLanguage)"
+    )));
 }
 
 QTEST_MAIN(ApiSettingsSectionHeaderTests)

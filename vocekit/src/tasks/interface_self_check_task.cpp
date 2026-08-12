@@ -5,6 +5,8 @@
 #include "../ocr/ocr_helper_process.h"
 #include "../ocr/ocr_manager.h"
 #include "../providers/built_in_provider_factory.h"
+#include "../providers/windows_speech_helper_client.h"
+#include "../providers/windows_speech_helper_protocol.h"
 #include "diagnostic_helpers.h"
 
 #include <QDir>
@@ -208,6 +210,64 @@ void appendOcrSelfCheck(QStringList *lines, const InterfaceSelfCheckRequest &tas
     ));
 }
 
+QStringList defaultWindowsSpeechProbe(
+    const QString &programPath,
+    const QString &language,
+    const CancellationToken &cancellation
+)
+{
+    WindowsSpeechHelperClient client(programPath);
+    WindowsSpeechProbeRequest probe;
+    probe.runId = QUuid::createUuid().toString();
+    probe.language = normalizeWindowsSpeechLanguage(language);
+    probe.cancellation = cancellation;
+    const WindowsSpeechHelperResult result = client.probe(probe);
+    if (!result.ok) {
+        return QStringList()
+            << result.errorCode
+            << QStringLiteral("requestedLanguage=") + probe.language
+            << result.errorMessage;
+    }
+    return QStringList()
+        << QStringLiteral("OK")
+        << QStringLiteral("resolvedLanguage=") + result.resolvedLanguage
+        << QStringLiteral("installedLanguages=")
+            + result.installedLanguages.join(QStringLiteral(","));
+}
+
+void appendWindowsSpeechSelfCheck(
+    QStringList *lines,
+    const InterfaceSelfCheckRequest &request
+)
+{
+    if (!lines || request.cancellation.isCancellationRequested()) {
+        return;
+    }
+    const QString language = normalizeWindowsSpeechLanguage(
+        request.windowsSpeechLanguage
+    );
+    const QString programPath = windowsSpeechHelperPathForApplicationDir(
+        request.applicationDirPath
+    );
+    const WindowsSpeechSelfCheckProbe probe = request.windowsSpeechProbe
+        ? request.windowsSpeechProbe
+        : WindowsSpeechSelfCheckProbe(defaultWindowsSpeechProbe);
+    const QStringList probeLines = probe(
+        programPath,
+        language,
+        request.cancellation
+    );
+    if (request.cancellation.isCancellationRequested()) {
+        return;
+    }
+    const bool ok = probeLines.contains(QStringLiteral("OK"));
+    lines->append(diagnosticStatusLine(
+        QStringLiteral("Windows ") + isTr8("本地语音识别"),
+        ok ? isTr8("通过") : isTr8("失败"),
+        probeLines.join(QStringLiteral("；"))
+    ));
+}
+
 } // namespace
 
 QStringList runInterfaceSelfCheckTask(const InterfaceSelfCheckRequest &request)
@@ -220,6 +280,13 @@ QStringList runInterfaceSelfCheckTask(const InterfaceSelfCheckRequest &request)
     ProviderRegistry registry;
     registerBuiltInProviders(&registry, request.useSystemProxy);
     const bool all = request.target.isEmpty() || request.target == QStringLiteral("all");
+
+    if (all || request.target == QStringLiteral("windows_speech")) {
+        appendWindowsSpeechSelfCheck(&lines, request);
+        if (request.cancellation.isCancellationRequested()) {
+            return QStringList();
+        }
+    }
 
     if (all || request.target == QStringLiteral("baidu")) {
         if (request.secrets.hasBaidu()) {

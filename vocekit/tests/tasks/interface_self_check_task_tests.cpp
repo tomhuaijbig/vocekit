@@ -3,6 +3,7 @@
 #include "../../src/tasks/diagnostic_task_runner.h"
 #include "../../src/tasks/interface_self_check_task.h"
 #include "../../src/tasks/network_diagnostics_task.h"
+#include "../../src/ui/diagnostics_settings_snapshot.h"
 
 #include <atomic>
 #include <chrono>
@@ -59,6 +60,76 @@ private slots:
         request.cancellation = cancellation.token();
 
         QVERIFY(runInterfaceSelfCheckTask(request).isEmpty());
+    }
+
+    void probesWindowsSpeechWithoutSecretsOrNetwork()
+    {
+        InterfaceSelfCheckRequest request;
+        request.target = QStringLiteral("windows_speech");
+        request.windowsSpeechLanguage = QStringLiteral(" EN-us ");
+        request.applicationDirPath = QStringLiteral("C:/deployed");
+        int calls = 0;
+        request.windowsSpeechProbe = [&calls](
+            const QString &programPath,
+            const QString &language,
+            const CancellationToken &
+        ) -> QStringList {
+            ++calls;
+            if (programPath != QStringLiteral(
+                "C:/deployed/speech/windows/vocekit-windows-speech.exe"
+            )) {
+                return QStringList() << QStringLiteral("WRONG_PATH");
+            }
+            if (language != QStringLiteral("en-US")) {
+                return QStringList() << QStringLiteral("WRONG_LANGUAGE");
+            }
+            return QStringList()
+                << QStringLiteral("OK")
+                << QStringLiteral("resolvedLanguage=en-US")
+                << QStringLiteral("installedLanguages=zh-CN,en-US");
+        };
+
+        const QStringList lines = runInterfaceSelfCheckTask(request);
+        QCOMPARE(calls, 1);
+        QCOMPARE(lines.size(), 1);
+        QVERIFY(lines.first().contains(QStringLiteral("Windows")));
+        QVERIFY(lines.first().contains(QStringLiteral("en-US")));
+    }
+
+    void reportsStableMissingWindowsRecognizer()
+    {
+        InterfaceSelfCheckRequest request;
+        request.target = QStringLiteral("windows_speech");
+        request.windowsSpeechLanguage = QStringLiteral("zh-CN");
+        request.windowsSpeechProbe = [](
+            const QString &,
+            const QString &language,
+            const CancellationToken &
+        ) -> QStringList {
+            return QStringList()
+                << QStringLiteral("RECOGNIZER_MISSING")
+                << QStringLiteral("requestedLanguage=") + language;
+        };
+
+        const QStringList lines = runInterfaceSelfCheckTask(request);
+        QCOMPARE(lines.size(), 1);
+        QVERIFY(lines.first().contains(QStringLiteral("RECOGNIZER_MISSING")));
+        QVERIFY(lines.first().contains(QStringLiteral("zh-CN")));
+    }
+
+    void diagnosticsSnapshotNormalizesWindowsSpeechLanguage()
+    {
+        AppSettingsData settings;
+        settings.windowsSpeechLanguage = QStringLiteral(" EN-us ");
+        const DiagnosticsSettingsSnapshot snapshot =
+            buildDiagnosticsSettingsSnapshot(settings);
+        QCOMPARE(snapshot.windowsSpeechLanguage, QStringLiteral("en-US"));
+
+        settings.windowsSpeechLanguage = QStringLiteral("legacy-value");
+        QCOMPARE(
+            buildDiagnosticsSettingsSnapshot(settings).windowsSpeechLanguage,
+            QStringLiteral("follow-windows")
+        );
     }
 
     void cancelsNetworkDiagnosticsBeforeWork()

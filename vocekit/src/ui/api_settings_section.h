@@ -12,11 +12,13 @@
 #include <functional>
 
 class QPushButton;
+class WindowsSpeechSettingsCard;
 
 struct ApiSettingsSnapshot
 {
     QString speechProvider;
     QString ocrEngine;
+    QString windowsSpeechLanguage;
     bool useSystemProxy = false;
 };
 
@@ -27,7 +29,7 @@ public:
     struct Callbacks
     {
         std::function<ApiSettingsSnapshot()> snapshotProvider;
-        std::function<bool(const QString &, const QString &)> saveRuntimeSettings;
+        std::function<bool(const QString &, const QString &, const QString &)> saveRuntimeSettings;
         std::function<void()> onChanged;
         std::function<void(const QString &, const QString &)> showDetail;
     };
@@ -86,6 +88,7 @@ private:
     QLineEdit *m_baiduSecretKeyEdit = nullptr;
     QLineEdit *m_baiduAppIdEdit = nullptr;
     QWidget *m_baiduSampleCodeImportRow = nullptr;
+    WindowsSpeechSettingsCard *m_windowsSpeechSettingsCard = nullptr;
     QLineEdit *m_xfyunAppIdEdit = nullptr;
     QLineEdit *m_xfyunApiKeyEdit = nullptr;
     QLineEdit *m_xfyunApiSecretEdit = nullptr;

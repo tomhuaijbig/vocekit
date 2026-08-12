@@ -923,6 +923,14 @@ void HubSettingsState::setRecordDirectoryPath(const QString &path)
 void HubSettingsState::resetRecordDirectory() { m_data.recordDirectory.clear(); }
 QString HubSettingsState::speechProvider() const { return normalizeSpeechProvider(m_data.speechProvider); }
 void HubSettingsState::setSpeechProvider(const QString &provider) { m_data.speechProvider = normalizeSpeechProvider(provider); }
+QString HubSettingsState::windowsSpeechLanguage() const
+{
+    return normalizeWindowsSpeechLanguage(m_data.windowsSpeechLanguage);
+}
+void HubSettingsState::setWindowsSpeechLanguage(const QString &language)
+{
+    m_data.windowsSpeechLanguage = normalizeWindowsSpeechLanguage(language);
+}
 QString HubSettingsState::ocrEngine() const { return normalizeOcrEngine(m_data.ocrEngine); }
 void HubSettingsState::setOcrEngine(const QString &engine) { m_data.ocrEngine = normalizeOcrEngine(engine); }
 

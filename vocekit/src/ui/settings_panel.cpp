@@ -10,6 +10,7 @@
 
 #include "../capture/screenshot_types.h"
 #include "../config/app_paths.h"
+#include "../config/app_settings_defaults.h"
 #include "../input/hotkey_definitions.h"
 
 #include <QtWidgets>
@@ -517,15 +518,20 @@ QString normalizedRecordDirectorySetting(const QString &path)
             ApiSettingsSnapshot snapshot;
             snapshot.speechProvider = settings.speechProvider;
             snapshot.ocrEngine = settings.ocrEngine;
+            snapshot.windowsSpeechLanguage = settings.windowsSpeechLanguage;
             snapshot.useSystemProxy = settings.useSystemProxy;
             return snapshot;
         };
         callbacks.saveRuntimeSettings = [this](
             const QString &speechProvider,
-            const QString &ocrEngine) {
+            const QString &ocrEngine,
+            const QString &windowsSpeechLanguage) {
             AppSettingsData settings = settingsSnapshot();
             settings.speechProvider = speechProvider;
             settings.ocrEngine = ocrEngine;
+            settings.windowsSpeechLanguage = normalizeWindowsSpeechLanguage(
+                windowsSpeechLanguage
+            );
             return persistSettings(settings);
         };
         callbacks.onChanged = [this]() {

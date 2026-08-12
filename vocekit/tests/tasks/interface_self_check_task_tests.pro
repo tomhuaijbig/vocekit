@@ -27,6 +27,9 @@ SOURCES += \
     ../../src/providers/provider_network_transport.cpp \
     ../../src/providers/provider_websocket_transport.cpp \
     ../../src/providers/provider_registry.cpp \
+    ../../src/providers/windows_speech_helper_client.cpp \
+    ../../src/providers/windows_speech_helper_protocol.cpp \
+    ../../src/providers/windows_speech_provider.cpp \
     ../../src/providers/xfyun_speech_protocol.cpp \
     ../../src/providers/xfyun_speech_provider.cpp \
     ../../src/result_flow_config.cpp \
@@ -35,7 +38,8 @@ SOURCES += \
     ../../src/tasks/diagnostic_task_runner.cpp \
     ../../src/tasks/diagnostic_helpers.cpp \
     ../../src/tasks/interface_self_check_task.cpp \
-    ../../src/tasks/network_diagnostics_task.cpp
+    ../../src/tasks/network_diagnostics_task.cpp \
+    ../../src/ui/diagnostics_settings_snapshot.cpp
 
 HEADERS += \
     ../../src/api/api_client_utils.h \
@@ -64,6 +68,9 @@ HEADERS += \
     ../../src/providers/provider_websocket_transport.h \
     ../../src/providers/provider_types.h \
     ../../src/providers/speech_provider.h \
+    ../../src/providers/windows_speech_helper_client.h \
+    ../../src/providers/windows_speech_helper_protocol.h \
+    ../../src/providers/windows_speech_provider.h \
     ../../src/providers/xfyun_speech_protocol.h \
     ../../src/providers/xfyun_speech_provider.h \
     ../../src/result_flow_config.h \
@@ -72,4 +79,5 @@ HEADERS += \
     ../../src/tasks/diagnostic_task_runner.h \
     ../../src/tasks/diagnostic_helpers.h \
     ../../src/tasks/interface_self_check_task.h \
-    ../../src/tasks/network_diagnostics_task.h
+    ../../src/tasks/network_diagnostics_task.h \
+    ../../src/ui/diagnostics_settings_snapshot.h

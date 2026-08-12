@@ -19,16 +19,20 @@ QString tr8(const char *text)
 InterfaceSelfCheckCard::InterfaceSelfCheckCard(
     const std::function<bool()> &useSystemProxy,
     const std::function<QString()> &ocrEngine,
+    const std::function<QString()> &windowsSpeechLanguage,
     const std::function<int()> &ocrTimeoutMs,
     const std::function<QString()> &applicationBasePath,
+    const std::function<QString()> &applicationDirPath,
     const std::function<SecretConfig()> &secrets,
     QWidget *parent
 )
     : QFrame(parent),
       m_useSystemProxy(useSystemProxy),
       m_ocrEngine(ocrEngine),
+      m_windowsSpeechLanguage(windowsSpeechLanguage),
       m_ocrTimeoutMs(ocrTimeoutMs),
       m_applicationBasePath(applicationBasePath),
+      m_applicationDirPath(applicationDirPath),
       m_secrets(secrets)
 {
     setObjectName(QStringLiteral("card"));
@@ -100,6 +104,10 @@ void InterfaceSelfCheckCard::refreshTargets()
     m_targetBox->addItem(tr8("百度语音识别"), QStringLiteral("baidu"));
     m_targetBox->addItem(tr8("讯飞语音听写"), QStringLiteral("xfyun"));
     m_targetBox->addItem(tr8("自定义语音接口"), QStringLiteral("custom_speech"));
+    m_targetBox->addItem(
+        tr8("Windows 本地语音识别"),
+        QStringLiteral("windows_speech")
+    );
     m_targetBox->addItem(tr8("当前图片识别接口"), QStringLiteral("ocr"));
     m_targetBox->addItem(QStringLiteral("DeepSeek"), QStringLiteral("deepseek"));
     m_targetBox->addItem(QStringLiteral("OpenAI"), QStringLiteral("openai"));
@@ -132,8 +140,14 @@ void InterfaceSelfCheckCard::runCheck()
         ? m_targetBox->currentData().toString()
         : QStringLiteral("all");
     request.ocrEngine = m_ocrEngine ? m_ocrEngine() : QString();
+    request.windowsSpeechLanguage = m_windowsSpeechLanguage
+        ? m_windowsSpeechLanguage()
+        : QString();
     request.ocrTimeoutMs = m_ocrTimeoutMs ? m_ocrTimeoutMs() : 45000;
     request.applicationBasePath = m_applicationBasePath ? m_applicationBasePath() : QString();
+    request.applicationDirPath = m_applicationDirPath
+        ? m_applicationDirPath()
+        : QString();
     request.secrets = m_secrets ? m_secrets() : SecretConfig();
 
     if (!m_runner) {

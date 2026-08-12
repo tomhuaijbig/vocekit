@@ -105,7 +105,11 @@ function Invoke-CapturedCommand {
                 $project.Name,
                 "-spec",
                 "win32-g++",
-                "CONFIG+=$Configuration"
+                "CONFIG+=$Configuration",
+                "OBJECTS_DIR=$Configuration/.codex/$target/obj",
+                "MOC_DIR=$Configuration/.codex/$target/moc",
+                "RCC_DIR=$Configuration/.codex/$target/rcc",
+                "UI_DIR=$Configuration/.codex/$target/ui"
             )
             if ($qmakeResult.ExitCode -ne 0) {
                 $failures.Add(

@@ -39,7 +39,13 @@ ApiSettingsSection::ApiSettingsSection(
 
 void ApiSettingsSection::refreshFromSettings()
 {
-    const ApiSettingsSnapshot current = snapshot();
+    restoreRuntimeSettings(snapshot());
+}
+
+void ApiSettingsSection::restoreRuntimeSettings(
+    const ApiSettingsSnapshot &current
+)
+{
     setComboCurrentData(m_speechProviderBox, current.speechProvider);
     if (m_windowsSpeechSettingsCard) {
         m_windowsSpeechSettingsCard->setLanguage(
@@ -436,6 +442,7 @@ QWidget *ApiSettingsSection::speechProviderRow()
         labels->addWidget(name);
 
         m_speechProviderBox = new QComboBox;
+        m_speechProviderBox->setObjectName(QStringLiteral("speechProviderBox"));
         for (const QString &provider : supportedSpeechProviderIds()) {
             m_speechProviderBox->addItem(
                 speechProviderTitle(provider),
@@ -475,6 +482,7 @@ QWidget *ApiSettingsSection::ocrProviderRow()
         name->setFont(appFont(11, QFont::DemiBold));
 
         m_ocrProviderBox = new QComboBox;
+        m_ocrProviderBox->setObjectName(QStringLiteral("ocrProviderBox"));
         m_ocrProviderBox->addItem(apiTr8("自动选择（本地）"), ocrEngineAutomatic());
         m_ocrProviderBox->addItem(QStringLiteral("RapidOCR"), ocrEngineRapid());
         m_ocrProviderBox->addItem(QStringLiteral("Windows OCR"), ocrEngineWindows());
@@ -1137,6 +1145,7 @@ bool ApiSettingsSection::saveSecretsFromUi(bool showConfirmation)
                 ocrEngine,
                 windowsSpeechLanguage
             )) {
+            restoreRuntimeSettings(snapshot());
             showAttentionWarning(this, apiTr8("保存失败"), apiTr8("接口密钥已保存，但无法写入语音识别服务选择。"));
             return false;
         }

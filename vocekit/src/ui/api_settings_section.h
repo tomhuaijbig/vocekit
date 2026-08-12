@@ -60,6 +60,7 @@ private:
     QWidget *baiduSampleCodeImportRow();
     void updateSpeechSecretRows();
     void updateOcrSecretRows();
+    void restoreRuntimeSettings(const ApiSettingsSnapshot &settings);
     QWidget *secretSection(const QString &title, const QString &hint, const QVector<QWidget *> &rows);
     QWidget *secretInputRow(const QString &title, const QString &hint, QLineEdit *edit);
     QWidget *plainInputRow(const QString &title, const QString &hint, QLineEdit *edit);

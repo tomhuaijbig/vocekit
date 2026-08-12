@@ -5,6 +5,9 @@
 
 #include <QComboBox>
 #include <QDir>
+#include <QFontDatabase>
+#include <QFontInfo>
+#include <QImage>
 #include <QLabel>
 #include <QLayout>
 #include <QPushButton>
@@ -17,6 +20,7 @@ private slots:
     void exposesNormalizedLanguageCatalogAndScalableControls();
     void runsProbeOffTheUiThreadAndPublishesResult();
     void exposesLanguageSettingsForMissingRecognizer();
+    void ignoresMissingRecognizerTextOutsideTheErrorCodeLine();
     void remainsUnclippedAcrossSupportedFontScales_data();
     void remainsUnclippedAcrossSupportedFontScales();
 };
@@ -125,6 +129,32 @@ void WindowsSpeechSettingsCardTests::exposesLanguageSettingsForMissingRecognizer
     QCOMPARE(openCount, 1);
 }
 
+void WindowsSpeechSettingsCardTests::
+ignoresMissingRecognizerTextOutsideTheErrorCodeLine()
+{
+    WindowsSpeechSettingsCardCallbacks callbacks;
+    callbacks.probe = [](
+        const QString &,
+        const CancellationToken &
+    ) {
+        return QStringList()
+            << QStringLiteral("PROGRAM_MISSING")
+            << QStringLiteral("details mention RECOGNIZER_MISSING");
+    };
+    WindowsSpeechSettingsCard card(callbacks);
+    QPushButton *test = card.findChild<QPushButton *>(
+        QStringLiteral("windowsSpeechTestButton")
+    );
+    QPushButton *open = card.findChild<QPushButton *>(
+        QStringLiteral("windowsSpeechOpenSettingsButton")
+    );
+    QVERIFY(test && open);
+
+    QTest::mouseClick(test, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(test->isEnabled(), 2000);
+    QVERIFY(!open->isEnabled());
+}
+
 void WindowsSpeechSettingsCardTests::remainsUnclippedAcrossSupportedFontScales_data()
 {
     QTest::addColumn<int>("percent");
@@ -159,15 +189,60 @@ void WindowsSpeechSettingsCardTests::remainsUnclippedAcrossSupportedFontScales()
         QVERIFY2(label->height() >= label->sizeHint().height(),
                  qPrintable(label->objectName()));
     }
+    QLabel *title = card.findChild<QLabel *>(
+        QStringLiteral("windowsSpeechCardTitle")
+    );
+    QVERIFY(title);
+    const QString chineseSample = QString::fromUtf8("本地语音识别");
+    const QFontInfo fontInfo(title->font());
+    QVERIFY2(!fontInfo.family().trimmed().isEmpty(), "No usable font family");
+    const QFontMetrics metrics(title->font());
+#if defined(Q_OS_WIN)
+    QVERIFY2(metrics.inFont(chineseSample.at(0)), "CJK glyph is unavailable");
+#else
+    if (!metrics.inFont(chineseSample.at(0))) {
+        QSKIP("This host has no CJK font; native Windows visual test is required");
+    }
+#endif
+    QVERIFY2(
+        metrics.width(chineseSample) >= metrics.height() * 2,
+        "CJK text advance is not plausible"
+    );
     const QList<QPushButton *> buttons = card.findChildren<QPushButton *>();
     for (QPushButton *button : buttons) {
         QVERIFY(button->height() >= button->sizeHint().height());
         QVERIFY(button->minimumHeight() != button->maximumHeight());
     }
-    const QString screenshot = QDir::current().filePath(
+    const QString outputDirectory = qEnvironmentVariableIsSet(
+        "VOCEKIT_VISUAL_OUTPUT_DIR"
+    )
+        ? qgetenv("VOCEKIT_VISUAL_OUTPUT_DIR")
+        : QDir::tempPath();
+    QVERIFY(QDir().mkpath(outputDirectory));
+    const QString screenshot = QDir(outputDirectory).filePath(
         QStringLiteral("windows-speech-card-%1.png").arg(percent)
     );
-    QVERIFY2(card.grab().save(screenshot), qPrintable(screenshot));
+    const QPixmap rendered = card.grab();
+    QVERIFY2(rendered.save(screenshot), qPrintable(screenshot));
+    const QImage image = rendered.toImage().convertToFormat(
+        QImage::Format_RGB32
+    );
+    const QRect titleRect(
+        title->mapTo(&card, QPoint(0, 0)),
+        title->size()
+    );
+    int darkTitlePixels = 0;
+    for (int y = titleRect.top(); y <= titleRect.bottom(); ++y) {
+        for (int x = titleRect.left(); x <= titleRect.right(); ++x) {
+            const QColor pixel(image.pixel(x, y));
+            if (pixel.red() < 120 && pixel.green() < 120
+                && pixel.blue() < 120) {
+                ++darkTitlePixels;
+            }
+        }
+    }
+    QVERIFY2(darkTitlePixels >= 20, "Rendered title contains no text pixels");
+    card.hide();
 }
 
 QTEST_MAIN(WindowsSpeechSettingsCardTests)

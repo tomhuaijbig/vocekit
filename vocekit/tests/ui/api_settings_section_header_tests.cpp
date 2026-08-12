@@ -1,8 +1,12 @@
 #include <QtTest>
 
 #include "../../src/ui/api_settings_section.h"
+#include "../../src/ui/attention_message.h"
 
 #include <QFile>
+#include <QComboBox>
+#include <QPushButton>
+#include <QMessageBox>
 #include <type_traits>
 
 namespace {
@@ -62,6 +66,7 @@ private slots:
     void wiresCancelButtonSizing();
     void wiresSaveButtonSizing();
     void carriesAndPersistsWindowsSpeechLanguage();
+    void savesThreeRuntimeValuesAndRollsBackOnFailure();
 };
 
 void ApiSettingsSectionHeaderTests::constructsFromCallbacksOnly()
@@ -218,6 +223,76 @@ void ApiSettingsSectionHeaderTests::carriesAndPersistsWindowsSpeechLanguage()
     QVERIFY(source.contains(QStringLiteral(
         "saveRuntimeSettings(speechProvider,ocrEngine,windowsSpeechLanguage)"
     )));
+}
+
+void ApiSettingsSectionHeaderTests::
+savesThreeRuntimeValuesAndRollsBackOnFailure()
+{
+    ApiSettingsSnapshot persisted;
+    persisted.speechProvider = QStringLiteral("baidu");
+    persisted.ocrEngine = QStringLiteral("automatic");
+    persisted.windowsSpeechLanguage = QStringLiteral("follow-windows");
+    QString savedSpeech;
+    QString savedOcr;
+    QString savedLanguage;
+    int saveCalls = 0;
+
+    ApiSettingsSection::Callbacks callbacks;
+    callbacks.snapshotProvider = [&persisted]() { return persisted; };
+    callbacks.saveRuntimeSettings = [
+        &savedSpeech,
+        &savedOcr,
+        &savedLanguage,
+        &saveCalls
+    ](
+        const QString &speech,
+        const QString &ocr,
+        const QString &language
+    ) {
+        ++saveCalls;
+        savedSpeech = speech;
+        savedOcr = ocr;
+        savedLanguage = language;
+        return false;
+    };
+    ApiSettingsSection section(callbacks);
+    setAttentionMessageBoxClickCallbackForTests([](QWidget *widget) {
+        QMessageBox *box = qobject_cast<QMessageBox *>(widget);
+        if (box) {
+            box->done(QMessageBox::Ok);
+        }
+    });
+    QComboBox *speech = section.findChild<QComboBox *>(
+        QStringLiteral("speechProviderBox")
+    );
+    QComboBox *ocr = section.findChild<QComboBox *>(
+        QStringLiteral("ocrProviderBox")
+    );
+    QComboBox *language = section.findChild<QComboBox *>(
+        QStringLiteral("windowsSpeechLanguageBox")
+    );
+    QVERIFY(speech && ocr && language);
+    speech->setCurrentIndex(speech->findData(QStringLiteral("windows-local")));
+    ocr->setCurrentIndex(ocr->findData(QStringLiteral("windows")));
+    language->setCurrentIndex(language->findData(QStringLiteral("en-US")));
+
+    QVERIFY(!section.saveSecretsFromUi(false));
+    QCOMPARE(saveCalls, 1);
+    QCOMPARE(savedSpeech, QStringLiteral("windows-local"));
+    QCOMPARE(savedOcr, QStringLiteral("windows"));
+    QCOMPARE(savedLanguage, QStringLiteral("en-US"));
+    QCOMPARE(persisted.speechProvider, QStringLiteral("baidu"));
+    QCOMPARE(persisted.ocrEngine, QStringLiteral("automatic"));
+    QCOMPARE(
+        persisted.windowsSpeechLanguage,
+        QStringLiteral("follow-windows")
+    );
+    QCOMPARE(speech->currentData().toString(), persisted.speechProvider);
+    QCOMPARE(ocr->currentData().toString(), persisted.ocrEngine);
+    QCOMPARE(language->currentData().toString(), persisted.windowsSpeechLanguage);
+    setAttentionMessageBoxClickCallbackForTests(
+        std::function<void(QWidget *)>()
+    );
 }
 
 QTEST_MAIN(ApiSettingsSectionHeaderTests)

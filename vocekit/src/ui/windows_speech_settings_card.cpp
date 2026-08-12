@@ -21,12 +21,8 @@ QString wsTr8(const char *text)
 
 bool containsMissingRecognizer(const QStringList &lines)
 {
-    for (const QString &line : lines) {
-        if (line.contains(QStringLiteral("RECOGNIZER_MISSING"))) {
-            return true;
-        }
-    }
-    return false;
+    return lines.value(0).trimmed()
+        == QStringLiteral("RECOGNIZER_MISSING");
 }
 
 } // namespace

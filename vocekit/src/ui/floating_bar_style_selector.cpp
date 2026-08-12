@@ -80,11 +80,47 @@ protected:
         painter.drawRoundedRect(preview, 14, 14);
         painter.setFont(font());
         if (m_style == floatingBarStyleStatusPill()) {
+            const qreal centerY = preview.center().y();
+            QPen iconPen(QColor("#ffffff"), 2.2, Qt::SolidLine,
+                         Qt::RoundCap, Qt::RoundJoin);
+            painter.setPen(iconPen);
+            painter.drawLine(
+                QPointF(preview.left() + 12, centerY - 5),
+                QPointF(preview.left() + 22, centerY + 5)
+            );
+            painter.drawLine(
+                QPointF(preview.left() + 22, centerY - 5),
+                QPointF(preview.left() + 12, centerY + 5)
+            );
+            for (int i = 0; i < 4; ++i) {
+                const qreal height = 5 + (i % 3) * 4;
+                const qreal x = preview.left() + 36 + i * 7;
+                painter.drawLine(
+                    QPointF(x, centerY - height / 2),
+                    QPointF(x, centerY + height / 2)
+                );
+            }
+            QPainterPath check;
+            check.moveTo(preview.right() - 24, centerY);
+            check.lineTo(preview.right() - 19, centerY + 5);
+            check.lineTo(preview.right() - 10, centerY - 6);
+            painter.drawPath(check);
             painter.setPen(QColor("#ffffff"));
+            const QRectF textRect(
+                preview.left() + 70,
+                preview.top(),
+                preview.width() - 108,
+                preview.height()
+            );
+            const QString recording = painter.fontMetrics().width(
+                QString::fromUtf8("正在录音")
+            ) <= textRect.width()
+                ? QString::fromUtf8("正在录音")
+                : QString::fromUtf8("录音中");
             painter.drawText(
-                preview.adjusted(10, 0, -10, 0),
-                Qt::AlignVCenter,
-                QString::fromUtf8("×  ▂▅▃▆  正在录音  ✓")
+                textRect,
+                Qt::AlignCenter,
+                recording
             );
             return;
         }

@@ -4,6 +4,7 @@
 #include "../../src/ui/floating_bar.h"
 
 #include <QLabel>
+#include <QFont>
 #include <QPushButton>
 
 class FloatingBarStreamingTests : public QObject
@@ -143,6 +144,45 @@ private slots:
                 QStringLiteral("streamingCommittedText"))->text(),
             QString()
         );
+    }
+
+    void enlargedFontKeepsRecordingActionsReadable()
+    {
+        FloatingBar bar;
+        QFont large = bar.font();
+        large.setPointSize(qMax(18, large.pointSize() + 8));
+        bar.setFont(large);
+        bar.setStyle(floatingBarStyleLiveTranscriptCard());
+        FloatingBarActions actions;
+        actions.cancel = []() {};
+        actions.confirm = []() {};
+        bar.setActions(actions);
+        bar.setStage(FloatingBarStage::Streaming);
+        bar.setWaveformVisible(true);
+        bar.setStreamingTranscript(
+            QString::fromUtf8("150% 字体下的已确认文字"),
+            QString::fromUtf8("临时文字")
+        );
+        bar.show();
+        QCoreApplication::processEvents();
+
+        QPushButton *cancel = bar.findChild<QPushButton *>(
+            QStringLiteral("floatingCancelButton")
+        );
+        QPushButton *confirm = bar.findChild<QPushButton *>(
+            QStringLiteral("floatingConfirmButton")
+        );
+        QVERIFY(cancel);
+        QVERIFY(confirm);
+        QVERIFY(cancel->text().isEmpty());
+        QVERIFY(confirm->text().isEmpty());
+        QVERIFY(!cancel->icon().isNull());
+        QVERIFY(!confirm->icon().isNull());
+        QVERIFY(cancel->height() >= cancel->fontMetrics().height() + 12);
+        QVERIFY(confirm->height() >= confirm->fontMetrics().height() + 12);
+        QVERIFY(cancel->geometry().right()
+                < confirm->geometry().left());
+        QVERIFY(bar.height() <= 260);
     }
 };
 

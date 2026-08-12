@@ -5,6 +5,8 @@
 
 #include <QFontMetrics>
 #include <QHBoxLayout>
+#include <QIcon>
+#include <QImage>
 #include <QLabel>
 #include <QPainter>
 #include <QPushButton>
@@ -45,6 +47,27 @@ bool showsRecordingActions(FloatingBarStage stage)
     return stage == FloatingBarStage::Preparing
         || stage == FloatingBarStage::Recording
         || stage == FloatingBarStage::Streaming;
+}
+
+QIcon actionIcon(bool confirm)
+{
+    QImage image(40, 40, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen pen(Qt::white, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    painter.setPen(pen);
+    if (confirm) {
+        QPainterPath path;
+        path.moveTo(9, 21);
+        path.lineTo(17, 29);
+        path.lineTo(32, 12);
+        painter.drawPath(path);
+    } else {
+        painter.drawLine(QPointF(11, 11), QPointF(29, 29));
+        painter.drawLine(QPointF(29, 11), QPointF(11, 29));
+    }
+    return QIcon(QPixmap::fromImage(image));
 }
 
 class CompactWaveform : public QWidget
@@ -116,17 +139,27 @@ public:
         QHBoxLayout *row = new QHBoxLayout;
         row->setContentsMargins(0, 0, 0, 0);
         row->setSpacing(8);
-        m_cancel = new QPushButton(QString::fromUtf8("×"), this);
+        m_cancel = new QPushButton(this);
         m_cancel->setObjectName(QStringLiteral("floatingCancelButton"));
         m_cancel->setCursor(Qt::PointingHandCursor);
+        m_cancel->setIcon(actionIcon(false));
         m_waveform = new CompactWaveform(this);
         m_title = new QLabel(this);
         m_title->setObjectName(QStringLiteral("floatingBarTitle"));
         m_title->setFont(appFont(10, QFont::DemiBold));
         m_title->setAlignment(Qt::AlignCenter);
-        m_confirm = new QPushButton(QString::fromUtf8("✓"), this);
+        m_confirm = new QPushButton(this);
         m_confirm->setObjectName(QStringLiteral("floatingConfirmButton"));
         m_confirm->setCursor(Qt::PointingHandCursor);
+        m_confirm->setIcon(actionIcon(true));
+        const int actionSize = qMax(
+            34,
+            QFontMetrics(m_cancel->font()).height() + 16
+        );
+        m_cancel->setMinimumSize(actionSize, actionSize);
+        m_confirm->setMinimumSize(actionSize, actionSize);
+        m_cancel->setIconSize(QSize(actionSize - 14, actionSize - 14));
+        m_confirm->setIconSize(QSize(actionSize - 14, actionSize - 14));
         row->addWidget(m_cancel);
         row->addWidget(m_waveform, 1);
         row->addWidget(m_title, transcript ? 0 : 1);
@@ -170,6 +203,14 @@ public:
         const FloatingBarActions &actions) override
     {
         m_actions = actions;
+        const int actionSize = qMax(
+            34,
+            QFontMetrics(m_cancel->font()).height() + 16
+        );
+        m_cancel->setMinimumSize(actionSize, actionSize);
+        m_confirm->setMinimumSize(actionSize, actionSize);
+        m_cancel->setIconSize(QSize(actionSize - 14, actionSize - 14));
+        m_confirm->setIconSize(QSize(actionSize - 14, actionSize - 14));
         const bool showActions = showsRecordingActions(state.stage);
         m_cancel->setVisible(showActions);
         m_confirm->setVisible(showActions);

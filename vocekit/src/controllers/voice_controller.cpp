@@ -759,8 +759,10 @@ private:
         };
         access.prepareFloatingBar = [this](
             bool enabled,
-            int autoHideMsec
+            int autoHideMsec,
+            const QString &style
         ) {
+            m_bar->setStyle(style);
             m_bar->setEnabledVisible(enabled);
             m_bar->setSuppressed(autoHideMsec <= 0);
             m_bar->setAutoHideMsec(autoHideMsec);

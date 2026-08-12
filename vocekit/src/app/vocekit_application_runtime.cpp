@@ -1283,6 +1283,7 @@ int runVocekitApplication(int argc, char *argv[])
             showAttentionInformation(hub.data(), tr8("浮动条已关闭"), tr8("请在设置的“常用设置”页勾选“启用浮动条”。"));
             return;
         }
+        bar.setStyle(settings.toData().floatingBarStyle);
         bar.setSuppressed(false);
         bar.setStatus(tr8("浮动条测试"), tr8("语音输入时显示，结束后自动关闭"));
         bar.hideLater();

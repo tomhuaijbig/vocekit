@@ -180,6 +180,7 @@ public:
 
     ~Impl() override
     {
+        clearRecordingActions();
         m_flowCancellationTimer.stop();
         cancelStreamingSession();
         m_recordingCoordinator.cancelPreparation();
@@ -272,6 +273,7 @@ public:
         request.limitIntervalMs = longRecordingEnabled
             ? maxRecordingMinutesFor(id) * 60 * 1000
             : 0;
+        installPreparationActions();
         m_recordingCoordinator.begin(request);
         return true;
     }
@@ -360,6 +362,7 @@ public:
             m_flow.recording.longRecordingEnabled
                 ? m_flow.recording.maximumMinutes * 60 * 1000
                 : 0;
+        installPreparationActions();
         m_recordingCoordinator.begin(request);
         return true;
     }
@@ -519,6 +522,64 @@ public:
     {
         return m_flow.active
             && handleHotkeyReleased(functionId);
+    }
+
+    bool confirmActiveRecording()
+    {
+        if (!m_recordingLifecycle.isRecording()) {
+            return false;
+        }
+        stopAndProcess();
+        return true;
+    }
+
+    bool cancelActiveRecording()
+    {
+        if (m_flow.active) {
+            if (!m_recordingCoordinator.isPreparing()
+                && !m_recordingLifecycle.isRecording()) {
+                return false;
+            }
+            cancelActiveFlow();
+            return true;
+        }
+        if (m_recordingCoordinator.isPreparing()) {
+            ++m_operationGeneration;
+            m_recordingCoordinator.cancelPreparation();
+            cancelStreamingSession();
+            clearRecordingActions();
+            m_modeId.clear();
+            m_coordinatorModeId.clear();
+            if (m_bar) {
+                m_bar->setStage(FloatingBarStage::Completed);
+            }
+            setStatus(tr8("已取消"), tr8("录音准备已取消"));
+            hideBarLater();
+            return true;
+        }
+        if (!m_recordingLifecycle.isRecording()) {
+            return false;
+        }
+        ++m_operationGeneration;
+        cancelStreamingSession();
+        m_longRecognitionCoordinator.cancel();
+        if (m_longRecordingSession.isActive()) {
+            m_recordingLifecycle.stop();
+            captureCurrentLongRecordingSegment();
+            m_longRecordingSession.complete();
+        } else {
+            m_recordingCoordinator.stopNormal();
+        }
+        clearRecordingActions();
+        setWaveformVisible(false);
+        m_modeId.clear();
+        m_coordinatorModeId.clear();
+        if (m_bar) {
+            m_bar->setStage(FloatingBarStage::Completed);
+        }
+        setStatus(tr8("已取消"), tr8("录音已取消，未进行识别"));
+        hideBarLater();
+        return true;
     }
 
     bool isBusy() const
@@ -898,6 +959,10 @@ private:
         const QString &error
     )
     {
+        clearRecordingActions();
+        if (m_bar) {
+            m_bar->setStage(FloatingBarStage::Failed);
+        }
         clearPcmTracking();
         if (m_flow.active) {
             if (m_flow.cancellation.isCancellationRequested()) {
@@ -1203,6 +1268,7 @@ private:
             m_runSession->setLongRecording(longRecordingActive);
         }
         startStreamingForCurrentRecording();
+        installRecordingActions();
         setWaveformVisible(true);
         setTimedStatus(
             tr8("正在录音"),
@@ -1385,6 +1451,10 @@ private:
         if (externalProcessing()) {
             setStatus(tr8("正在处理"), tr8("请等待当前任务完成。"));
             return;
+        }
+        clearRecordingActions();
+        if (m_bar) {
+            m_bar->setStage(FloatingBarStage::Recognizing);
         }
         if (m_longRecordingSession.isActive()) {
             stopLongRecordingAndProcess();
@@ -1582,6 +1652,10 @@ private:
             stopLongRecordingAndProcess();
             return;
         }
+        clearRecordingActions();
+        if (m_bar) {
+            m_bar->setStage(FloatingBarStage::Recognizing);
+        }
 
         const bool finishWithStreaming = hasHealthyStreamingSession();
         m_recordingCapture.setPcmListener(
@@ -1767,6 +1841,12 @@ private:
         if (!m_longRecordingSession.isActive()
             || m_longRecordingSession.isFinalizing()) {
             return;
+        }
+
+        clearRecordingActions();
+
+        if (m_bar) {
+            m_bar->setStage(FloatingBarStage::Recognizing);
         }
 
         m_recordingLifecycle.stop();
@@ -2130,6 +2210,11 @@ private:
         if (!m_flow.active) {
             return;
         }
+        ++m_operationGeneration;
+        clearRecordingActions();
+        if (m_bar) {
+            m_bar->setStage(FloatingBarStage::Completed);
+        }
         cancelStreamingSession();
         const quint64 generation = m_flow.generation;
         const ExecutionId runId = m_flow.runId;
@@ -2160,6 +2245,7 @@ private:
         if (!flowMatches(generation, runId)) {
             return;
         }
+        clearRecordingActions();
         cancelStreamingSession();
         const bool wasProcessing = m_flow.processing;
         const FunctionFlowNodeCompletion completion =
@@ -2214,6 +2300,55 @@ private:
                 ? elapsedStatusText()
                 : detail + tr8(" · ") + elapsedStatusText()
         );
+    }
+
+    void installPreparationActions()
+    {
+        if (!m_bar) {
+            return;
+        }
+        const quint64 generation = m_operationGeneration;
+        const QPointer<Impl> self(this);
+        m_bar->setStage(
+            FloatingBarStage::Preparing,
+            tr8("准备录音"),
+            QString()
+        );
+        FloatingBarActions actions;
+        actions.cancel = [self, generation]() {
+            if (self && self->m_operationGeneration == generation) {
+                self->cancelActiveRecording();
+            }
+        };
+        m_bar->setActions(actions);
+    }
+
+    void installRecordingActions()
+    {
+        if (!m_bar) {
+            return;
+        }
+        const quint64 generation = m_operationGeneration;
+        const QPointer<Impl> self(this);
+        FloatingBarActions actions;
+        actions.cancel = [self, generation]() {
+            if (self && self->m_operationGeneration == generation) {
+                self->cancelActiveRecording();
+            }
+        };
+        actions.confirm = [self, generation]() {
+            if (self && self->m_operationGeneration == generation) {
+                self->confirmActiveRecording();
+            }
+        };
+        m_bar->setActions(actions);
+    }
+
+    void clearRecordingActions()
+    {
+        if (m_bar) {
+            m_bar->setActions(FloatingBarActions());
+        }
     }
 
     void setStatus(
@@ -2385,6 +2520,16 @@ bool VoiceRecordingWorkflowController::handleHotkeyReleased(
 )
 {
     return d->handleHotkeyReleased(functionId);
+}
+
+bool VoiceRecordingWorkflowController::confirmActiveRecording()
+{
+    return d->confirmActiveRecording();
+}
+
+bool VoiceRecordingWorkflowController::cancelActiveRecording()
+{
+    return d->cancelActiveRecording();
 }
 
 bool VoiceRecordingWorkflowController::isBusy() const

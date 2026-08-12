@@ -33,6 +33,7 @@ private slots:
     void differentKnownFunctionKeepsActiveRecordingGuard();
     void holdOwnerUsesModeAtRegisteredHotkeyDispatch();
     void voiceControllerOnlyDelegatesCommandRouting();
+    void resolvesFloatingStyleOnlyForRunsThatActuallyStart();
 };
 
 namespace {
@@ -186,7 +187,8 @@ collectsSelectionAndProcessesText()
     };
     access.prepareFloatingBar = [&](
         bool enabled,
-        int autoHideMsec
+        int autoHideMsec,
+        const QString &
     ) {
         floatingEnabled = enabled;
         floatingMsec = autoHideMsec;
@@ -249,7 +251,7 @@ void FunctionCommandControllerTests::startsVoiceAfterSelection()
     access.captureTargetWindow = []() {
         return FunctionCommandWindowHandle(nullptr);
     };
-    access.prepareFloatingBar = [](bool, int) {};
+    access.prepareFloatingBar = [](bool, int, const QString &) {};
     access.readSelectedText = [](
         const SelectedTextWorkflowRequest &
     ) {
@@ -288,7 +290,7 @@ void FunctionCommandControllerTests::defersSelectionWhenVoiceComesFirst()
     access.captureTargetWindow = []() {
         return FunctionCommandWindowHandle(nullptr);
     };
-    access.prepareFloatingBar = [](bool, int) {};
+    access.prepareFloatingBar = [](bool, int, const QString &) {};
     access.readSelectedText = [&actions](
         const SelectedTextWorkflowRequest &
     ) {
@@ -350,7 +352,7 @@ runsScreenshotBeforeVoiceWhenConfigured()
     access.captureTargetWindow = []() {
         return FunctionCommandWindowHandle(nullptr);
     };
-    access.prepareFloatingBar = [](bool, int) {};
+    access.prepareFloatingBar = [](bool, int, const QString &) {};
     access.beginScreenshot = [&actions](
         const QString &,
         bool,
@@ -433,7 +435,7 @@ runsVoiceBeforeScreenshotWhenConfigured()
     access.processing = [&processing]() {
         return processing;
     };
-    access.prepareFloatingBar = [](bool, int) {};
+    access.prepareFloatingBar = [](bool, int, const QString &) {};
     access.beginScreenshot = [&](
         const QString &,
         bool,
@@ -521,7 +523,7 @@ routesPrimaryAndDedicatedScreenshotCommands()
     access.captureTargetWindow = []() {
         return FunctionCommandWindowHandle(nullptr);
     };
-    access.prepareFloatingBar = [](bool, int) {};
+    access.prepareFloatingBar = [](bool, int, const QString &) {};
     access.beginScreenshot = [&calls](
         const QString &functionId,
         bool targetRemembered,
@@ -1172,6 +1174,84 @@ voiceControllerOnlyDelegatesCommandRouting()
     QVERIFY(!contents.contains(
         "parseScreenshotHotkeyLogicalId(id"
     ));
+}
+
+void FunctionCommandControllerTests::
+resolvesFloatingStyleOnlyForRunsThatActuallyStart()
+{
+    QStringList styles;
+    int flowCalls = 0;
+    FunctionFlowStartOutcome nextFlowOutcome =
+        FunctionFlowStartOutcome::Started;
+    FunctionCommandAccess access;
+    access.captureTargetWindow = []() {
+        return FunctionCommandWindowHandle(nullptr);
+    };
+    access.beginAction = []() {};
+    access.prepareFloatingBar = [&styles](
+        bool,
+        int,
+        const QString &style) {
+        styles.append(style);
+    };
+    access.startPublishedFlow = [&](const FunctionFlowTriggerRequest &) {
+        ++flowCalls;
+        return nextFlowOutcome;
+    };
+    access.readSelectedText = [](
+        const SelectedTextWorkflowRequest &) {
+        SelectedTextWorkflowResult result;
+        result.text = QStringLiteral("text");
+        return result;
+    };
+
+    AppSettingsData settings;
+    settings.floatingBarStyle = QStringLiteral("liveTranscriptCard");
+    FunctionSettings inherited = functionSettings(
+        QStringLiteral("custom_inherit"), true, false);
+    inherited.output.floatingBarStyleOverride = QStringLiteral("inherit");
+    FunctionSettings overridden = functionSettings(
+        QStringLiteral("custom_override"), true, false);
+    overridden.output.floatingBarStyleOverride = QStringLiteral("statusPill");
+    FunctionSettings builtIn = functionSettings(
+        QStringLiteral("dictate"), true, false);
+    builtIn.builtIn = true;
+    builtIn.output.floatingBarStyleOverride =
+        QStringLiteral("liveTranscriptCard");
+    FunctionSettings canvas = functionSettings(
+        QStringLiteral("custom_canvas"), false, false, true,
+        screenshotTriggerSeparate());
+    canvas.executionMode = FunctionExecutionMode::Canvas;
+    settings.functions << inherited << overridden << builtIn << canvas;
+
+    FunctionCommandController controller(access);
+    controller.updateConfiguration(settings);
+    QCOMPARE(controller.handleHotkey(inherited.id),
+             FunctionCommandOutcome::TextSubmitted);
+    QCOMPARE(styles.takeLast(), QStringLiteral("liveTranscriptCard"));
+    QCOMPARE(controller.handleHotkey(overridden.id),
+             FunctionCommandOutcome::TextSubmitted);
+    QCOMPARE(styles.takeLast(), QStringLiteral("statusPill"));
+
+    settings.floatingBarStyle = QStringLiteral("invalid-global");
+    controller.updateConfiguration(settings);
+    QCOMPARE(controller.handleHotkey(builtIn.id),
+             FunctionCommandOutcome::TextSubmitted);
+    QCOMPARE(styles.takeLast(), QStringLiteral("statusPill"));
+
+    nextFlowOutcome = FunctionFlowStartOutcome::Started;
+    QCOMPARE(controller.handleScreenshotTrigger(canvas.id),
+             FunctionCommandOutcome::FlowStarted);
+    QCOMPARE(styles.takeLast(), QStringLiteral("statusPill"));
+    const int preparedAfterStart = styles.size();
+    nextFlowOutcome = FunctionFlowStartOutcome::Busy;
+    QCOMPARE(controller.handleScreenshotTrigger(canvas.id),
+             FunctionCommandOutcome::FlowBusy);
+    QCOMPARE(styles.size(), preparedAfterStart);
+    QCOMPARE(controller.handleHotkey(QStringLiteral("unknown")),
+             FunctionCommandOutcome::NoAction);
+    QCOMPARE(styles.size(), preparedAfterStart);
+    QCOMPARE(flowCalls, 2);
 }
 
 QTEST_APPLESS_MAIN(FunctionCommandControllerTests)

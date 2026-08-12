@@ -1,6 +1,7 @@
 #include "function_command_controller.h"
 
 #include "../capture/screenshot_types.h"
+#include "../config/app_settings_defaults.h"
 
 namespace {
 
@@ -170,6 +171,9 @@ FunctionCommandOutcome FunctionCommandController::handleHotkey(
 
     if (screenshotHotkey) {
         clearInputSequence();
+        prepareFloatingBarForFunction(
+            m_settings.function(screenshotFunctionId)
+        );
         return startScreenshot(screenshotFunctionId, true)
             ? FunctionCommandOutcome::ScreenshotStarted
             : FunctionCommandOutcome::InputMissing;
@@ -181,14 +185,6 @@ FunctionCommandOutcome FunctionCommandController::handleHotkey(
     // 目标窗口已在流程分流和任何状态 UI 之前冻结。
 
     const FunctionSettings &function = m_settings.function(id);
-    const int floatingBarMsec =
-        qMax(0, function.output.floatingBarSeconds) * 1000;
-    if (m_access.prepareFloatingBar) {
-        m_access.prepareFloatingBar(
-            m_settings.floatingBarEnabled,
-            floatingBarMsec
-        );
-    }
     m_selectedText.clear();
     clearInputSequence();
 
@@ -251,6 +247,7 @@ FunctionCommandOutcome FunctionCommandController::handleHotkey(
         return FunctionCommandOutcome::InputMissing;
     }
 
+    prepareFloatingBarForFunction(function);
     m_activeSequenceFunctionId = id;
     return continueInputSequence();
 }
@@ -332,6 +329,7 @@ handleScreenshotLauncherTrigger(
         return FunctionCommandOutcome::ProcessingBusy;
     }
     clearInputSequence();
+    prepareFloatingBarForFunction(m_settings.function(id));
     return startScreenshot(id, true)
         ? FunctionCommandOutcome::ScreenshotStarted
         : FunctionCommandOutcome::InputMissing;
@@ -557,6 +555,9 @@ FunctionCommandController::tryStartPublishedFlow(
     request.classicWorkflowBusy = classicWorkflowBusy();
     const FunctionFlowStartOutcome outcome =
         m_access.startPublishedFlow(request);
+    if (outcome == FunctionFlowStartOutcome::Started) {
+        prepareFloatingBarForFunction(function);
+    }
     if (outcome == FunctionFlowStartOutcome::NotAvailable) {
         if (m_access.showError) {
             m_access.showError(commandText(
@@ -604,6 +605,25 @@ bool FunctionCommandController::startScreenshot(
         );
     }
     return false;
+}
+
+void FunctionCommandController::prepareFloatingBarForFunction(
+    const FunctionSettings &function) const
+{
+    if (!m_access.prepareFloatingBar) {
+        return;
+    }
+    const QString functionStyle = function.builtIn
+        ? floatingBarStyleInherit()
+        : function.output.floatingBarStyleOverride;
+    m_access.prepareFloatingBar(
+        m_settings.floatingBarEnabled,
+        qMax(0, function.output.floatingBarSeconds) * 1000,
+        resolveFloatingBarStyle(
+            functionStyle,
+            m_settings.floatingBarStyle
+        )
+    );
 }
 
 void FunctionCommandController::setTimedStatus(

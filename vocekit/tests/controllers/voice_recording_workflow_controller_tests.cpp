@@ -6,11 +6,13 @@
 #include "../../src/recording/voice_audio_recorder_adapter.h"
 #include "../../src/runtime_log.h"
 #include "../../src/storage/history_paths.h"
+#include "../../src/ui/floating_bar.h"
 
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QPushButton>
 
 #include <atomic>
 #include <thread>
@@ -363,7 +365,91 @@ private slots:
     void classicHoldReleaseSurvivesConfigurationRemoval();
     void ownsPressOnlyForTheCurrentActiveRecording();
     void voiceControllerDoesNotOwnRecordingImplementation();
+    void floatingConfirmStopsOnceAndHidesActions();
+    void floatingCancelSkipsRecognitionAndFlowCompletesCancelled();
 };
+
+void VoiceRecordingWorkflowControllerTests::
+floatingConfirmStopsOnceAndHidesActions()
+{
+    FakeRecorder recorder;
+    int recognitionCount = 0;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.speechRecognition.recognizeProvider = [&](const SpeechRecognitionProviderTaskRequest &) {
+        ++recognitionCount;
+        SpeechRecognitionTaskResult result;
+        result.text = QStringLiteral("recognized");
+        return result;
+    };
+    FloatingBar bar;
+    VoiceRecordingWorkflowController controller(access, &bar, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = false;
+    FunctionSettings function;
+    function.id = QStringLiteral("confirm-test");
+    function.name = QStringLiteral("Confirm test");
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(function.id));
+    QVERIFY(controller.isRecording());
+    QPushButton *confirm = bar.findChild<QPushButton *>(
+        QStringLiteral("floatingConfirmButton")
+    );
+    QVERIFY(confirm);
+    QVERIFY(confirm->isVisible());
+    QVERIFY(confirm->isEnabled());
+    confirm->click();
+    QTRY_COMPARE_WITH_TIMEOUT(recorder.stopCount, 1, 500);
+    QTRY_COMPARE_WITH_TIMEOUT(recognitionCount, 1, 1000);
+    QVERIFY(!confirm->isVisible());
+    QVERIFY(!controller.confirmActiveRecording());
+    QCOMPARE(recorder.stopCount, 1);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+floatingCancelSkipsRecognitionAndFlowCompletesCancelled()
+{
+    FakeRecorder recorder;
+    int recognitionCount = 0;
+    int completionCount = 0;
+    FunctionFlowNodeResult completed;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.speechRecognition.recognizeProvider = [&](const SpeechRecognitionProviderTaskRequest &) {
+        ++recognitionCount;
+        return SpeechRecognitionTaskResult();
+    };
+    FloatingBar bar;
+    VoiceRecordingWorkflowController controller(access, &bar, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = false;
+    controller.updateConfiguration(settings);
+    CancellationSource cancellation;
+    const QString nodeId = QStringLiteral("voice-node");
+
+    QVERIFY(controller.beginForFlow(
+        flowRun(cancellation, flowDependencies(nodeId)),
+        voiceNode(nodeId),
+        [&](const FunctionFlowNodeResult &result) {
+            ++completionCount;
+            completed = result;
+        }
+    ));
+    QVERIFY(controller.isRecording());
+    QPushButton *cancel = bar.findChild<QPushButton *>(
+        QStringLiteral("floatingCancelButton")
+    );
+    QVERIFY(cancel);
+    QVERIFY(cancel->isVisible());
+    cancel->click();
+    QCOMPARE(recorder.stopCount, 1);
+    QCOMPARE(recognitionCount, 0);
+    QCOMPARE(completionCount, 1);
+    QCOMPARE(completed.state, FunctionFlowNodeState::Cancelled);
+    QVERIFY(!cancel->isVisible());
+    QVERIFY(!controller.cancelActiveRecording());
+    QCOMPARE(completionCount, 1);
+}
 
 void VoiceRecordingWorkflowControllerTests::
 holdReleaseWaitsForFirstPcmBeforeStopping()

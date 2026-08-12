@@ -72,6 +72,8 @@ public:
     bool handleHotkey(const QString &functionId);
     bool handleFlowHotkeyReleased(const QString &functionId);
     bool handleHotkeyReleased(const QString &functionId);
+    bool confirmActiveRecording();
+    bool cancelActiveRecording();
 
     bool isBusy() const;
     bool isPreparing() const;

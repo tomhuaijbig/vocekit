@@ -10,6 +10,7 @@ INCLUDEPATH += ../..
 
 SOURCES += \
     function_command_controller_tests.cpp \
+    ../../src/config/app_settings_defaults.cpp \
     ../../src/controllers/function_command_controller.cpp \
     ../../src/capture/screenshot_types.cpp \
     ../../src/domain/function_settings.cpp \

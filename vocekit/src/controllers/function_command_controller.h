@@ -79,7 +79,11 @@ struct FunctionCommandAccess
     std::function<QString(const QString &speechProvider)>
         speechConfigurationError;
     std::function<void(const QString &functionId)> beginRecording;
-    std::function<void(bool enabled, int autoHideMsec)>
+    std::function<void(
+        bool enabled,
+        int autoHideMsec,
+        const QString &style
+    )>
         prepareFloatingBar;
 };
 
@@ -141,6 +145,9 @@ private:
     void setTimedStatus(
         const QString &title,
         const QString &detail
+    ) const;
+    void prepareFloatingBarForFunction(
+        const FunctionSettings &function
     ) const;
 
     FunctionCommandAccess m_access;

@@ -171,6 +171,36 @@ namespace VoceKit.WindowsSpeech
         public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
     }
 
+    internal sealed class ThrowingReadStream : Stream
+    {
+        private readonly string message;
+
+        internal ThrowingReadStream(string message)
+        {
+            this.message = message;
+        }
+
+        public override bool CanRead { get { return true; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanWrite { get { return false; } }
+        public override long Length { get { throw new NotSupportedException(); } }
+        public override long Position
+        {
+            get { throw new NotSupportedException(); }
+            set { throw new NotSupportedException(); }
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            throw new IOException(message);
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+        public override void SetLength(long value) { throw new NotSupportedException(); }
+        public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+    }
+
     internal sealed class InputPump : IDisposable
     {
         private const int StopWaitMilliseconds = 1000;
@@ -668,21 +698,25 @@ namespace VoceKit.WindowsSpeech
 
                     Exception producerFailure = inputPump.Failure;
                     bool inputStreamEnded = inputPump.InputStreamEnded;
-                    if (producerFailure is InputTooLargeException)
+                    string errorCode;
+                    int errorExitCode = ClassifyRecognitionFailure(
+                        producerFailure,
+                        recognitionCancelled,
+                        recognitionFailure,
+                        out errorCode);
+                    if (errorExitCode != 0)
                     {
-                        writer.Error("INPUT_TOO_LARGE", "Raw PCM input exceeds the 64 MiB limit.", inputStreamEnded);
-                        return 7;
-                    }
-                    if (producerFailure is OperationCanceledException || recognitionCancelled)
-                    {
-                        writer.Error("CANCELLED", "Speech recognition was cancelled.", inputStreamEnded);
-                        return 8;
-                    }
-                    if (producerFailure != null || recognitionFailure != null)
-                    {
-                        writer.Error("LOCAL_FAILURE", "Windows speech recognition failed locally.", inputStreamEnded);
-                        Diagnostic("recognition failed", producerFailure ?? recognitionFailure);
-                        return 1;
+                        string message = errorCode == "INPUT_TOO_LARGE"
+                            ? "Raw PCM input exceeds the 64 MiB limit."
+                            : errorCode == "CANCELLED"
+                                ? "Speech recognition was cancelled."
+                                : "Windows speech recognition failed locally.";
+                        writer.Error(errorCode, message, inputStreamEnded);
+                        if (errorCode == "LOCAL_FAILURE")
+                        {
+                            Diagnostic("recognition failed", producerFailure ?? recognitionFailure);
+                        }
+                        return errorExitCode;
                     }
 
                     string transcript;
@@ -705,6 +739,41 @@ namespace VoceKit.WindowsSpeech
             }
         }
 
+        private static int ClassifyRecognitionFailure(
+            Exception producerFailure,
+            bool recognitionCancelled,
+            Exception recognitionFailure,
+            out string errorCode)
+        {
+            if (producerFailure is InputTooLargeException)
+            {
+                errorCode = "INPUT_TOO_LARGE";
+                return 7;
+            }
+            if (producerFailure is OperationCanceledException)
+            {
+                errorCode = "CANCELLED";
+                return 8;
+            }
+            if (producerFailure != null)
+            {
+                errorCode = "LOCAL_FAILURE";
+                return 1;
+            }
+            if (recognitionCancelled)
+            {
+                errorCode = "CANCELLED";
+                return 8;
+            }
+            if (recognitionFailure != null)
+            {
+                errorCode = "LOCAL_FAILURE";
+                return 1;
+            }
+            errorCode = null;
+            return 0;
+        }
+
         private static int RunSelfTests(EventWriter writer)
         {
             List<string> passed = new List<string>();
@@ -715,6 +784,8 @@ namespace VoceKit.WindowsSpeech
                 RunSelfTestCase("event-json", TestEventJson, passed, failures);
                 RunSelfTestCase("error-event-protocol", TestErrorEventProtocol, passed, failures);
                 RunSelfTestCase("early-recognizer-completion", TestEarlyRecognizerCompletion, passed, failures);
+                RunSelfTestCase("producer-failure-precedence", TestProducerFailurePrecedence, passed, failures);
+                RunSelfTestCase("diagnostic-privacy", TestDiagnosticPrivacy, passed, failures);
                 RunSelfTestCase("language-resolver", TestLanguageResolver, passed, failures);
                 RunSelfTestCase("segment-join", TestSegmentJoin, passed, failures);
                 RunSelfTestCase("exact-one-final", TestFinalAccumulator, passed, failures);
@@ -723,6 +794,7 @@ namespace VoceKit.WindowsSpeech
                 RunSelfTestCase("stream-backpressure", TestBackpressure, passed, failures);
                 RunSelfTestCase("stream-complete-wakeup", TestCompleteWakeup, passed, failures);
                 RunSelfTestCase("stream-cancel-wakeups", TestCancelWakeups, passed, failures);
+                RunSelfTestCase("stream-zero-count-state", TestZeroCountStateValidation, passed, failures);
                 RunSelfTestCase("concurrent-event-json", TestConcurrentEventWriter, passed, failures);
                 if (failures.Count != 0)
                 {
@@ -804,6 +876,50 @@ namespace VoceKit.WindowsSpeech
                 Assert(!pump.InputStreamEnded, "recognizer cancellation must not be reported as stdin EOF");
                 Assert(input.WasDisposed, "recognizer completion did not release stdin");
             }
+        }
+
+        private static void TestProducerFailurePrecedence()
+        {
+            const string secret = "sensitive-input-source-detail";
+            using (ThrowingReadStream input = new ThrowingReadStream(secret))
+            using (ProducerConsumerAudioStream audio = new ProducerConsumerAudioStream())
+            {
+                int cancelRequests = 0;
+                using (InputPump pump = new InputPump(input, audio, delegate { Interlocked.Increment(ref cancelRequests); }))
+                {
+                    pump.Start();
+                    Assert(pump.WaitForStop(2000), "throwing input pump did not stop");
+                    Assert(pump.Failure is IOException, "throwing input did not preserve its producer failure type");
+                    Assert(cancelRequests == 1, "producer failure did not request recognizer cancellation exactly once");
+
+                    System.Reflection.MethodInfo classifier = typeof(Program).GetMethod(
+                        "ClassifyRecognitionFailure",
+                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+                    Assert(classifier != null, "producer/recognizer outcome classifier is missing");
+                    object[] arguments = { pump.Failure, true, null, null };
+                    int exitCode = (int)classifier.Invoke(null, arguments);
+                    Assert(exitCode == 1, "producer IOException plus recognizer cancellation must exit 1");
+                    Assert((string)arguments[3] == "LOCAL_FAILURE", "producer IOException must take precedence over recognizer cancellation");
+                }
+            }
+        }
+
+        private static void TestDiagnosticPrivacy()
+        {
+            const string secret = "sensitive-input-source-detail";
+            StringWriter captured = new StringWriter(CultureInfo.InvariantCulture);
+            TextWriter previous = Console.Error;
+            try
+            {
+                Console.SetError(captured);
+                Diagnostic("input pump failed", new IOException(secret));
+            }
+            finally
+            {
+                Console.SetError(previous);
+            }
+            Assert(captured.ToString().IndexOf(secret, StringComparison.Ordinal) < 0,
+                "stderr diagnostic leaked an exception message");
         }
 
         private static void TestLanguageResolver()
@@ -919,6 +1035,22 @@ namespace VoceKit.WindowsSpeech
             }
         }
 
+        private static void TestZeroCountStateValidation()
+        {
+            byte[] buffer = new byte[1];
+            ProducerConsumerAudioStream disposedStream = new ProducerConsumerAudioStream();
+            disposedStream.Dispose();
+            Expect<ObjectDisposedException>(delegate { disposedStream.Read(buffer, 0, 0); });
+            Expect<ObjectDisposedException>(delegate { disposedStream.WriteChunk(buffer, 0, 0); });
+
+            using (ProducerConsumerAudioStream cancelledStream = new ProducerConsumerAudioStream())
+            {
+                cancelledStream.Cancel();
+                Assert(cancelledStream.Read(buffer, 0, 0) == 0, "cancelled zero-count Read must preserve the existing zero result");
+                Expect<OperationCanceledException>(delegate { cancelledStream.WriteChunk(buffer, 0, 0); });
+            }
+        }
+
         private static void TestCompleteWakeup()
         {
             using (ProducerConsumerAudioStream readerStream = new ProducerConsumerAudioStream())
@@ -1007,7 +1139,7 @@ namespace VoceKit.WindowsSpeech
 
         private static void Diagnostic(string context, Exception exception)
         {
-            Console.Error.WriteLine("[windows-speech] {0}: {1}: {2}", context, exception.GetType().Name, exception.Message);
+            Console.Error.WriteLine("[windows-speech] {0}: {1}", context, exception.GetType().Name);
         }
     }
 }

@@ -89,11 +89,6 @@ namespace VoceKit.WindowsSpeech
         internal void WriteChunk(byte[] buffer, int offset, int count)
         {
             ValidateBufferArguments(buffer, offset, count);
-            if (count == 0)
-            {
-                return;
-            }
-
             lock (monitor)
             {
                 ThrowIfDisposed();
@@ -104,6 +99,10 @@ namespace VoceKit.WindowsSpeech
                 if (writingCompleted)
                 {
                     throw new InvalidOperationException("PCM input has already completed.");
+                }
+                if (count == 0)
+                {
+                    return;
                 }
                 if (acceptedBytes > DeclaredLength - count)
                 {
@@ -181,15 +180,14 @@ namespace VoceKit.WindowsSpeech
         public override int Read(byte[] buffer, int offset, int count)
         {
             ValidateBufferArguments(buffer, offset, count);
-            if (count == 0)
-            {
-                return 0;
-            }
-
             int copied = 0;
             lock (monitor)
             {
                 ThrowIfDisposed();
+                if (count == 0)
+                {
+                    return 0;
+                }
                 while (copied < count)
                 {
                     while (bufferedBytes == 0 && !writingCompleted && !cancelled && !disposed)

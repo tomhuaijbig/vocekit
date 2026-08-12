@@ -23,6 +23,75 @@ function Get-WindowsSpeechBuildDecision {
     return "Fail"
 }
 
+function Resolve-VisualStudioToolchain {
+    param(
+        [string[]]$InstallationPaths
+    )
+
+    $candidates = @()
+    if ($null -ne $InstallationPaths) {
+        $candidates = @($InstallationPaths)
+    } else {
+        $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
+        $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+            $located = @(& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath)
+            if ($LASTEXITCODE -ne 0) {
+                throw "Visual Studio Installer vswhere failed with exit code $LASTEXITCODE."
+            }
+            $candidates += @($located | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        }
+
+        $programFilesRoots = @(
+            [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+            $programFilesX86
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+        foreach ($root in $programFilesRoots) {
+            foreach ($edition in @("Community", "Professional", "Enterprise", "BuildTools")) {
+                $candidates += Join-Path $root ("Microsoft Visual Studio\2022\" + $edition)
+            }
+        }
+    }
+
+    foreach ($installationPath in @($candidates | Select-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace($installationPath)) {
+            continue
+        }
+        $fullInstallationPath = [IO.Path]::GetFullPath($installationPath.Trim())
+        if ($fullInstallationPath -notmatch '[\\/]2022[\\/]') {
+            continue
+        }
+        $msbuild = Join-Path $fullInstallationPath "MSBuild\Current\Bin\MSBuild.exe"
+        $csc = Join-Path $fullInstallationPath "MSBuild\Current\Bin\Roslyn\csc.exe"
+        if ((Test-Path -LiteralPath $msbuild -PathType Leaf) -and
+            (Test-Path -LiteralPath $csc -PathType Leaf)) {
+            return [PSCustomObject]@{
+                InstallationPath = $fullInstallationPath
+                MSBuild = $msbuild
+                Csc = $csc
+            }
+        }
+    }
+
+    throw "Visual Studio 2022 MSBuild and Roslyn toolchain were not found."
+}
+
+function Remove-WindowsSpeechHelperOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot
+    )
+
+    $fullProjectRoot = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $helper = [IO.Path]::GetFullPath((Join-Path $fullProjectRoot "helpers\bin\vocekit-windows-speech.exe"))
+    if (-not $helper.StartsWith($fullProjectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Windows speech helper output escaped the project root: $helper"
+    }
+    if (Test-Path -LiteralPath $helper -PathType Leaf) {
+        Remove-Item -LiteralPath $helper -Force
+    }
+}
+
 if ($DecisionTestMode) {
     return
 }
@@ -44,10 +113,9 @@ foreach ($sourceFile in $sourceFiles) {
     }
 }
 
-$msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
-if (-not (Test-Path -LiteralPath $msbuild -PathType Leaf)) {
-    throw "Visual Studio 2022 MSBuild was not found: $msbuild"
-}
+$toolchain = Resolve-VisualStudioToolchain
+$msbuild = $toolchain.MSBuild
+Remove-WindowsSpeechHelperOutput -ProjectRoot $projectRoot
 
 $msbuildLines = @(& $msbuild $speechProject /m /nologo /v:minimal /p:Configuration=$Configuration /p:Platform=x64 2>&1 | ForEach-Object {
     $line = $_.ToString()
@@ -66,7 +134,7 @@ if ($buildDecision -eq "MSBuild") {
     }
 
     $usedFallback = $true
-    $csc = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\Roslyn\csc.exe"
+    $csc = $toolchain.Csc
     $framework = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
     $referencePaths = @(
         (Join-Path $framework "mscorlib.dll"),

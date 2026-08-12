@@ -1225,6 +1225,8 @@ private:
         }
 
         VoiceRecordingStopResult stopped;
+        const bool wasLongRecording =
+            m_longRecordingSession.isActive();
         if (m_recordingLifecycle.isRecording()) {
             if (m_longRecordingSession.isActive()) {
                 m_recordingLifecycle.stop();
@@ -1234,8 +1236,22 @@ private:
             }
         }
         if (!m_flow.active && m_runSession) {
-            m_runSession->setRecordingAudioPath(stopped.wavPath);
-            m_runSession->setLongRecording(false);
+            if (wasLongRecording) {
+                const QVector<RecordingSegment> segments =
+                    m_longRecordingSession
+                        .recognitionState()
+                        .segments();
+                m_runSession->setLongRecording(true);
+                m_runSession->setRecordingSegments(segments);
+                if (!segments.isEmpty()) {
+                    m_runSession->setRecordingAudioPath(
+                        segments.first().wavPath
+                    );
+                }
+            } else {
+                m_runSession->setRecordingAudioPath(stopped.wavPath);
+                m_runSession->setLongRecording(false);
+            }
         }
         setWaveformVisible(false);
         if (m_bar) {
@@ -1246,7 +1262,9 @@ private:
         if (m_flow.active) {
             const quint64 flowGeneration = m_flow.generation;
             const ExecutionId runId = m_flow.runId;
-            m_flow.normalRecording = stopped;
+            if (!wasLongRecording) {
+                m_flow.normalRecording = stopped;
+            }
             FunctionFlowNodeResult result;
             result.state = FunctionFlowNodeState::Failed;
             result.error = flowVoiceError(errorCode, message);

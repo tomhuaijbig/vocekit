@@ -1,8 +1,6 @@
 #include "voice_controller.h"
 
 #include <QtWidgets>
-#include <QDesktopServices>
-#include <QUrl>
 
 static QString tr8(const char *text)
 {
@@ -117,7 +115,11 @@ public:
             const QString &errorCode,
             const QString &message
         ) {
-            showWindowsSpeechFailure(errorCode, message);
+            showWindowsSpeechFailureAttention(
+                hostWidget(),
+                errorCode,
+                message
+            );
         };
         recordingAccess.saveFailureHistory = [this](
             const QString &modeId,
@@ -982,43 +984,6 @@ private:
         m_bar->setStatus(tr8("处理失败"), text);
         m_bar->hideLater();
         showAttentionWarning(hostWidget(), tr8("处理失败"), text);
-    }
-
-    void showWindowsSpeechFailure(
-        const QString &errorCode,
-        const QString &message
-    )
-    {
-        const QString text = message.trimmed().isEmpty()
-            ? tr8("Windows 本地语音识别不可用。")
-            : message;
-        const QString title = tr8("Windows 本地语音识别不可用");
-        if (errorCode == QStringLiteral(
-                "speech.windows.program_missing"
-            )) {
-            showAttentionWarning(
-                hostWidget(),
-                title,
-                text
-                    + tr8("\n\n请重新安装软件，或完整解压发布包后再试。")
-            );
-            return;
-        }
-        if (isWindowsSpeechConfigurationErrorCode(errorCode)) {
-            showAttentionWarningWithAction(
-                hostWidget(),
-                title,
-                text,
-                tr8("打开 Windows 语言设置"),
-                []() {
-                    QDesktopServices::openUrl(
-                        QUrl(QStringLiteral("ms-settings:regionlanguage"))
-                    );
-                }
-            );
-            return;
-        }
-        showAttentionWarning(hostWidget(), title, text);
     }
 
     qint64 currentActionElapsedMs() const

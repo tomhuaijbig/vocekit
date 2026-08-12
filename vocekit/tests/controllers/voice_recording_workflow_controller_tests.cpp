@@ -4,6 +4,7 @@
 #include "../../src/config/app_settings_defaults.h"
 #include "../../src/controllers/voice_recording_workflow_controller.h"
 #include "../../src/domain/function_catalog.h"
+#include "../../src/domain/voice_run_session.h"
 #include "../../src/recording/voice_audio_recorder_adapter.h"
 #include "../../src/runtime_log.h"
 #include "../../src/storage/history_paths.h"
@@ -16,6 +17,7 @@
 #include <QThread>
 #include <QPushButton>
 #include <QMessageBox>
+#include <QLabel>
 
 #include <atomic>
 #include <thread>
@@ -384,12 +386,19 @@ private slots:
     void windowsStreamingUsesNormalizedLanguageAndUniqueRunIds();
     void windowsStreamingDegradeFallsBackToSameEngineOnce();
     void windowsStreamingConfigurationFailureStopsWithoutBatch();
+    void windowsLongPreReadyFailurePreservesDiagnosticRecording();
     void windowsPreReadyFailuresNeverFallBackToBatch_data();
     void windowsPreReadyFailuresNeverFallBackToBatch();
     void windowsFinalTimeoutFallsBackOnceWithCompletePcm();
     void windowsBatchAndLongRequestsKeepConfiguredLanguage();
     void structuredWindowsBatchFailureUsesActionableWarning();
+    void windowsStructuredFailuresCrossWorkflowBoundaries_data();
+    void windowsStructuredFailuresCrossWorkflowBoundaries();
+    void windowsSnapshotUpdatesFloatingBarWithoutDownstream();
+    void windowsFinalAndDuplicateCompleteExactlyOnce();
+    void windowsOldGenerationAndCancelSuppressCallbacks();
     void attentionActionRunsOnlyForItsActionButton();
+    void voiceControllerWindowsSpeechModalUsesRealRolesAndMapping();
 };
 
 void VoiceRecordingWorkflowControllerTests::
@@ -1893,6 +1902,76 @@ windowsStreamingConfigurationFailureStopsWithoutBatch()
 }
 
 void VoiceRecordingWorkflowControllerTests::
+windowsLongPreReadyFailurePreservesDiagnosticRecording()
+{
+    FakeRecorder recorder;
+    recorder.wavPath = QStringLiteral("C:/diagnostics/windows-segment.wav");
+    recorder.pcm = QByteArrayLiteral("diagnostic-long-pcm");
+    QSharedPointer<FakeStreamingSpeechSession> session(
+        new FakeStreamingSpeechSession
+    );
+    int batchCount = 0;
+    int downstreamCount = 0;
+    int warningCount = 0;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [session](
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &callbacks
+    ) {
+        session->callbacks = callbacks;
+        StreamingSpeechSessionCreation result;
+        result.session = session;
+        return result;
+    };
+    access.runSpeechRecognition = [&batchCount](
+        const VoiceSpeechRecognitionRequest &,
+        const VoiceSpeechRecognitionHandlers &,
+        const VoiceRecordingFlowSpeechCompletion &
+    ) { ++batchCount; };
+    access.processRecognizedSpeech = [&downstreamCount](
+        const QString &,
+        const QString &
+    ) { ++downstreamCount; };
+    access.showWindowsSpeechFailure = [&warningCount](
+        const QString &,
+        const QString &
+    ) { ++warningCount; };
+    VoiceRunSession runSession;
+    runSession.beginAction();
+    VoiceRecordingWorkflowController controller(
+        access,
+        nullptr,
+        &runSession
+    );
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = speechProviderWindowsLocal();
+    FunctionSettings function;
+    function.id = QStringLiteral("windows-long-pre-ready");
+    function.recording.longRecordingEnabled = true;
+    function.recording.segmentSeconds = 20;
+    function.recording.maximumMinutes = 1;
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(function.id));
+    session->emitConfigurationFailed(
+        QStringLiteral("speech.windows.recognizer_missing"),
+        QStringLiteral("recognizer missing")
+    );
+    QTRY_COMPARE_WITH_TIMEOUT(warningCount, 1, 1000);
+    QCOMPARE(batchCount, 0);
+    QCOMPARE(downstreamCount, 0);
+    QCOMPARE(recorder.stopCount, 1);
+    const VoiceRunSessionSnapshot snapshot = runSession.snapshot();
+    QVERIFY(snapshot.longRecording);
+    QCOMPARE(snapshot.recordingAudioPath, recorder.wavPath);
+    QCOMPARE(snapshot.recordingSegments.size(), 1);
+    QCOMPARE(snapshot.recordingSegments.first().wavPath, recorder.wavPath);
+    QVERIFY(!controller.isBusy());
+}
+
+void VoiceRecordingWorkflowControllerTests::
 windowsPreReadyFailuresNeverFallBackToBatch_data()
 {
     QTest::addColumn<QString>("errorCode");
@@ -2111,6 +2190,353 @@ structuredWindowsBatchFailureUsesActionableWarning()
 }
 
 void VoiceRecordingWorkflowControllerTests::
+windowsStructuredFailuresCrossWorkflowBoundaries_data()
+{
+    QTest::addColumn<QString>("errorCode");
+    QTest::newRow("program-missing")
+        << QStringLiteral("speech.windows.program_missing");
+    QTest::newRow("recognizer-missing")
+        << QStringLiteral("speech.windows.recognizer_missing");
+}
+
+void VoiceRecordingWorkflowControllerTests::
+windowsStructuredFailuresCrossWorkflowBoundaries()
+{
+    QFETCH(QString, errorCode);
+
+    FakeRecorder classicRecorder;
+    int classicBatchCount = 0;
+    int classicDownstreamCount = 0;
+    QStringList classicWarnings;
+    VoiceRecordingWorkflowAccess classicAccess = fakeAccess(
+        &classicRecorder
+    );
+    classicAccess.runSpeechRecognition = [
+        &classicBatchCount, errorCode
+    ](
+        const VoiceSpeechRecognitionRequest &,
+        const VoiceSpeechRecognitionHandlers &,
+        const VoiceRecordingFlowSpeechCompletion &completion
+    ) {
+        ++classicBatchCount;
+        VoiceSpeechRecognitionResult result;
+        result.errorCode = errorCode;
+        result.error = QStringLiteral("classic structured failure");
+        completion(result);
+    };
+    classicAccess.processRecognizedSpeech = [
+        &classicDownstreamCount
+    ](const QString &, const QString &) {
+        ++classicDownstreamCount;
+    };
+    classicAccess.showWindowsSpeechFailure = [
+        &classicWarnings
+    ](const QString &code, const QString &) {
+        classicWarnings.append(code);
+    };
+    VoiceRecordingWorkflowController classicController(
+        classicAccess,
+        nullptr,
+        nullptr
+    );
+    AppSettingsData classicSettings;
+    classicSettings.streamingSpeechRecognitionEnabled = false;
+    classicSettings.speechProvider = speechProviderWindowsLocal();
+    FunctionSettings classicFunction;
+    classicFunction.id = QStringLiteral("structured-classic");
+    classicSettings.functions.append(classicFunction);
+    classicController.updateConfiguration(classicSettings);
+    QVERIFY(classicController.begin(classicFunction.id));
+    QVERIFY(classicController.handleHotkey(classicFunction.id));
+    QTRY_COMPARE_WITH_TIMEOUT(classicWarnings.size(), 1, 1000);
+    QCOMPARE(classicWarnings.first(), errorCode);
+    QCOMPARE(classicBatchCount, 1);
+    QCOMPARE(classicDownstreamCount, 0);
+
+    FakeRecorder flowRecorder;
+    int flowBatchCount = 0;
+    int flowCompletionCount = 0;
+    FunctionFlowNodeResult flowResult;
+    QStringList flowWarnings;
+    VoiceRecordingWorkflowAccess flowAccess = fakeAccess(&flowRecorder);
+    flowAccess.runSpeechRecognition = [&flowBatchCount, errorCode](
+        const VoiceSpeechRecognitionRequest &request,
+        const VoiceSpeechRecognitionHandlers &,
+        const VoiceRecordingFlowSpeechCompletion &completion
+    ) {
+        ++flowBatchCount;
+        QCOMPARE(request.provider, speechProviderWindowsLocal());
+        VoiceSpeechRecognitionResult result;
+        result.errorCode = errorCode;
+        result.error = QStringLiteral("flow structured failure");
+        completion(result);
+    };
+    flowAccess.showWindowsSpeechFailure = [&flowWarnings](
+        const QString &code,
+        const QString &
+    ) {
+        flowWarnings.append(code);
+    };
+    VoiceRecordingWorkflowController flowController(
+        flowAccess,
+        nullptr,
+        nullptr
+    );
+    AppSettingsData flowSettings;
+    flowSettings.streamingSpeechRecognitionEnabled = false;
+    flowController.updateConfiguration(flowSettings);
+    CancellationSource source;
+    const QString nodeId = QStringLiteral("structured-flow-node");
+    QVERIFY(flowController.beginForFlow(
+        flowRun(
+            source,
+            flowDependencies(nodeId, speechProviderWindowsLocal())
+        ),
+        voiceNode(nodeId),
+        [&flowCompletionCount, &flowResult](
+            const FunctionFlowNodeResult &result
+        ) {
+            ++flowCompletionCount;
+            flowResult = result;
+        }
+    ));
+    QVERIFY(flowController.handleHotkey(QStringLiteral("flow-function")));
+    QTRY_COMPARE_WITH_TIMEOUT(flowCompletionCount, 1, 1000);
+    QCOMPARE(flowResult.state, FunctionFlowNodeState::Failed);
+    QCOMPARE(flowWarnings.size(), 1);
+    QCOMPARE(flowWarnings.first(), errorCode);
+    QCOMPARE(flowBatchCount, 1);
+
+    QTemporaryDir longDirectory;
+    QVERIFY(longDirectory.isValid());
+    FakeRecorder longRecorder;
+    longRecorder.wavPath = QDir(longDirectory.path()).filePath(
+        QStringLiteral("structured-long.wav")
+    );
+    int longProviderCount = 0;
+    int longDownstreamCount = 0;
+    QString longObservedProvider;
+    QStringList longWarnings;
+    VoiceRecordingWorkflowAccess longAccess = fakeAccess(&longRecorder);
+    longAccess.speechRecognition.recognizeProvider = [
+        &longProviderCount, &longObservedProvider, errorCode
+    ](const SpeechRecognitionProviderTaskRequest &request)
+        -> SpeechRecognitionTaskResult {
+        ++longProviderCount;
+        longObservedProvider = request.provider;
+        SpeechRecognitionTaskResult result;
+        result.errorCode = errorCode;
+        result.error = QStringLiteral("long structured failure");
+        return result;
+    };
+    longAccess.processRecognizedSpeech = [
+        &longDownstreamCount
+    ](const QString &, const QString &) {
+        ++longDownstreamCount;
+    };
+    longAccess.showWindowsSpeechFailure = [&longWarnings](
+        const QString &code,
+        const QString &
+    ) {
+        longWarnings.append(code);
+    };
+    VoiceRecordingWorkflowController longController(
+        longAccess,
+        nullptr,
+        nullptr
+    );
+    AppSettingsData longSettings;
+    longSettings.streamingSpeechRecognitionEnabled = false;
+    longSettings.speechProvider = speechProviderWindowsLocal();
+    FunctionSettings longFunction;
+    longFunction.id = QStringLiteral("structured-long");
+    longFunction.recording.longRecordingEnabled = true;
+    longSettings.functions.append(longFunction);
+    longController.updateConfiguration(longSettings);
+    QVERIFY(longController.begin(longFunction.id));
+    QVERIFY(longController.handleHotkey(longFunction.id));
+    QTRY_COMPARE_WITH_TIMEOUT(longWarnings.size(), 1, 1000);
+    QCOMPARE(longWarnings.first(), errorCode);
+    QTRY_VERIFY_WITH_TIMEOUT(!longController.isBusy(), 1000);
+    QVERIFY(longProviderCount >= 1);
+    QCOMPARE(longObservedProvider, speechProviderWindowsLocal());
+    QCOMPARE(longDownstreamCount, 0);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+windowsSnapshotUpdatesFloatingBarWithoutDownstream()
+{
+    FakeRecorder recorder;
+    QSharedPointer<FakeStreamingSpeechSession> session(
+        new FakeStreamingSpeechSession
+    );
+    int downstreamCount = 0;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [session](
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &callbacks
+    ) {
+        session->callbacks = callbacks;
+        StreamingSpeechSessionCreation result;
+        result.session = session;
+        return result;
+    };
+    access.processRecognizedSpeech = [&downstreamCount](
+        const QString &,
+        const QString &
+    ) { ++downstreamCount; };
+    FloatingBar bar;
+    bar.setStage(FloatingBarStage::Completed);
+    bar.setStyle(floatingBarStyleLiveTranscriptCard());
+    VoiceRecordingWorkflowController controller(access, &bar, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = speechProviderWindowsLocal();
+    FunctionSettings function;
+    function.id = QStringLiteral("windows-snapshot");
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+    QVERIFY(controller.begin(function.id));
+    session->emitSnapshot(
+        QStringLiteral("committed "),
+        QStringLiteral("provisional")
+    );
+    QCoreApplication::processEvents();
+    QCoreApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        !bar.findChildren<QLabel *>().isEmpty(),
+        1000
+    );
+    QStringList visibleTexts;
+    for (QLabel *label : bar.findChildren<QLabel *>()) {
+        if (!label->text().isEmpty()) {
+            visibleTexts.append(label->text());
+        }
+    }
+    QLabel *committedLabel = bar.findChild<QLabel *>(
+        QStringLiteral("streamingCommittedText")
+    );
+    QLabel *provisionalLabel = bar.findChild<QLabel *>(
+        QStringLiteral("streamingProvisionalText")
+    );
+    QVERIFY(committedLabel);
+    QVERIFY(provisionalLabel);
+    QCOMPARE(committedLabel->text(), QStringLiteral("committed "));
+    QCOMPARE(provisionalLabel->text(), QStringLiteral("provisional"));
+    QCOMPARE(downstreamCount, 0);
+    QVERIFY(controller.cancelActiveRecording());
+}
+
+void VoiceRecordingWorkflowControllerTests::
+windowsFinalAndDuplicateCompleteExactlyOnce()
+{
+    FakeRecorder recorder;
+    QSharedPointer<FakeStreamingSpeechSession> session(
+        new FakeStreamingSpeechSession
+    );
+    int batchCount = 0;
+    QStringList downstream;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [session](
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &callbacks
+    ) {
+        session->callbacks = callbacks;
+        StreamingSpeechSessionCreation result;
+        result.session = session;
+        return result;
+    };
+    access.runSpeechRecognition = [&batchCount](
+        const VoiceSpeechRecognitionRequest &,
+        const VoiceSpeechRecognitionHandlers &,
+        const VoiceRecordingFlowSpeechCompletion &
+    ) { ++batchCount; };
+    access.processRecognizedSpeech = [&downstream](
+        const QString &,
+        const QString &text
+    ) { downstream.append(text); };
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = speechProviderWindowsLocal();
+    FunctionSettings function;
+    function.id = QStringLiteral("windows-final-once");
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+    QVERIFY(controller.begin(function.id));
+    QVERIFY(controller.handleHotkey(function.id));
+    session->emitCompleted(QStringLiteral("one final"));
+    QTRY_COMPARE_WITH_TIMEOUT(downstream.size(), 1, 1000);
+    QCOMPARE(batchCount, 0);
+    session->emitCompleted(QStringLiteral("duplicate"));
+    QTest::qWait(20);
+    QCOMPARE(downstream.size(), 1);
+    QCOMPARE(downstream.first(), QStringLiteral("one final"));
+    QCOMPARE(batchCount, 0);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+windowsOldGenerationAndCancelSuppressCallbacks()
+{
+    FakeRecorder recorder;
+    QList<QSharedPointer<FakeStreamingSpeechSession> > sessions;
+    int batchCount = 0;
+    int downstreamCount = 0;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.createStreamingSpeechSession = [&sessions](
+        const StreamingSpeechSessionRequest &,
+        const StreamingSpeechCallbacks &callbacks
+    ) {
+        QSharedPointer<FakeStreamingSpeechSession> session(
+            new FakeStreamingSpeechSession
+        );
+        session->callbacks = callbacks;
+        sessions.append(session);
+        StreamingSpeechSessionCreation result;
+        result.session = session;
+        return result;
+    };
+    access.runSpeechRecognition = [&batchCount](
+        const VoiceSpeechRecognitionRequest &,
+        const VoiceSpeechRecognitionHandlers &,
+        const VoiceRecordingFlowSpeechCompletion &
+    ) { ++batchCount; };
+    access.processRecognizedSpeech = [&downstreamCount](
+        const QString &,
+        const QString &
+    ) { ++downstreamCount; };
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = true;
+    settings.speechProvider = speechProviderWindowsLocal();
+    FunctionSettings function;
+    function.id = QStringLiteral("windows-generation");
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(function.id));
+    QCOMPARE(sessions.size(), 1);
+    QSharedPointer<FakeStreamingSpeechSession> old = sessions.first();
+    QVERIFY(controller.cancelActiveRecording());
+    QCOMPARE(old->cancelCount, 1);
+    old->emitCompleted(QStringLiteral("late old"));
+    old->emitDegraded(QStringLiteral("late old degraded"));
+    QTest::qWait(20);
+    QCOMPARE(batchCount, 0);
+    QCOMPARE(downstreamCount, 0);
+
+    QVERIFY(controller.begin(function.id));
+    QCOMPARE(sessions.size(), 2);
+    QSharedPointer<FakeStreamingSpeechSession> current = sessions.last();
+    QVERIFY(controller.cancelActiveRecording());
+    QCOMPARE(current->cancelCount, 1);
+    current->emitCompleted(QStringLiteral("late current"));
+    QTest::qWait(20);
+    QCOMPARE(batchCount, 0);
+    QCOMPARE(downstreamCount, 0);
+}
+
+void VoiceRecordingWorkflowControllerTests::
 attentionActionRunsOnlyForItsActionButton()
 {
     int actionCount = 0;
@@ -2143,6 +2569,103 @@ attentionActionRunsOnlyForItsActionButton()
     QCOMPARE(actionCount, 1);
     setAttentionActionDialogCallbackForTests(
         AttentionActionDialogCallback()
+    );
+}
+
+void VoiceRecordingWorkflowControllerTests::
+voiceControllerWindowsSpeechModalUsesRealRolesAndMapping()
+{
+    const QString voicePath = QFINDTESTDATA(
+        "../../src/controllers/voice_controller.cpp"
+    );
+    QVERIFY(!voicePath.isEmpty());
+    QFile voiceSource(voicePath);
+    QVERIFY(voiceSource.open(QIODevice::ReadOnly));
+    QVERIFY(voiceSource.readAll().contains(
+        "showWindowsSpeechFailureAttention"
+    ));
+    setAttentionActionDialogCallbackForTests(
+        AttentionActionDialogCallback()
+    );
+    int openUrlCount = 0;
+    QString openedUrl;
+    setAttentionMessageBoxClickCallbackForTests([](QWidget *widget) {
+        QMessageBox *box = qobject_cast<QMessageBox *>(widget);
+        QVERIFY(box);
+        QCOMPARE(box->windowModality(), Qt::ApplicationModal);
+        for (QAbstractButton *button : box->buttons()) {
+            if (box->buttonRole(button) == QMessageBox::ActionRole
+                && button->text().contains(
+                    QString::fromUtf8("语言设置")
+                )) {
+                box->setProperty(
+                    "vocekit_attention_selected_action",
+                    button->text()
+                );
+                return;
+            }
+        }
+        QFAIL("language settings ActionRole button was not found");
+    });
+    showWindowsSpeechFailureAttention(
+        nullptr,
+        QStringLiteral("speech.windows.recognizer_missing"),
+        QStringLiteral("missing"),
+        [&openUrlCount, &openedUrl](const QUrl &url) {
+            openedUrl = url.toString();
+            ++openUrlCount;
+            return true;
+        }
+    );
+    QCOMPARE(openUrlCount, 1);
+    QCOMPARE(openedUrl, QStringLiteral("ms-settings:regionlanguage"));
+
+    setAttentionMessageBoxClickCallbackForTests([](QWidget *widget) {
+        QMessageBox *box = qobject_cast<QMessageBox *>(widget);
+        QVERIFY(box);
+        QCOMPARE(box->windowModality(), Qt::ApplicationModal);
+        QAbstractButton *ok = box->button(QMessageBox::Ok);
+        QVERIFY(ok);
+    });
+    showWindowsSpeechFailureAttention(
+        nullptr,
+        QStringLiteral("speech.windows.recognizer_missing"),
+        QStringLiteral("missing"),
+        [&openUrlCount](const QUrl &) {
+            ++openUrlCount;
+            return true;
+        }
+    );
+    QCOMPARE(openUrlCount, 1);
+
+    bool programDialogVerified = false;
+    setAttentionMessageBoxClickCallbackForTests(
+        [&programDialogVerified](QWidget *widget) {
+        QMessageBox *box = qobject_cast<QMessageBox *>(widget);
+        QVERIFY(box);
+        QCOMPARE(box->windowModality(), Qt::ApplicationModal);
+        QVERIFY(box->text().contains(QString::fromUtf8("重新安装")));
+        QVERIFY(box->text().contains(QString::fromUtf8("完整解压")));
+        for (QAbstractButton *button : box->buttons()) {
+            QVERIFY(
+                box->buttonRole(button) != QMessageBox::ActionRole
+                || !button->text().contains(
+                    QString::fromUtf8("语言设置")
+                )
+            );
+        }
+        programDialogVerified = true;
+        QAbstractButton *ok = box->button(QMessageBox::Ok);
+        QVERIFY(ok);
+    });
+    showWindowsSpeechFailureAttention(
+        nullptr,
+        QStringLiteral("speech.windows.program_missing"),
+        QStringLiteral("program missing")
+    );
+    QVERIFY(programDialogVerified);
+    setAttentionMessageBoxClickCallbackForTests(
+        std::function<void(QWidget *)>()
     );
 }
 

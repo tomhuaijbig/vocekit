@@ -1,6 +1,8 @@
 #include "attention_message.h"
 
 #include <QtWidgets>
+#include <QDesktopServices>
+#include <QUrl>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -11,6 +13,7 @@ namespace {
 AttentionFaqCallback g_openFaqCallback;
 #ifdef VOCEKIT_TESTING
 AttentionActionDialogCallback g_actionDialogCallback;
+std::function<void(QWidget *)> g_messageBoxClickCallback;
 #endif
 
 QString tr8(const char *text)
@@ -193,7 +196,7 @@ void showAttentionMessageBox(
         okButton->setText(tr8("确定"));
     }
 
-    QTimer::singleShot(0, &box, [&box]() {
+    const auto showBox = [&box]() {
         const int screenNumber = QApplication::desktop()->screenNumber(QCursor::pos());
         const QRect screen = QApplication::desktop()->availableGeometry(screenNumber);
         box.adjustSize();
@@ -208,17 +211,39 @@ void showAttentionMessageBox(
         ShowWindow(handle, SW_RESTORE);
         SetForegroundWindow(handle);
 #endif
-    });
-    box.exec();
+    };
+#ifdef VOCEKIT_TESTING
+    const bool inspectedWithoutExec = bool(g_messageBoxClickCallback);
+    if (inspectedWithoutExec) {
+        g_messageBoxClickCallback(&box);
+    } else
+#endif
+    {
+        QTimer::singleShot(0, &box, showBox);
+        box.exec();
+    }
+#ifdef VOCEKIT_TESTING
+    const QString selectedActionText = box.property(
+        "vocekit_attention_selected_action"
+    ).toString();
+#endif
     if (faqButton && box.clickedButton() == faqButton && g_openFaqCallback) {
         g_openFaqCallback(faqId);
     }
-    if (actionButton
-        && (box.clickedButton() == actionButton
-            || box.property(
-                "vocekit_attention_action_selected"
-            ).toBool())
-        && action) {
+    bool actionSelected = false;
+    if (actionButton) {
+#ifdef VOCEKIT_TESTING
+        actionSelected = inspectedWithoutExec
+            ? selectedActionText == actionButton->text()
+            : box.clickedButton() == actionButton;
+#else
+        actionSelected = box.clickedButton() == actionButton;
+#endif
+        actionSelected = actionSelected || box.property(
+            "vocekit_attention_action_selected"
+        ).toBool();
+    }
+    if (actionButton && actionSelected && action) {
         action();
     }
 }
@@ -277,11 +302,67 @@ void showAttentionWarningWithAction(
     );
 }
 
+void showWindowsSpeechFailureAttention(
+    QWidget *parent,
+    const QString &errorCode,
+    const QString &message,
+    const AttentionOpenUrlCallback &openUrl
+)
+{
+    const QString text = message.trimmed().isEmpty()
+        ? QString::fromUtf8("Windows 本地语音识别不可用。")
+        : message;
+    const QString title = QString::fromUtf8(
+        "Windows 本地语音识别不可用"
+    );
+    if (errorCode == QStringLiteral("speech.windows.program_missing")) {
+        showAttentionWarning(
+            parent,
+            title,
+            text + QString::fromUtf8(
+                "\n\n请重新安装软件，或完整解压发布包后再试。"
+            )
+        );
+        return;
+    }
+    if (errorCode == QStringLiteral("speech.windows.recognizer_missing")
+        || errorCode == QStringLiteral("speech.windows.runtime_missing")
+        || errorCode == QStringLiteral(
+            "speech.windows.grammar_load_failed"
+        )) {
+        showAttentionWarningWithAction(
+            parent,
+            title,
+            text,
+            QString::fromUtf8("打开 Windows 语言设置"),
+            [openUrl]() {
+                const QUrl url(QStringLiteral(
+                    "ms-settings:regionlanguage"
+                ));
+                if (openUrl) {
+                    openUrl(url);
+                } else {
+                    QDesktopServices::openUrl(url);
+                }
+            }
+        );
+        return;
+    }
+    showAttentionWarning(parent, title, text);
+}
+
 #ifdef VOCEKIT_TESTING
 void setAttentionActionDialogCallbackForTests(
     const AttentionActionDialogCallback &callback
 )
 {
     g_actionDialogCallback = callback;
+}
+
+void setAttentionMessageBoxClickCallbackForTests(
+    const std::function<void(QWidget *)> &callback
+)
+{
+    g_messageBoxClickCallback = callback;
 }
 #endif

@@ -243,6 +243,7 @@ public:
 
         ++m_operationGeneration;
         m_windowsSpeechFailureShown = false;
+        m_windowsStructuredTerminalHandled = false;
         m_activeSpeechLanguage = normalizeWindowsSpeechLanguage(
             m_settings.windowsSpeechLanguage
         );
@@ -313,6 +314,7 @@ public:
 
         FlowState flow;
         m_windowsSpeechFailureShown = false;
+        m_windowsStructuredTerminalHandled = false;
         m_activeSpeechLanguage = normalizeWindowsSpeechLanguage(
             m_settings.windowsSpeechLanguage
         );
@@ -721,6 +723,7 @@ private:
                     result.errorCode,
                     result.error
                 );
+                m_windowsStructuredTerminalHandled = true;
             }
             if (m_flow.active) {
                 if (cancelFlowIfRequested()) {
@@ -1051,6 +1054,7 @@ private:
         m_streamingTerminalHandled = false;
         m_streamingFallbackActive = false;
         m_windowsSpeechFailureShown = false;
+        m_windowsStructuredTerminalHandled = false;
         if (!m_settings.streamingSpeechRecognitionEnabled
             || !m_access.createStreamingSpeechSession) {
             return true;
@@ -1794,8 +1798,9 @@ private:
         if (!speech.ok) {
             if (isWindowsSpeechConfigurationErrorCode(speech.errorCode)) {
                 showWindowsSpeechFailure(speech.errorCode, speech.error);
+            } else {
+                showFailure(speech.error);
             }
-            showFailure(speech.error);
             saveFailureHistory(modeId, speech.error);
             setProcessing(false);
             return;
@@ -2261,7 +2266,9 @@ private:
         m_longRecordingSession.complete();
 
         if (!result.ok) {
-            showFailure(result.error);
+            if (!m_windowsStructuredTerminalHandled) {
+                showFailure(result.error);
+            }
             saveFailureHistory(m_modeId, result.error);
             setProcessing(false);
             return;
@@ -2634,6 +2641,7 @@ private:
     bool m_streamingTerminalHandled = false;
     bool m_streamingFallbackActive = false;
     bool m_windowsSpeechFailureShown = false;
+    bool m_windowsStructuredTerminalHandled = false;
     bool m_recordingReceivedPcm = false;
     bool m_holdReleasePending = false;
     quint64 m_operationGeneration = 0;

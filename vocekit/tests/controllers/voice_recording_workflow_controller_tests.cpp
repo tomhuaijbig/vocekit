@@ -398,6 +398,8 @@ private slots:
     void windowsFinalTimeoutFallsBackOnceWithCompletePcm();
     void windowsBatchAndLongRequestsKeepConfiguredLanguage();
     void structuredWindowsBatchFailureUsesActionableWarning();
+    void windowsTerminalWarningsAreNotDuplicated_data();
+    void windowsTerminalWarningsAreNotDuplicated();
     void windowsStructuredFailuresCrossWorkflowBoundaries_data();
     void windowsStructuredFailuresCrossWorkflowBoundaries();
     void windowsSnapshotUpdatesFloatingBarWithoutDownstream();
@@ -2193,6 +2195,92 @@ structuredWindowsBatchFailureUsesActionableWarning()
         1000
     );
     QCOMPARE(observedMessage, QStringLiteral("helper missing"));
+}
+
+void VoiceRecordingWorkflowControllerTests::
+windowsTerminalWarningsAreNotDuplicated_data()
+{
+    QTest::addColumn<bool>("longRecording");
+    QTest::addColumn<bool>("structuredError");
+    QTest::addColumn<bool>("structuredCallback");
+    QTest::addColumn<int>("expectedStructuredWarnings");
+    QTest::addColumn<int>("expectedGenericWarnings");
+
+    QTest::newRow("classic-structured-actionable")
+        << false << true << true << 1 << 0;
+    QTest::newRow("classic-structured-fallback")
+        << false << true << false << 0 << 1;
+    QTest::newRow("classic-nonstructured")
+        << false << false << true << 0 << 1;
+    QTest::newRow("long-structured-actionable")
+        << true << true << true << 1 << 0;
+    QTest::newRow("long-structured-fallback")
+        << true << true << false << 0 << 1;
+    QTest::newRow("long-nonstructured")
+        << true << false << true << 0 << 1;
+}
+
+void VoiceRecordingWorkflowControllerTests::
+windowsTerminalWarningsAreNotDuplicated()
+{
+    QFETCH(bool, longRecording);
+    QFETCH(bool, structuredError);
+    QFETCH(bool, structuredCallback);
+    QFETCH(int, expectedStructuredWarnings);
+    QFETCH(int, expectedGenericWarnings);
+
+    const QString errorCode = structuredError
+        ? QStringLiteral("speech.windows.recognizer_missing")
+        : QStringLiteral("speech.network");
+    FakeRecorder recorder;
+    int structuredWarningCount = 0;
+    int genericWarningCount = 0;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.showFailure = [&genericWarningCount](const QString &) {
+        ++genericWarningCount;
+    };
+    if (structuredCallback) {
+        access.showWindowsSpeechFailure = [&structuredWarningCount](
+            const QString &,
+            const QString &
+        ) {
+            ++structuredWarningCount;
+        };
+    }
+    access.runSpeechRecognition = [errorCode](
+        const VoiceSpeechRecognitionRequest &,
+        const VoiceSpeechRecognitionHandlers &,
+        const VoiceRecordingFlowSpeechCompletion &completion
+    ) {
+        VoiceSpeechRecognitionResult result;
+        result.errorCode = errorCode;
+        result.error = QStringLiteral("terminal failure");
+        completion(result);
+    };
+    access.speechRecognition.recognizeProvider = [errorCode](
+        const SpeechRecognitionProviderTaskRequest &
+    ) {
+        SpeechRecognitionTaskResult result;
+        result.errorCode = errorCode;
+        result.error = QStringLiteral("terminal failure");
+        return result;
+    };
+
+    VoiceRecordingWorkflowController controller(access, nullptr, nullptr);
+    AppSettingsData settings;
+    settings.streamingSpeechRecognitionEnabled = false;
+    settings.speechProvider = speechProviderWindowsLocal();
+    FunctionSettings function;
+    function.id = QStringLiteral("windows-terminal-warning");
+    function.recording.longRecordingEnabled = longRecording;
+    settings.functions.append(function);
+    controller.updateConfiguration(settings);
+
+    QVERIFY(controller.begin(function.id));
+    QVERIFY(controller.handleHotkey(function.id));
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.isBusy(), 1000);
+    QCOMPARE(structuredWarningCount, expectedStructuredWarnings);
+    QCOMPARE(genericWarningCount, expectedGenericWarnings);
 }
 
 void VoiceRecordingWorkflowControllerTests::

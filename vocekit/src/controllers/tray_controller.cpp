@@ -24,12 +24,25 @@ TrayController::TrayController(
     auto *speechMenu = menu->addMenu(QString::fromUtf8("语音识别服务"));
     auto *speechGroup = new QActionGroup(speechMenu);
     speechGroup->setExclusive(true);
-    auto *baiduSpeech = speechMenu->addAction(QString::fromUtf8("百度语音识别"));
-    baiduSpeech->setCheckable(true);
-    baiduSpeech->setActionGroup(speechGroup);
-    auto *xfyunSpeech = speechMenu->addAction(QString::fromUtf8("讯飞语音听写"));
-    xfyunSpeech->setCheckable(true);
-    xfyunSpeech->setActionGroup(speechGroup);
+    QMap<QString, QAction *> speechActions;
+    for (const QString &providerId : supportedSpeechProviderIds()) {
+        QAction *action = speechMenu->addAction(
+            speechProviderTitle(providerId)
+        );
+        action->setData(providerId);
+        action->setCheckable(true);
+        action->setActionGroup(speechGroup);
+        speechActions.insert(providerId, action);
+        connect(action, &QAction::triggered, this, [this, providerId]() {
+            if (m_callbacks.setSpeechProvider) {
+                m_callbacks.setSpeechProvider(providerId);
+            }
+            applyQuickSetting(
+                QString::fromUtf8("已切换为")
+                    + speechProviderTitle(providerId)
+            );
+        });
+    }
 
     auto *proxyAction = menu->addAction(QString::fromUtf8("网络代理：直连"));
     proxyAction->setCheckable(true);
@@ -49,12 +62,15 @@ TrayController::TrayController(
         menu,
         &QMenu::aboutToShow,
         this,
-        [this, baiduSpeech, xfyunSpeech, proxyAction, floatingBarAction]() {
-            const QString provider = m_callbacks.speechProvider
-                ? m_callbacks.speechProvider()
-                : QString();
-            baiduSpeech->setChecked(provider == speechProviderBaidu());
-            xfyunSpeech->setChecked(provider == speechProviderXfyun());
+        [this, speechActions, proxyAction, floatingBarAction]() {
+            const QString provider = normalizeSpeechProvider(
+                m_callbacks.speechProvider
+                    ? m_callbacks.speechProvider()
+                    : QString()
+            );
+            if (speechActions.contains(provider)) {
+                speechActions.value(provider)->setChecked(true);
+            }
 
             const bool useProxy = m_callbacks.useSystemProxy
                 && m_callbacks.useSystemProxy();
@@ -71,26 +87,6 @@ TrayController::TrayController(
                 : QString::fromUtf8("浮动条：已关闭"));
         }
     );
-    connect(baiduSpeech, &QAction::triggered, this, [this]() {
-        if (m_callbacks.speechProvider
-            && m_callbacks.speechProvider() == speechProviderBaidu()) {
-            return;
-        }
-        if (m_callbacks.setSpeechProvider) {
-            m_callbacks.setSpeechProvider(speechProviderBaidu());
-        }
-        applyQuickSetting(QString::fromUtf8("已切换为百度语音识别"));
-    });
-    connect(xfyunSpeech, &QAction::triggered, this, [this]() {
-        if (m_callbacks.speechProvider
-            && m_callbacks.speechProvider() == speechProviderXfyun()) {
-            return;
-        }
-        if (m_callbacks.setSpeechProvider) {
-            m_callbacks.setSpeechProvider(speechProviderXfyun());
-        }
-        applyQuickSetting(QString::fromUtf8("已切换为讯飞语音听写"));
-    });
     connect(proxyAction, &QAction::triggered, this, [this](bool checked) {
         if (m_callbacks.setUseSystemProxy) {
             m_callbacks.setUseSystemProxy(checked);

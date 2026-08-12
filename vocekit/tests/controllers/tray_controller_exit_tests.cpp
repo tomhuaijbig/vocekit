@@ -1,9 +1,13 @@
 #include <QtTest>
 
 #include "../../src/controllers/tray_controller.h"
+#include "../../src/config/app_settings_defaults.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QFile>
+#include <QMenu>
+#include <QSystemTrayIcon>
 #include <QWidget>
 
 class TrayControllerExitTests : public QObject
@@ -14,7 +18,75 @@ private slots:
     void quitActionUsesTheApplicationExitCallbackExactlyOnce();
     void missingExitCallbackIsSafe();
     void trayControllerDoesNotQuitTheApplicationDirectly();
+    void speechMenuUsesTheProviderCatalogAndRefreshesSelection();
 };
+
+void TrayControllerExitTests::
+speechMenuUsesTheProviderCatalogAndRefreshesSelection()
+{
+    QWidget hub;
+    QString currentProvider = speechProviderXfyun();
+    QStringList selectedProviders;
+    TrayController::Callbacks callbacks;
+    callbacks.speechProvider = [&currentProvider]() {
+        return currentProvider;
+    };
+    callbacks.setSpeechProvider = [&selectedProviders](const QString &id) {
+        selectedProviders.append(id);
+    };
+    TrayController controller(&hub, callbacks);
+
+    QActionGroup *group = hub.findChild<QActionGroup *>();
+    QVERIFY(group);
+    QMenu *speechMenu = qobject_cast<QMenu *>(group->parent());
+    QVERIFY(speechMenu);
+
+    QMap<QString, QAction *> providerActions;
+    for (QAction *action : speechMenu->actions()) {
+        const QString providerId = action->data().toString();
+        if (!providerId.isEmpty()) {
+            providerActions.insert(providerId, action);
+        }
+    }
+    QStringList actionIds;
+    for (const QString &providerId : providerActions.keys()) {
+        actionIds.append(providerId);
+    }
+    QStringList expectedIds = supportedSpeechProviderIds();
+    actionIds.sort();
+    expectedIds.sort();
+    QCOMPARE(actionIds, expectedIds);
+    QVERIFY(group->isExclusive());
+    QCOMPARE(group->actions().size(), supportedSpeechProviderIds().size());
+    for (const QString &providerId : supportedSpeechProviderIds()) {
+        QAction *action = providerActions.value(providerId);
+        QVERIFY(action);
+        QVERIFY(action->isCheckable());
+        QCOMPARE(action->actionGroup(), group);
+    }
+
+    QSystemTrayIcon *tray = controller.findChild<QSystemTrayIcon *>();
+    QVERIFY(tray);
+    QVERIFY(tray->contextMenu());
+    QVERIFY(QMetaObject::invokeMethod(
+        tray->contextMenu(),
+        "aboutToShow",
+        Qt::DirectConnection
+    ));
+    QVERIFY(providerActions.value(speechProviderXfyun())->isChecked());
+    QCOMPARE(group->checkedAction(), providerActions.value(speechProviderXfyun()));
+
+    currentProvider = QStringLiteral(" custom ");
+    QVERIFY(QMetaObject::invokeMethod(
+        tray->contextMenu(),
+        "aboutToShow",
+        Qt::DirectConnection
+    ));
+    QCOMPARE(group->checkedAction(), providerActions.value(speechProviderCustom()));
+
+    providerActions.value(speechProviderWindowsLocal())->trigger();
+    QCOMPARE(selectedProviders, QStringList() << speechProviderWindowsLocal());
+}
 
 void TrayControllerExitTests::quitActionUsesTheApplicationExitCallbackExactlyOnce()
 {

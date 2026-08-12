@@ -885,9 +885,12 @@ void FunctionCommandPage::refresh()
         qMax(0, triggerBox->findData(m_access.settings->recordingTriggerModeFor(id))));
 
     auto *speechBox = new QComboBox;
-    speechBox->addItem(speechProviderTitle(speechProviderBaidu()), speechProviderBaidu());
-    speechBox->addItem(speechProviderTitle(speechProviderXfyun()), speechProviderXfyun());
-    speechBox->addItem(speechProviderTitle(speechProviderCustom()), speechProviderCustom());
+    for (const QString &providerId : supportedSpeechProviderIds()) {
+        speechBox->addItem(
+            speechProviderTitle(providerId),
+            providerId
+        );
+    }
     speechBox->setCurrentIndex(qMax(0, speechBox->findData(m_access.settings->speechProvider())));
 
     auto *countdownBox =

@@ -7,7 +7,9 @@
 #include "../../src/ui/hub_settings_state.h"
 #include "../../src/ui/floating_bar_style_selector.h"
 #include "../../src/ui/shortcut_display.h"
+#include "../../src/config/app_settings_defaults.h"
 
+#include <QComboBox>
 #include <QPointer>
 #include <QPushButton>
 #include <QFontMetrics>
@@ -274,6 +276,29 @@ void showPage(FunctionCommandPage *page)
     QCoreApplication::processEvents();
 }
 
+int countData(const QComboBox *box, const QString &value)
+{
+    int count = 0;
+    for (int index = 0; index < box->count(); ++index) {
+        if (box->itemData(index).toString() == value) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+QComboBox *speechProviderCombo(QWidget *root)
+{
+    const QList<QComboBox *> boxes = root->findChildren<QComboBox *>();
+    for (QComboBox *box : boxes) {
+        if (box->findData(speechProviderBaidu()) >= 0
+            && box->findData(speechProviderXfyun()) >= 0) {
+            return box;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
 class FunctionCommandPageTests : public QObject
@@ -293,7 +318,46 @@ private slots:
     void canvasOnlyRefreshDoesNotRebuildTheSettingsForm();
     void customFunctionPersistsFloatingBarStyleOverride();
     void builtInFunctionHasNoFloatingBarStyleOverride();
+    void speechSelectorsContainCatalogProvidersExactlyOnce();
 };
+
+void FunctionCommandPageTests::
+speechSelectorsContainCatalogProvidersExactlyOnce()
+{
+    PageEnvironment environment;
+    FunctionCommandPage page(environment.pageAccess);
+    QVERIFY(page.setFunctionId(QStringLiteral("custom_1")));
+    showPage(&page);
+
+    QComboBox *globalSpeech = speechProviderCombo(&page);
+    QVERIFY(globalSpeech);
+    for (const QString &providerId : supportedSpeechProviderIds()) {
+        QCOMPARE(countData(globalSpeech, providerId), 1);
+    }
+
+    QPushButton *toggle = canvasToggle(&page);
+    QVERIFY(toggle);
+    toggle->click();
+    QCoreApplication::processEvents();
+    FunctionCanvasEditor *editor = page.canvasEditor();
+    QVERIFY(editor);
+    const QString voiceId = editor->controller()->placeNode(
+        FunctionFlowNodeType::VoiceSource,
+        QPointF(120.0, 120.0)
+    );
+    QVERIFY(!voiceId.isEmpty());
+    editor->inspector()->setGraphAndSelection(
+        editor->controller()->graph(),
+        voiceId
+    );
+    QComboBox *inspectorSpeech = editor->inspector()->findChild<QComboBox *>(
+        QStringLiteral("flowVoiceProvider")
+    );
+    QVERIFY(inspectorSpeech);
+    for (const QString &providerId : supportedSpeechProviderIds()) {
+        QCOMPARE(countData(inspectorSpeech, providerId), 1);
+    }
+}
 
 void FunctionCommandPageTests::
 customFunctionPersistsFloatingBarStyleOverride()

@@ -383,6 +383,10 @@ AppSettingsData appSettingsDataFromJson(
     data.speechProvider = normalizeSpeechProvider(
         root.value(QStringLiteral("speechProvider")).toString()
     );
+    data.windowsSpeechLanguage = normalizeWindowsSpeechLanguage(
+        root.value(QStringLiteral("windowsSpeechLanguage"))
+            .toString(windowsSpeechLanguageFollowWindows())
+    );
     data.ocrEngine = normalizeOcrEngine(
         root.value(QStringLiteral("ocrEngine")).toString()
     );
@@ -822,6 +826,10 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
         data.vocabularyPromptEntryLimit
     );
     root.insert(QStringLiteral("speechProvider"), data.speechProvider);
+    root.insert(
+        QStringLiteral("windowsSpeechLanguage"),
+        normalizeWindowsSpeechLanguage(data.windowsSpeechLanguage)
+    );
     root.insert(QStringLiteral("ocrEngine"), data.ocrEngine);
     root.insert(QStringLiteral("ocrTimeoutMs"), data.ocrTimeoutMs);
     root.insert(QStringLiteral("recordPath"), data.recordDirectory);

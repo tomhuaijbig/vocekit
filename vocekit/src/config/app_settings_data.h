@@ -47,6 +47,7 @@ struct AppSettingsData
     int vocabularyPromptEntryLimit = 16;
 
     QString speechProvider = QStringLiteral("baidu");
+    QString windowsSpeechLanguage = QStringLiteral("follow-windows");
     QString ocrEngine = QStringLiteral("automatic");
     int ocrTimeoutMs = 45000;
     QString recordDirectory;

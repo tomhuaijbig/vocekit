@@ -50,9 +50,17 @@ int defaultResultPopupSeconds();
 QString speechProviderBaidu();
 QString speechProviderXfyun();
 QString speechProviderCustom();
+QString speechProviderWindowsLocal();
 QStringList supportedSpeechProviderIds();
 QString normalizeSpeechProvider(const QString &provider);
 QString speechProviderTitle(const QString &provider);
+
+QString windowsSpeechLanguageFollowWindows();
+QString windowsSpeechLanguageChinese();
+QString windowsSpeechLanguageEnglish();
+QStringList supportedWindowsSpeechLanguages();
+QString normalizeWindowsSpeechLanguage(const QString &language);
+QString windowsSpeechLanguageTitle(const QString &language);
 
 QString ocrEngineAutomatic();
 QString ocrEngineRapid();

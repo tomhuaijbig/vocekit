@@ -277,12 +277,18 @@ QString speechProviderCustom()
     return QStringLiteral("custom");
 }
 
+QString speechProviderWindowsLocal()
+{
+    return QStringLiteral("windows-local");
+}
+
 QStringList supportedSpeechProviderIds()
 {
     return QStringList()
         << speechProviderBaidu()
         << speechProviderXfyun()
-        << speechProviderCustom();
+        << speechProviderCustom()
+        << speechProviderWindowsLocal();
 }
 
 QString normalizeSpeechProvider(const QString &provider)
@@ -293,6 +299,9 @@ QString normalizeSpeechProvider(const QString &provider)
     }
     if (normalized == speechProviderCustom()) {
         return speechProviderCustom();
+    }
+    if (normalized == speechProviderWindowsLocal()) {
+        return speechProviderWindowsLocal();
     }
     return speechProviderBaidu();
 }
@@ -306,7 +315,57 @@ QString speechProviderTitle(const QString &provider)
     if (normalized == speechProviderCustom()) {
         return trText("自定义语音接口");
     }
+    if (normalized == speechProviderWindowsLocal()) {
+        return trText("Windows 本地语音识别");
+    }
     return trText("百度语音识别");
+}
+
+QString windowsSpeechLanguageFollowWindows()
+{
+    return QStringLiteral("follow-windows");
+}
+
+QString windowsSpeechLanguageChinese()
+{
+    return QStringLiteral("zh-CN");
+}
+
+QString windowsSpeechLanguageEnglish()
+{
+    return QStringLiteral("en-US");
+}
+
+QStringList supportedWindowsSpeechLanguages()
+{
+    return QStringList()
+        << windowsSpeechLanguageFollowWindows()
+        << windowsSpeechLanguageChinese()
+        << windowsSpeechLanguageEnglish();
+}
+
+QString normalizeWindowsSpeechLanguage(const QString &language)
+{
+    const QString normalized = language.trimmed().toLower();
+    if (normalized == windowsSpeechLanguageChinese().toLower()) {
+        return windowsSpeechLanguageChinese();
+    }
+    if (normalized == windowsSpeechLanguageEnglish().toLower()) {
+        return windowsSpeechLanguageEnglish();
+    }
+    return windowsSpeechLanguageFollowWindows();
+}
+
+QString windowsSpeechLanguageTitle(const QString &language)
+{
+    const QString normalized = normalizeWindowsSpeechLanguage(language);
+    if (normalized == windowsSpeechLanguageChinese()) {
+        return trText("简体中文");
+    }
+    if (normalized == windowsSpeechLanguageEnglish()) {
+        return QStringLiteral("English");
+    }
+    return trText("跟随 Windows");
 }
 
 QString ocrEngineAutomatic()

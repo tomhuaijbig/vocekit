@@ -15,6 +15,85 @@ private slots:
         QCOMPARE(normalizeSpeechProvider(QString()), speechProviderBaidu());
     }
 
+    void windowsSpeechProviderIsCatalogued()
+    {
+        QCOMPARE(
+            speechProviderWindowsLocal(),
+            QStringLiteral("windows-local")
+        );
+        QCOMPARE(
+            normalizeSpeechProvider(QStringLiteral("WINDOWS-LOCAL")),
+            speechProviderWindowsLocal()
+        );
+        QCOMPARE(
+            speechProviderTitle(speechProviderWindowsLocal()),
+            QString::fromUtf8("Windows 本地语音识别")
+        );
+        QCOMPARE(
+            supportedSpeechProviderIds(),
+            QStringList()
+                << speechProviderBaidu()
+                << speechProviderXfyun()
+                << speechProviderCustom()
+                << speechProviderWindowsLocal()
+        );
+    }
+
+    void windowsSpeechLanguageCatalogIsStable()
+    {
+        QCOMPARE(
+            windowsSpeechLanguageFollowWindows(),
+            QStringLiteral("follow-windows")
+        );
+        QCOMPARE(
+            windowsSpeechLanguageChinese(),
+            QStringLiteral("zh-CN")
+        );
+        QCOMPARE(
+            windowsSpeechLanguageEnglish(),
+            QStringLiteral("en-US")
+        );
+        QCOMPARE(
+            supportedWindowsSpeechLanguages(),
+            QStringList()
+                << windowsSpeechLanguageFollowWindows()
+                << windowsSpeechLanguageChinese()
+                << windowsSpeechLanguageEnglish()
+        );
+        QCOMPARE(
+            windowsSpeechLanguageTitle(windowsSpeechLanguageFollowWindows()),
+            QString::fromUtf8("跟随 Windows")
+        );
+        QCOMPARE(
+            windowsSpeechLanguageTitle(windowsSpeechLanguageChinese()),
+            QString::fromUtf8("简体中文")
+        );
+        QCOMPARE(
+            windowsSpeechLanguageTitle(windowsSpeechLanguageEnglish()),
+            QStringLiteral("English")
+        );
+    }
+
+    void windowsSpeechLanguageNormalizesSafely()
+    {
+        QCOMPARE(
+            normalizeWindowsSpeechLanguage(QString()),
+            windowsSpeechLanguageFollowWindows()
+        );
+        QCOMPARE(
+            normalizeWindowsSpeechLanguage(QStringLiteral("ZH-cn")),
+            windowsSpeechLanguageChinese()
+        );
+        QCOMPARE(
+            normalizeWindowsSpeechLanguage(QStringLiteral("en-US")),
+            windowsSpeechLanguageEnglish()
+        );
+        QCOMPARE(
+            normalizeWindowsSpeechLanguage(QStringLiteral("fr-FR")),
+            windowsSpeechLanguageFollowWindows()
+        );
+    }
+
     void normalizesOcrEngineIds()
     {
         QCOMPARE(normalizeOcrEngine(QStringLiteral("rapid")), ocrEngineRapid());
@@ -33,6 +112,7 @@ private slots:
                 << QStringLiteral("baidu")
                 << QStringLiteral("xfyun")
                 << QStringLiteral("custom")
+                << QStringLiteral("windows-local")
         );
         QCOMPARE(speech.size(), speech.toSet().size());
 

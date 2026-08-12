@@ -50,6 +50,77 @@ private slots:
         QVERIFY(!restored.streamingSpeechRecognitionEnabled);
     }
 
+    void missingWindowsSpeechLanguageUsesFollowWindows()
+    {
+        const AppSettingsData restored = appSettingsDataFromJson(
+            QJsonObject()
+        );
+
+        QCOMPARE(
+            restored.windowsSpeechLanguage,
+            windowsSpeechLanguageFollowWindows()
+        );
+    }
+
+    void windowsSpeechSettingsRoundTrip()
+    {
+        AppSettingsData original;
+        original.speechProvider = speechProviderWindowsLocal();
+        original.windowsSpeechLanguage = windowsSpeechLanguageEnglish();
+
+        const QJsonObject written = appSettingsDataToJson(original);
+        const AppSettingsData restored = appSettingsDataFromJson(written);
+
+        QCOMPARE(
+            written.value(QStringLiteral("speechProvider")).toString(),
+            speechProviderWindowsLocal()
+        );
+        QCOMPARE(
+            written.value(QStringLiteral("windowsSpeechLanguage")).toString(),
+            windowsSpeechLanguageEnglish()
+        );
+        QCOMPARE(restored.speechProvider, speechProviderWindowsLocal());
+        QCOMPARE(
+            restored.windowsSpeechLanguage,
+            windowsSpeechLanguageEnglish()
+        );
+    }
+
+    void invalidWindowsSpeechLanguageNormalizesToFollowWindows()
+    {
+        QJsonObject root;
+        root.insert(
+            QStringLiteral("windowsSpeechLanguage"),
+            QStringLiteral("fr-FR")
+        );
+
+        const AppSettingsData restored = appSettingsDataFromJson(root);
+
+        QCOMPARE(
+            restored.windowsSpeechLanguage,
+            windowsSpeechLanguageFollowWindows()
+        );
+        QCOMPARE(
+            appSettingsDataToJson(restored)
+                .value(QStringLiteral("windowsSpeechLanguage"))
+                .toString(),
+            windowsSpeechLanguageFollowWindows()
+        );
+    }
+
+    void unknownSpeechProviderStillFallsBackToBaidu()
+    {
+        QJsonObject root;
+        root.insert(
+            QStringLiteral("speechProvider"),
+            QStringLiteral("future-provider")
+        );
+
+        const AppSettingsData restored = appSettingsDataFromJson(root);
+
+        QCOMPARE(restored.speechProvider, speechProviderBaidu());
+    }
+
     void missingFloatingPreferencesUseMigrationSafeDefaults()
     {
         const AppSettingsData restored = appSettingsDataFromJson(

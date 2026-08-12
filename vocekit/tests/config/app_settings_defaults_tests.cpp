@@ -81,12 +81,18 @@ private slots:
             windowsSpeechLanguageFollowWindows()
         );
         QCOMPARE(
-            normalizeWindowsSpeechLanguage(QStringLiteral("ZH-cn")),
+            normalizeWindowsSpeechLanguage(QStringLiteral("  ZH-cn  ")),
             windowsSpeechLanguageChinese()
         );
         QCOMPARE(
-            normalizeWindowsSpeechLanguage(QStringLiteral("en-US")),
+            normalizeWindowsSpeechLanguage(QStringLiteral(" En-uS ")),
             windowsSpeechLanguageEnglish()
+        );
+        QCOMPARE(
+            normalizeWindowsSpeechLanguage(
+                QStringLiteral(" FOLLOW-WINDOWS ")
+            ),
+            windowsSpeechLanguageFollowWindows()
         );
         QCOMPARE(
             normalizeWindowsSpeechLanguage(QStringLiteral("fr-FR")),

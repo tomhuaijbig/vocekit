@@ -66,7 +66,7 @@ private slots:
     {
         AppSettingsData original;
         original.speechProvider = speechProviderWindowsLocal();
-        original.windowsSpeechLanguage = windowsSpeechLanguageEnglish();
+        original.windowsSpeechLanguage = QStringLiteral(" EN-us ");
 
         const QJsonObject written = appSettingsDataToJson(original);
         const AppSettingsData restored = appSettingsDataFromJson(written);

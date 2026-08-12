@@ -6,7 +6,7 @@
 
 **Architecture:** Keep Qt as the only microphone owner and send its existing 16 kHz mono 16-bit PCM to one .NET Framework helper process per recording. A focused QProcess adapter translates line-delimited helper JSON into the existing provider-neutral streaming callbacks, while an `ISpeechProvider` implementation reuses the same helper in batch mode. Persist one global Windows speech language setting, expose the provider through the shared catalog, and preserve all existing cloud-provider behavior.
 
-**Tech Stack:** C++11, Qt 5.9 Core/Widgets/Multimedia/Concurrent, QProcess, QtTest, qmake, MinGW 5.3 x86, C# 7.3, .NET Framework 4.8 x64, System.Speech, MSBuild/Visual Studio 2022.
+**Tech Stack:** C++11, Qt 5.9 Core/Widgets/Multimedia/Concurrent, QProcess, QtTest, qmake, MinGW 5.3 x86, C# 7.3, Windows .NET Framework 4.x x64, System.Speech, VS2022 MSBuild/Roslyn.
 
 **Design:** `docs/superpowers/specs/2026-08-12-windows-local-speech-recognition-design.md`
 
@@ -16,7 +16,7 @@
 
 ### New helper files
 
-- `helpers/windows_speech/windows_speech.csproj` — x64 .NET Framework 4.8 console-helper build.
+- `helpers/windows_speech/windows_speech.csproj` — preferred x64 .NET Framework 4.8 console-helper build when the 4.8 targeting pack is installed.
 - `helpers/windows_speech/Program.cs` — command-line validation, recognizer selection, JSON event output, probe, stream, and batch modes.
 - `helpers/windows_speech/ProducerConsumerAudioStream.cs` — bounded PCM stream with the minimal seek/declared-length compatibility required by System.Speech, plus EOF and cancellation semantics.
 - `scripts/build-windows-speech-helper.ps1` — deterministic Release helper build and output validation.
@@ -227,14 +227,14 @@ git commit -m "feat: add Windows speech settings contract"
 
 - [ ] **Step 1: Add a helper self-test that initially fails to build**
 
-Define these modes in the command parser and make `--self-test` exercise the stream without loading a recognizer:
+Define these modes in the command parser and make `--self-test` exercise the stream, parser, event writer, and text accumulator without loading a recognizer:
 
 ```csharp
 if (options.SelfTest)
 {
     using (var stream = new ProducerConsumerAudioStream(32))
     {
-        Require(stream.TryWriteChunk(new byte[] { 1, 2, 3, 4 }), "write");
+        stream.WriteChunk(new byte[] { 1, 2, 3, 4 });
         stream.CompleteWriting();
         var output = new byte[8];
         var count = stream.Read(output, 0, output.Length);
@@ -252,7 +252,7 @@ Run the new build script before creating the project. Expected: fail with `windo
 
 - [ ] **Step 2: Implement the bounded producer/consumer stream**
 
-Implement a forward-only SAPI-compatible `Stream` with a monitor-protected queue:
+Implement a forward-only SAPI-compatible `Stream` with a monitor-protected queue. The helper-side writer applies backpressure: a temporarily full queue is normal and must block until the recognizer consumes bytes, while cancel/completion wakes every waiter:
 
 ```csharp
 public sealed class ProducerConsumerAudioStream : Stream
@@ -266,16 +266,26 @@ public sealed class ProducerConsumerAudioStream : Stream
     private long readPosition;
     private readonly long declaredLength = 64L * 1024L * 1024L;
 
-    public bool TryWriteChunk(byte[] value)
+    public void WriteChunk(byte[] value)
     {
+        int offset = 0;
         lock (chunks)
         {
-            if (completed || cancelled || queuedBytes + value.Length > capacityBytes)
-                return false;
-            chunks.Enqueue(value);
-            queuedBytes += value.Length;
-            Monitor.PulseAll(chunks);
-            return true;
+            while (offset < value.Length)
+            {
+                while (!completed && !cancelled && queuedBytes >= capacityBytes)
+                    Monitor.Wait(chunks);
+                if (cancelled) throw new OperationCanceledException();
+                if (completed) throw new InvalidOperationException("input completed");
+                int count = Math.Min(value.Length - offset,
+                                     capacityBytes - queuedBytes);
+                var part = new byte[count];
+                Buffer.BlockCopy(value, offset, part, 0, count);
+                chunks.Enqueue(part);
+                queuedBytes += count;
+                offset += count;
+                Monitor.PulseAll(chunks);
+            }
         }
     }
 
@@ -291,9 +301,9 @@ public sealed class ProducerConsumerAudioStream : Stream
 }
 ```
 
-`Read` must wait while it has not filled the caller's requested count and the queue is temporarily empty, return queued bytes in order, and return a short read/zero only at EOF or cancel. `CanRead=true`, `CanSeek=true`, `CanWrite=false`. `Length` reports the fixed 64 MiB declared maximum without allocating it. `Position` reports consumed bytes. Only `Seek(0, SeekOrigin.Current)` and setting `Position` to its current value are accepted; every reposition attempt and write throws `NotSupportedException`. Reject cumulative input beyond the 64 MiB declaration. Keep the actual queued-memory capacity at 64,000 bytes.
+`Read` must wait while it has not filled the caller's requested count and the queue is temporarily empty, return queued bytes in order, pulse waiting producers whenever capacity is released, and return a short read/zero only at EOF or cancel. `CanRead=true`, `CanSeek=true`, `CanWrite=false`. `Length` reports the fixed 64 MiB declared maximum without allocating it. `Position` reports consumed bytes. Only `Seek(0, SeekOrigin.Current)` and setting `Position` to its current value are accepted; every reposition attempt and write throws `NotSupportedException`. Reject cumulative input beyond the 64 MiB declaration. Keep the actual queued-memory capacity at 64,000 bytes. The stdin feeder may block here; the OS pipe then naturally backpressures QProcess, whose separate Qt-side queue remains capped at 64,000 bytes and never blocks audio capture.
 
-These unusual semantics are required because the .NET Framework System.Speech/SAPI wrapper probes `Length`, `Position`, and `Seek(0, Current)` at bind time. Add self-test assertions that a zero-length declaration is rejected by the test fixture, and that the compatible stream produces audio reads without allowing rewind.
+These unusual semantics are required because the .NET Framework System.Speech/SAPI wrapper probes `Length`, `Position`, and `Seek(0, Current)` at bind time. Add self-test assertions that a zero-length declaration is rejected by the test fixture, that the compatible stream produces audio reads without allowing rewind, that a writer blocked by the 64,000-byte capacity resumes after a reader consumes data, and that cancel unblocks both a waiting reader and writer without deadlock.
 
 - [ ] **Step 3: Implement probe, stream, and batch modes**
 
@@ -320,11 +330,13 @@ private static RecognizerInfo ResolveRecognizer(string requested)
 }
 ```
 
-For `--probe`, load `DictationGrammar` and emit one `probe` JSON object containing `ok`, `resolvedLanguage`, and `installedLanguages`. For stream/batch, feed stdin on a producer thread into the bounded stream, call `SetInputToAudioStream(...16000, Sixteen, Mono)`, publish `hypothesis` and `recognized` events, and after EOF publish exactly one `final` with concatenated committed text. Catch exceptions into stable `error` JSON with `errorCode`; keep stdout JSON-only and send diagnostics to stderr.
+For `--probe`, load `DictationGrammar` and emit one `probe` JSON object containing `ok`, `resolvedLanguage`, and `installedLanguages`. For stream/batch, feed stdin on a producer thread into the bounded stream, call `SetInputToAudioStream(...16000, Sixteen, Mono)`, publish `hypothesis` and `recognized` events, and after EOF publish exactly one `final` with concatenated committed text. Join two confirmed segments with one space only when both boundary characters are Latin letters/digits; do not inject spaces at CJK boundaries. Catch exceptions into stable `error` JSON with `errorCode`; keep stdout JSON-only and send diagnostics to stderr.
+
+Set `Console.OutputEncoding = new UTF8Encoding(false)`. All callbacks must call one locked `WriteEvent` implementation that serializes, writes one complete line, and flushes while holding the lock; no callback writes stdout directly. The self-test must launch concurrent event writers against an injectable text sink and prove that every resulting line is valid JSON with one run ID/type, then cover invalid arguments, language resolution against an injected recognizer catalog, English/CJK segment joining, exact-one final, and stable error serialization.
 
 - [ ] **Step 4: Create the .NET Framework project and build scripts**
 
-The project must target x64 Release and reference `System.Speech`:
+The preferred project path targets x64 Release and references `System.Speech`:
 
 ```xml
 <Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
@@ -351,7 +363,9 @@ The project must target x64 Release and reference `System.Speech`:
 </Project>
 ```
 
-`build-windows-speech-helper.ps1` must locate VS2022 MSBuild, build `/p:Configuration=Release /p:Platform=x64`, assert `helpers/bin/vocekit-windows-speech.exe`, then run `--self-test --run-id build-check` and require exit code zero. `build-runtime-helpers.ps1` must invoke `build-ocr-helpers.ps1` and the new script and propagate either failure.
+`build-windows-speech-helper.ps1` must locate VS2022. First run MSBuild with `/p:Configuration=Release /p:Platform=x64`. If and only if that build fails with missing .NET Framework reference assemblies/targeting pack (`MSB3644`), fall back to VS2022's `MSBuild\Current\Bin\Roslyn\csc.exe` with `/noconfig /nostdlib+ /target:exe /platform:x64 /langversion:7.3`; explicitly reference `mscorlib.dll`, `System.dll`, `System.Core.dll`, and `System.Web.Extensions.dll` from `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319`, plus `System.Speech.dll` resolved from `%WINDIR%\Microsoft.NET\assembly\GAC_MSIL\System.Speech`. Require every reference to exist and log which build path was used. Do not fall back for C# compile errors or other MSBuild failures. Assert `helpers/bin/vocekit-windows-speech.exe`, then run `--self-test --run-id build-check` and require exit code zero. `build-runtime-helpers.ps1` must invoke `build-ocr-helpers.ps1` and the new script and propagate either failure.
+
+This fallback is required by a fresh local probe: the machine has the .NET 4.8 runtime and working `System.Speech`, but no 4.8 Developer Pack, so the project path reports `MSB3644`; the explicit Roslyn/x64 reference path compiles and runs successfully. Add a build-script test or injectable resolver covering both the normal MSBuild path and the exact `MSB3644` fallback, plus rejection of a non-targeting-pack failure.
 
 - [ ] **Step 5: Verify helper self-test and real probe**
 
@@ -364,7 +378,7 @@ Run:
 & .\helpers\bin\vocekit-windows-speech.exe --probe --language en-US --run-id en-probe
 ```
 
-Expected: each command exits zero; self-test reports `ok:true`; probes resolve exactly `zh-CN` and `en-US` on the current machine. Before integrating Qt, run a helper-only synthesized-stream test for both languages and require at least one `hypothesis` or `recognized` event plus `InputStreamEnded=true`; this locks in the SAPI compatibility semantics discovered during feasibility probing.
+Expected: the build script explicitly reports either `MSBuild` or `Roslyn fallback`, exits zero, and self-test reports `ok:true`; probes resolve exactly `zh-CN` and `en-US` on the current machine. Before integrating Qt, run a helper-only synthesized-stream test for both languages and require at least one `hypothesis` or `recognized` event plus `InputStreamEnded=true`; this locks in the SAPI compatibility semantics discovered during feasibility probing. Also run a producer-faster-than-consumer stress case above 64,000 bytes and require completion without `WRITE_FAILED`, deadlock, or queue growth beyond the declared capacity.
 
 - [ ] **Step 6: Commit helper sources and scripts**
 
@@ -450,9 +464,11 @@ QStringList windowsSpeechHelperArguments(const QString &mode,
 WindowsSpeechHelperEvent parseWindowsSpeechHelperEvent(const QByteArray &line);
 QString windowsSpeechOperationErrorCode(const QString &helperErrorCode);
 bool isWindowsSpeechConfigurationErrorCode(const QString &operationErrorCode);
+QString appendWindowsSpeechRecognizedSegment(const QString &committed,
+                                             const QString &segment);
 ```
 
-Reject non-object JSON, version not equal to 1, missing run ID, unknown event type, missing required text/error fields, embedded newline, and payloads over 64 KiB. Normalize display errors without echoing raw stdout or transcript. Map helper codes deterministically: `PROGRAM_MISSING -> speech.windows.program_missing`, `RECOGNIZER_MISSING -> speech.windows.recognizer_missing`, `SYSTEM_SPEECH_UNAVAILABLE -> speech.windows.runtime_missing`, `GRAMMAR_LOAD_FAILED -> speech.windows.grammar_load_failed`, `NO_SPEECH -> speech.empty_result`, `CANCELLED -> operation.cancelled`, and all other failures to `speech.windows.local`.
+Reject non-object JSON, version not equal to 1, missing run ID, unknown event type, missing required text/error fields, embedded newline, and payloads over 64 KiB. Normalize display errors without echoing raw stdout or transcript. Map helper codes deterministically: `PROGRAM_MISSING -> speech.windows.program_missing`, `RECOGNIZER_MISSING -> speech.windows.recognizer_missing`, `SYSTEM_SPEECH_UNAVAILABLE -> speech.windows.runtime_missing`, `GRAMMAR_LOAD_FAILED -> speech.windows.grammar_load_failed`, `NO_SPEECH -> speech.empty_result`, `CANCELLED -> operation.cancelled`, and all other failures to `speech.windows.local`. Test the segment helper with `"hello" + "world" -> "hello world"`, CJK boundaries with no inserted space, already-spaced input, and empty segments; the streaming preview must follow the same semantics as the helper's authoritative final accumulator.
 
 - [ ] **Step 4: Build a deterministic fake helper**
 
@@ -491,7 +507,7 @@ Add missing program, start failure, invalid JSON, wrong run ID, output over 1 Mi
 
 - [ ] **Step 6: Implement the synchronous client**
 
-Use `QProcess::SeparateChannels`, wait for start up to 5 seconds, write all PCM with partial-write handling, close the write channel, poll at 50 ms for cancellation/timeout, cap stdout and stderr at 1 MiB, and accept exactly one matching terminal event. Return stable codes such as `PROGRAM_MISSING`, `START_FAILED`, `WRITE_FAILED`, `INVALID_RESPONSE`, `RUN_ID_MISMATCH`, `OUTPUT_TOO_LARGE`, `PROCESS_CRASHED`, `TIMEOUT`, `CANCELLED`, and `EMPTY_TEXT`.
+Use `QProcess::SeparateChannels`, wait for start up to 5 seconds, and feed PCM in at most 32 KiB chunks. Never enqueue the full recording into QProcess: keep `bytesToWrite()` below 64 KiB, wait/poll `bytesWritten` in 50 ms slices, and check cancellation plus the shared deadline between chunks. After the last confirmed write, close the write channel, keep polling at 50 ms, cap stdout and stderr at 1 MiB, and accept exactly one matching terminal event. Derive the batch deadline as `max(15 seconds, audioDuration * 1.5 + 10 seconds)` with a 35-minute hard cap so a valid 30-minute local recording is not always killed at 120 seconds. Return stable codes such as `PROGRAM_MISSING`, `START_FAILED`, `WRITE_FAILED`, `INVALID_RESPONSE`, `RUN_ID_MISMATCH`, `OUTPUT_TOO_LARGE`, `PROCESS_CRASHED`, `TIMEOUT`, `CANCELLED`, and `EMPTY_TEXT`. Add a fake-helper case that delays stdin reads, sends more than 64 KiB, cancels during backpressure, and proves the client does not deadlock or leave a child process.
 
 - [ ] **Step 7: Run all three projects GREEN and commit**
 
@@ -711,7 +727,8 @@ case WindowsSpeechHelperEventType::Hypothesis:
     emitSnapshot();
     break;
 case WindowsSpeechHelperEventType::Recognized:
-    m_committedText += event.text;
+    m_committedText = appendWindowsSpeechRecognizedSegment(
+        m_committedText, event.text);
     m_provisionalText.clear();
     emitSnapshot();
     break;
@@ -723,7 +740,7 @@ case WindowsSpeechHelperEventType::Error:
     break;
 ```
 
-Queue no more than 64,000 bytes. Before `ready`, `PROGRAM_MISSING`, `RECOGNIZER_MISSING`, `SYSTEM_SPEECH_UNAVAILABLE`, and `GRAMMAR_LOAD_FAILED` call `configurationFailed(windowsSpeechOperationErrorCode(code), message)` exactly once; these are not transient streaming failures. A `QProcess::FailedToStart` before `ready` uses `speech.windows.program_missing` when the resolved file is absent and `speech.windows.local` otherwise. After `ready`, process, protocol, timeout, and queue failures use `degraded`. `finish()` marks finalizing, drains queued PCM, then closes the write channel exactly once. `cancel()` disconnects business callbacks, clears buffers, terminates and after 250 ms kills the process. Destructor calls the same cleanup without invoking callbacks.
+Queue no more than 64,000 bytes and remove bytes from that queue only as `bytesWritten` confirms delivery; never dump the whole queue into QProcess's internal write buffer. `start()` returns true once asynchronous process startup has been initiated and returns false only for an invalid request/state. Every terminal failure before the matching `ready` event—including missing file, `FailedToStart`, startup timeout, bad startup protocol, missing recognizer/runtime, and grammar failure—calls `configurationFailed(code, message)` exactly once and never `degraded`; `PROGRAM_MISSING` is used when the resolved file is absent and other local startup failures use their stable mapped code. After `ready`, process, protocol, final timeout, and queue failures use `degraded`. `finish()` marks finalizing, drains queued PCM, then closes the write channel exactly once. `cancel()` disconnects business callbacks, clears buffers, terminates and after 250 ms kills the process. Destructor calls the same cleanup without invoking callbacks.
 
 - [ ] **Step 5: Wire the production factory**
 
@@ -765,6 +782,7 @@ Add real controller tests proving:
 7. long-recording segment requests preserve the configured Windows language.
 8. `RECOGNIZER_MISSING` and `PROGRAM_MISSING` survive batch and long-recording task boundaries and use the actionable Windows warning path rather than a cloud-key warning.
 9. a pre-ready configuration failure stops the current recording and does not batch fallback through the same known-bad component.
+10. a pre-ready startup timeout, malformed event, or `FailedToStart` follows the same zero-batch path, while the equivalent failure after `ready` still performs exactly one same-engine batch fallback.
 
 Representative assertions:
 
@@ -830,7 +848,7 @@ void showAttentionWarningWithAction(
 
 The dialog adds one `QMessageBox::ActionRole` button and calls the action only when that button is clicked. `VoiceController` receives `(errorCode, message)` and uses `isWindowsSpeechConfigurationErrorCode(...)` rather than matching localized text. For `speech.windows.recognizer_missing`, `speech.windows.runtime_missing`, and `speech.windows.grammar_load_failed`, it shows action text “打开 Windows 语言设置” and calls `QDesktopServices::openUrl(QUrl("ms-settings:regionlanguage"))`. For `speech.windows.program_missing`, it shows a non-actionable warning that tells the user to reinstall or fully extract the application; opening language settings cannot repair a missing packaged helper. Normal batch, flow batch, long-recording segments, and streaming use the same mapping. Add a modal test that clicks the language action and verifies exactly one callback, an OK path that verifies zero, and a program-missing path that verifies no language-settings button.
 
-Wire `StreamingSpeechCallbacks::configurationFailed` separately from `degraded`. When it arrives before `ready`, end the active generation through the existing cancellation path, stop capture, preserve the WAV path for diagnostics, set processing false, and invoke `showWindowsSpeechFailure`; do not schedule batch fallback because the same helper or recognizer is already known unusable. A process/protocol failure after `ready` still uses the same-engine batch fallback.
+Wire `StreamingSpeechCallbacks::configurationFailed` separately from `degraded`. When it arrives before `ready`, end the active generation through the existing cancellation path, stop capture, preserve the WAV path for diagnostics, set processing false, and invoke `showWindowsSpeechFailure`; do not schedule batch fallback because the same helper or recognizer is already known unusable. Any failure after `ready` still uses the same-engine batch fallback. Apply the same structured-code warning mapping when normal batch, flow batch, or a long-recording segment returns; flow paths must surface the actionable warning before completing their existing failure result rather than only logging it.
 
 - [ ] **Step 5: Run GREEN and long-recording/flow regressions**
 
@@ -1020,13 +1038,13 @@ git commit -m "feat: expose Windows speech across selectors"
 
 - [ ] **Step 1: Add RED deployment assertions before copying the helper**
 
-Add `speech\windows\vocekit-windows-speech.exe` to `verify-runtime.ps1` required files and make it run:
+Add `speech\windows\vocekit-windows-speech.exe` to `verify-runtime.ps1` required files and make it run a language-pack-independent integrity check:
 
 ```powershell
 $speechHelper = Join-Path $RuntimeDir 'speech\windows\vocekit-windows-speech.exe'
-$probeOutput = & $speechHelper --probe --language follow-windows --run-id runtime-verify 2>&1
-if ($LASTEXITCODE -ne 0 -or ($probeOutput -join "`n") -notmatch '"type":"probe"') {
-    throw "Windows speech helper probe failed.`n$($probeOutput -join "`n")"
+$selfTestOutput = & $speechHelper --self-test --run-id runtime-verify 2>&1
+if ($LASTEXITCODE -ne 0 -or ($selfTestOutput -join "`n") -notmatch '"type":"self-test"') {
+    throw "Windows speech helper self-test failed.`n$($selfTestOutput -join "`n")"
 }
 ```
 
@@ -1051,7 +1069,7 @@ Resolve source from `helpers/bin/vocekit-windows-speech.exe`, require it, create
 
 - [ ] **Step 4: Extend package verification**
 
-Before archive creation, assert the packaged helper exists and run its `--probe` from the package path. Keep `.pdb`, helper source, build logs, PCM/WAV, and personal config excluded. Do not require the x64 helper PE machine to match the x86 Qt executable; it is a child process, not a loaded DLL. Add this distinction to `verify-runtime.ps1` comments and `docs/TESTING.md`.
+Before archive creation, assert the packaged helper exists and run its `--self-test` from the package path. Do not require an installed speech language for package integrity; language-specific `--probe` remains a settings/Task 10 smoke check. Keep `.pdb`, helper source, build logs, PCM/WAV, and personal config excluded. Do not require the x64 helper PE machine to match the x86 Qt executable; it is a child process, not a loaded DLL. Add this distinction to `verify-runtime.ps1` comments and `docs/TESTING.md`.
 
 - [ ] **Step 5: Build, deploy, and verify from clean paths**
 
@@ -1065,7 +1083,7 @@ Run:
 .\scripts\package-test.ps1 -PackageName vocekit-windows-speech-test
 ```
 
-Expected: helper self-test/probe, Qt Release build, runtime verification, package verification, and archive creation all succeed.
+Expected: helper self-test, Qt Release build, runtime verification, package verification, and archive creation all succeed. Language-specific probes are verified separately on the current machine in Task 10 and may legitimately report a missing recognizer on another user's unconfigured Windows installation.
 
 - [ ] **Step 6: Commit**
 
@@ -1149,5 +1167,5 @@ Report commit IDs, helper and main executable hashes, exact full-suite totals, r
 - Follow Windows / zh-CN / en-US language semantics and missing-component UX: Tasks 1, 2, and 7.
 - Interface, function, canvas, and tray selection consistency: Tasks 7 and 8.
 - No API keys and deterministic self-check: Tasks 4 and 7.
-- Qt 5.9/C++11 plus .NET Framework helper build and x86/x64 process boundary: Tasks 2, 5, and 9.
+- Qt 5.9/C++11 plus .NET Framework helper build (MSBuild or verified Roslyn fallback) and x86/x64 process boundary: Tasks 2, 5, and 9.
 - Deployment, probe, clean-PATH package, privacy, real language smoke, visual scaling, and full suite: Tasks 9 and 10.

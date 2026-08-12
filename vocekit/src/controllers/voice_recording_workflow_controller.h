@@ -44,6 +44,7 @@ struct VoiceRecordingWorkflowAccess
         const StreamingSpeechCallbacks &
     )> createStreamingSpeechSession;
     int streamingFinalTimeoutMs = 5000;
+    int holdReleaseWarmupTimeoutMs = 500;
 };
 
 // 完整管理录音准备、采集、长录音分段、语音识别和录音结果元数据。

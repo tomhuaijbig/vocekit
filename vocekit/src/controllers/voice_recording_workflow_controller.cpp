@@ -44,18 +44,15 @@ class StreamingPcmEvent : public QEvent
 public:
     StreamingPcmEvent(
         quint64 generationValue,
-        const QWeakPointer<IStreamingSpeechSession> &sessionValue,
         const QByteArray &pcmValue
     )
         : QEvent(static_cast<QEvent::Type>(streamingPcmEventType())),
           generation(generationValue),
-          session(sessionValue),
           pcm(pcmValue)
     {
     }
 
     quint64 generation = 0;
-    QWeakPointer<IStreamingSpeechSession> session;
     QByteArray pcm;
 };
 
@@ -139,6 +136,7 @@ public:
         configureRecognitionCallbacks();
         m_flowCancellationTimer.setInterval(10);
         m_streamingFinalTimer.setSingleShot(true);
+        m_holdReleaseWarmupTimer.setSingleShot(true);
         connect(
             &m_flowCancellationTimer,
             &QTimer::timeout,
@@ -156,6 +154,26 @@ public:
                     m_operationGeneration,
                     tr8("等待实时识别最终结果超时。")
                 );
+            }
+        );
+        connect(
+            &m_holdReleaseWarmupTimer,
+            &QTimer::timeout,
+            this,
+            [this]() {
+                if (!m_holdReleasePending) {
+                    return;
+                }
+                m_holdReleasePending = false;
+                if (!m_recordingLifecycle.isRecording()) {
+                    return;
+                }
+                logRuntimeEvent(
+                    tr8("录音"),
+                    tr8("麦克风预热超时"),
+                    QStringLiteral("功能=") + m_modeId
+                );
+                stopAndProcess();
             }
         );
     }
@@ -179,10 +197,23 @@ public:
             StreamingPcmEvent *pcmEvent =
                 static_cast<StreamingPcmEvent *>(event);
             if (pcmEvent->generation == m_operationGeneration) {
-                const QSharedPointer<IStreamingSpeechSession> session =
-                    pcmEvent->session.toStrongRef();
-                if (!session.isNull()) {
-                    session->pushAudio(pcmEvent->pcm);
+                if (!pcmEvent->pcm.isEmpty()) {
+                    m_recordingReceivedPcm = true;
+                }
+                if (!m_streamingSession.isNull()) {
+                    m_streamingSession->pushAudio(pcmEvent->pcm);
+                }
+                if (m_recordingReceivedPcm
+                    && m_holdReleasePending
+                    && m_recordingLifecycle.isRecording()) {
+                    m_holdReleasePending = false;
+                    m_holdReleaseWarmupTimer.stop();
+                    logRuntimeEvent(
+                        tr8("录音"),
+                        tr8("麦克风已就绪，结束按住说话"),
+                        QStringLiteral("功能=") + m_modeId
+                    );
+                    stopAndProcess();
                 }
             }
             return true;
@@ -217,6 +248,7 @@ public:
                 ? QStringLiteral("hold")
                 : QStringLiteral("toggle");
         m_longRecognitionCoordinator.reset();
+        preparePcmTracking();
         if (m_runSession) {
             m_runSession->setRecordingTriggerMode(
                 m_classicEffectiveTriggerMode
@@ -299,6 +331,7 @@ public:
         m_coordinatorModeId =
             QStringLiteral("flow:") + flow.runId.value;
         m_longRecognitionCoordinator.reset();
+        preparePcmTracking();
         m_flowCancellationTimer.start();
 
         if (m_flow.cancellation.isCancellationRequested()) {
@@ -354,6 +387,7 @@ public:
                     cancelActiveFlow();
                 } else {
                     m_recordingCoordinator.cancelPreparation();
+                    clearPcmTracking();
                     setStatus(tr8("已取消"), tr8("录音准备已取消"));
                     hideBarLater();
                     logRuntimeEvent(
@@ -435,6 +469,7 @@ public:
                 cancelActiveFlow();
             } else {
                 m_recordingCoordinator.cancelPreparation();
+                clearPcmTracking();
                 setStatus(
                     tr8("已取消"),
                     tr8("已在录音开始前松开快捷键")
@@ -455,6 +490,25 @@ public:
                 QStringLiteral("功能=") + id,
                 elapsedMs()
             );
+            if (!m_recordingReceivedPcm) {
+                if (!m_holdReleasePending) {
+                    m_holdReleasePending = true;
+                    m_holdReleaseWarmupTimer.start(qMax(
+                        1,
+                        m_access.holdReleaseWarmupTimeoutMs
+                    ));
+                    setStatus(
+                        tr8("正在启动麦克风"),
+                        tr8("收到音频后将自动结束录音")
+                    );
+                    logRuntimeEvent(
+                        tr8("录音"),
+                        tr8("等待麦克风首帧"),
+                        QStringLiteral("功能=") + id
+                    );
+                }
+                return true;
+            }
             stopAndProcess();
             return true;
         }
@@ -844,6 +898,7 @@ private:
         const QString &error
     )
     {
+        clearPcmTracking();
         if (m_flow.active) {
             if (m_flow.cancellation.isCancellationRequested()) {
                 cancelActiveFlow();
@@ -875,6 +930,37 @@ private:
         showFailure(error);
     }
 
+    void preparePcmTracking()
+    {
+        m_holdReleaseWarmupTimer.stop();
+        m_recordingReceivedPcm = false;
+        m_holdReleasePending = false;
+
+        const quint64 generation = m_operationGeneration;
+        const QPointer<Impl> self(this);
+        m_recordingCapture.setPcmListener(
+            [self, generation](const QByteArray &pcm) {
+                if (!self) {
+                    return;
+                }
+                QCoreApplication::postEvent(
+                    self.data(),
+                    new StreamingPcmEvent(generation, pcm)
+                );
+            }
+        );
+    }
+
+    void clearPcmTracking()
+    {
+        m_holdReleaseWarmupTimer.stop();
+        m_recordingReceivedPcm = false;
+        m_holdReleasePending = false;
+        m_recordingCapture.setPcmListener(
+            std::function<void(const QByteArray &)>()
+        );
+    }
+
     void startStreamingForCurrentRecording()
     {
         m_streamingFinalTimer.stop();
@@ -883,10 +969,6 @@ private:
         m_streamingFinalizing = false;
         m_streamingTerminalHandled = false;
         m_streamingFallbackActive = false;
-        m_recordingCapture.setPcmListener(
-            std::function<void(const QByteArray &)>()
-        );
-
         if (!m_settings.streamingSpeechRecognitionEnabled
             || !m_access.createStreamingSpeechSession) {
             return;
@@ -962,19 +1044,6 @@ private:
             return;
         }
         m_streamingSession = creation.session;
-        const QWeakPointer<IStreamingSpeechSession> weakSession =
-            m_streamingSession.toWeakRef();
-        m_recordingCapture.setPcmListener(
-            [self, weakSession, generation](const QByteArray &pcm) {
-                if (!self) {
-                    return;
-                }
-                QCoreApplication::postEvent(
-                    self.data(),
-                    new StreamingPcmEvent(generation, weakSession, pcm)
-                );
-            }
-        );
         logRuntimeEvent(
             tr8("实时语音识别"),
             tr8("开始"),
@@ -1020,9 +1089,6 @@ private:
         const bool wasFinalizing = m_streamingFinalizing;
         m_streamingFallbackActive = true;
         m_streamingFinalTimer.stop();
-        m_recordingCapture.setPcmListener(
-            std::function<void(const QByteArray &)>()
-        );
         const QSharedPointer<IStreamingSpeechSession> session =
             m_streamingSession;
         m_streamingSession.reset();
@@ -1110,9 +1176,7 @@ private:
     void cancelStreamingSession()
     {
         m_streamingFinalTimer.stop();
-        m_recordingCapture.setPcmListener(
-            std::function<void(const QByteArray &)>()
-        );
+        clearPcmTracking();
         const QSharedPointer<IStreamingSpeechSession> session =
             m_streamingSession;
         m_streamingSession.reset();
@@ -1312,6 +1376,8 @@ private:
 
     void stopAndProcess()
     {
+        m_holdReleasePending = false;
+        m_holdReleaseWarmupTimer.stop();
         if (m_flow.active) {
             stopFlowAndProcess();
             return;
@@ -2232,11 +2298,14 @@ private:
     FlowState m_flow;
     QTimer m_flowCancellationTimer;
     QTimer m_streamingFinalTimer;
+    QTimer m_holdReleaseWarmupTimer;
     QSharedPointer<IStreamingSpeechSession> m_streamingSession;
     VoiceRecordingStopResult m_streamingStoppedRecording;
     bool m_streamingFinalizing = false;
     bool m_streamingTerminalHandled = false;
     bool m_streamingFallbackActive = false;
+    bool m_recordingReceivedPcm = false;
+    bool m_holdReleasePending = false;
     quint64 m_operationGeneration = 0;
     bool m_classicRecognitionRunning = false;
     QString m_modeId;

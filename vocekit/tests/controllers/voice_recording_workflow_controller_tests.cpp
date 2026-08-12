@@ -362,11 +362,101 @@ private slots:
     void disabledStreamingUsesBatchOnly();
     void flowStreamingUsesFrozenProviderAndCompletesOnce();
     void longRecordingStreamingSkipsSegmentRecognition();
+    void holdReleaseWaitsForFirstPcmBeforeStopping();
+    void holdReleaseStopsOnceAfterWarmupTimeout();
     void classicToggleAndHoldPathsRemainAvailable();
     void classicHoldReleaseSurvivesConfigurationRemoval();
     void ownsPressOnlyForTheCurrentActiveRecording();
     void voiceControllerDoesNotOwnRecordingImplementation();
 };
+
+void VoiceRecordingWorkflowControllerTests::
+holdReleaseWaitsForFirstPcmBeforeStopping()
+{
+    FakeRecorder recorder;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.holdReleaseWarmupTimeoutMs = 1000;
+
+    VoiceRecordingWorkflowController controller(
+        access,
+        nullptr,
+        nullptr
+    );
+    AppSettingsData settings;
+    FunctionSettings hold;
+    hold.id = QStringLiteral("hold-warmup");
+    hold.name = QStringLiteral("Hold warmup");
+    hold.recording.triggerMode = QStringLiteral("hold");
+    settings.functions << hold;
+    controller.updateConfiguration(settings);
+    controller.setActiveHoldFunctions(
+        QSet<QString>() << hold.id
+    );
+
+    QVERIFY(controller.begin(hold.id));
+    QVERIFY(controller.isRecording());
+    QVERIFY(controller.handleHotkeyReleased(hold.id));
+    QCOMPARE(recorder.stopCount, 0);
+    QVERIFY(controller.isRecording());
+
+    recorder.emitPcm(QByteArrayLiteral("first-pcm"));
+    QTRY_COMPARE_WITH_TIMEOUT(recorder.stopCount, 1, 500);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.isBusy(), 1000);
+
+    recorder.emitPcm(QByteArrayLiteral("late-pcm"));
+    QTest::qWait(30);
+    QCOMPARE(recorder.stopCount, 1);
+}
+
+void VoiceRecordingWorkflowControllerTests::
+holdReleaseStopsOnceAfterWarmupTimeout()
+{
+    FakeRecorder recorder;
+    recorder.pcm.clear();
+    QStringList failures;
+    VoiceRecordingWorkflowAccess access = fakeAccess(&recorder);
+    access.holdReleaseWarmupTimeoutMs = 30;
+    access.speechRecognition.recognizeProvider = [](
+        const SpeechRecognitionProviderTaskRequest &request
+    ) {
+        SpeechRecognitionTaskResult result;
+        if (request.audioData.isEmpty()) {
+            result.error = QStringLiteral("录音为空。");
+        }
+        return result;
+    };
+    access.showFailure = [&](const QString &message) {
+        failures.append(message);
+    };
+
+    VoiceRecordingWorkflowController controller(
+        access,
+        nullptr,
+        nullptr
+    );
+    AppSettingsData settings;
+    FunctionSettings hold;
+    hold.id = QStringLiteral("hold-timeout");
+    hold.name = QStringLiteral("Hold timeout");
+    hold.recording.triggerMode = QStringLiteral("hold");
+    settings.functions << hold;
+    controller.updateConfiguration(settings);
+    controller.setActiveHoldFunctions(
+        QSet<QString>() << hold.id
+    );
+
+    QVERIFY(controller.begin(hold.id));
+    QVERIFY(controller.handleHotkeyReleased(hold.id));
+    QCOMPARE(recorder.stopCount, 0);
+
+    QTRY_COMPARE_WITH_TIMEOUT(recorder.stopCount, 1, 500);
+    QTRY_VERIFY_WITH_TIMEOUT(!failures.isEmpty(), 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.isBusy(), 1000);
+
+    recorder.emitPcm(QByteArrayLiteral("too-late"));
+    QTest::qWait(30);
+    QCOMPARE(recorder.stopCount, 1);
+}
 
 void VoiceRecordingWorkflowControllerTests::
 exposesIndependentWorkflowInterface()
@@ -568,6 +658,7 @@ flowHoldReleaseOnlyFinishesCurrentRun()
     QVERIFY(controller.isRecording());
     QCOMPARE(recorder.stopCount, 0);
 
+    recorder.emitPcm(QByteArrayLiteral("flow-pcm"));
     QVERIFY(controller.handleHotkeyReleased(
         QStringLiteral("flow-function")
     ));
@@ -1215,7 +1306,11 @@ streamingDegradeFallsBackOnceAndIgnoresLateCompletion()
     QVERIFY(controller.begin(QStringLiteral("fallback")));
     streaming->emitDegraded(QStringLiteral("socket failed"));
     streaming->emitDegraded(QStringLiteral("duplicate"));
-    QTRY_VERIFY_WITH_TIMEOUT(!recorder.pcmListener, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(bool(recorder.pcmListener), 1000);
+    const int pushedBeforeDegrade = streaming->pushedAudio.size();
+    recorder.emitPcm(QByteArrayLiteral("after-degrade"));
+    QTest::qWait(20);
+    QCOMPARE(streaming->pushedAudio.size(), pushedBeforeDegrade);
     QVERIFY(controller.handleHotkey(QStringLiteral("fallback")));
 
     QTRY_COMPARE_WITH_TIMEOUT(batchCount, 1, 1000);
@@ -1435,6 +1530,7 @@ classicToggleAndHoldPathsRemainAvailable()
     QVERIFY(controller.isRecording());
     QVERIFY(controller.handleHotkey(QStringLiteral("classic-hold")));
     QVERIFY(controller.isRecording());
+    recorder.emitPcm(QByteArrayLiteral("hold-pcm"));
     QVERIFY(controller.handleHotkeyReleased(
         QStringLiteral("classic-hold")
     ));
@@ -1471,6 +1567,8 @@ classicHoldReleaseSurvivesConfigurationRemoval()
 
     settings.functions.clear();
     controller.updateConfiguration(settings);
+    recorder.emitPcm(QByteArrayLiteral("first-pcm"));
+    QCoreApplication::processEvents();
     QVERIFY(controller.handleHotkeyReleased(
         QStringLiteral("classic-hold")
     ));

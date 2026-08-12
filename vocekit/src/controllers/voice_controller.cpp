@@ -387,7 +387,7 @@ public:
             bool replaceSelection,
             bool hasSelection
         ) {
-            ClipboardWriter::pasteTextToWindow(
+            return ClipboardWriter::pasteTextToWindowChecked(
                 text,
                 m_functionCommands
                     ? m_functionCommands->targetWindow()

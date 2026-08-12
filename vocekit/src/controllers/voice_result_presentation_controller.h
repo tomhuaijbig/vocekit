@@ -51,7 +51,11 @@ struct VoiceResultPresentationAccess
     std::function<void(const QString &, const QString &)> showInformation;
     std::function<void(const QString &)> showError;
     std::function<void(const QString &, const QString &)> setTimedStatus;
-    std::function<void(const QString &, bool, bool)> writeText;
+    std::function<ClipboardWriteResult(
+        const QString &,
+        bool,
+        bool
+    )> writeText;
     std::function<ClipboardWindowHandle()> targetWindow;
     std::function<bool()> processing;
     std::function<void(bool)> processingChanged;

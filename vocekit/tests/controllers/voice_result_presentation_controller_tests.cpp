@@ -59,6 +59,11 @@ voiceControllerDoesNotOwnResultWindows()
     QVERIFY(presentationContents.contains("ResultChoicePopup"));
     QVERIFY(presentationContents.contains("ScreenshotResultWindow"));
     QVERIFY(presentationContents.contains("VoiceResultOutputDispatcher"));
+    QVERIFY(presentationContents.contains("ClassicAutoWriteExecutor::execute"));
+    QVERIFY(presentationContents.contains("showFallbackPopup"));
+    QVERIFY(!presentationContents.contains(
+        "std::function<void(const QString &, bool, bool)> writeText"
+    ));
     QVERIFY(presentationContents.contains("VoiceResultStreamExecutor"));
     QVERIFY(presentationContents.contains("VoiceResultRerunExecutor"));
 }

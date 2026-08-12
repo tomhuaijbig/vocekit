@@ -96,6 +96,7 @@ SOURCES += \
     src/output/voice_result_popup_builder.cpp \
     src/output/result_output_router.cpp \
     src/output/voice_result_output_dispatcher.cpp \
+    src/output/classic_auto_write_executor.cpp \
     src/platform/windows_autostart.cpp \
     src/providers/built_in_provider_factory.cpp \
     src/providers/baidu_realtime_speech_protocol.cpp \
@@ -362,6 +363,7 @@ HEADERS += \
     src/output/voice_result_popup_builder.h \
     src/output/result_output_router.h \
     src/output/voice_result_output_dispatcher.h \
+    src/output/classic_auto_write_executor.h \
     src/platform/windows_autostart.h \
     src/recording/audio_recorder_legacy.h \
     src/providers/built_in_provider_factory.h \

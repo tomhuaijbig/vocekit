@@ -7,6 +7,7 @@
 #include "../domain/voice_result_stream_executor.h"
 #include "../domain/voice_run_session.h"
 #include "../output/voice_result_output_dispatcher.h"
+#include "../output/classic_auto_write_executor.h"
 #include "../output/voice_result_popup_builder.h"
 #include "../providers/model_catalog.h"
 #include "../runtime_log.h"
@@ -255,19 +256,51 @@ public:
 
         if (plan.destination == ResultOutputDestination::AutoWrite) {
             setTimedStatus(plan.progressTitle, plan.progressMessage);
-            writeText(
-                finalOutput,
-                true,
-                plan.replaceSelectedText
-            );
-            setTimedStatus(plan.doneTitle, plan.doneMessage);
-            logRuntimeEvent(
-                text8("写入"),
-                plan.logAction,
-                dispatch.autoWriteLogDetail,
-                elapsedMs()
-            );
-            hideFloatingBar();
+            ClassicAutoWriteRequest autoWrite;
+            autoWrite.text = finalOutput;
+            autoWrite.replaceSelection = true;
+            autoWrite.hasSelection = plan.replaceSelectedText;
+            autoWrite.popupFallbackEnabled =
+                m_settings.writeFailurePopupFallbackEnabled;
+            ClassicAutoWriteAccess autoWriteAccess;
+            autoWriteAccess.checkedWrite = [this](
+                const QString &text,
+                bool replaceSelection,
+                bool hasSelection) {
+                return writeText(
+                    text,
+                    replaceSelection,
+                    hasSelection
+                );
+            };
+            autoWriteAccess.setStatus = [this](
+                const QString &title,
+                const QString &detail) {
+                setTimedStatus(title, detail);
+            };
+            autoWriteAccess.showFallbackPopup =
+                [this, context](const QString &text) {
+                    showResultPopup(context, text);
+                };
+            autoWriteAccess.log = [this, dispatch](
+                const QString &action,
+                const QString &detail) {
+                logRuntimeEvent(
+                    text8("写入"),
+                    action,
+                    dispatch.autoWriteLogDetail
+                        + QStringLiteral("，") + detail,
+                    elapsedMs()
+                );
+            };
+            const ClipboardWriteResult writeResult =
+                ClassicAutoWriteExecutor::execute(
+                    autoWrite,
+                    autoWriteAccess
+                );
+            if (writeResult.ok) {
+                hideFloatingBar();
+            }
             return;
         }
 
@@ -341,19 +374,22 @@ private:
         }
     }
 
-    void writeText(
+    ClipboardWriteResult writeText(
         const QString &text,
         bool replaceSelection,
         bool hasSelection
     ) const
     {
         if (m_access.writeText) {
-            m_access.writeText(
+            return m_access.writeText(
                 text,
                 replaceSelection,
                 hasSelection
             );
         }
+        ClipboardWriteResult result;
+        result.errorCode = QStringLiteral("flow_auto_write_failed");
+        return result;
     }
 
     void hideFloatingBar() const

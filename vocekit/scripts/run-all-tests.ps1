@@ -121,8 +121,7 @@ function Invoke-CapturedCommand {
             Get-ChildItem -LiteralPath $project.DirectoryName -File |
                 Where-Object {
                     $_.Name -like "$makefileName*" -or
-                    $_.Name -like "object_script.$target.*" -or
-                    $_.Name -eq "target_wrapper.sh"
+                    $_.Name -like "object_script.$target.*"
                 } |
                 ForEach-Object { $generatedFiles.Add($_.FullName) }
 

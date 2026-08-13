@@ -266,6 +266,16 @@ private slots:
         QCOMPARE(result.errorCode, QStringLiteral("EMPTY_TEXT"));
     }
 
+    void rejectsFinalWithoutHelperEof()
+    {
+        const WindowsSpeechHelperResult result =
+            clientFor(QStringLiteral("final-input-not-ended")).recognize(
+                batchRequest(QStringLiteral("input-not-ended-1"))
+            );
+        QVERIFY(!result.ok);
+        QCOMPARE(result.errorCode, QStringLiteral("INVALID_RESPONSE"));
+    }
+
     void passesHelperErrorThroughUnchanged()
     {
         const WindowsSpeechHelperResult result =

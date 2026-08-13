@@ -240,6 +240,15 @@ private:
                 );
                 return false;
             }
+            if (!event.inputStreamEnded) {
+                fail(
+                    QStringLiteral("INVALID_RESPONSE"),
+                    QStringLiteral(
+                        "The speech helper returned a final response before input ended."
+                    )
+                );
+                return false;
+            }
             setTerminal(event);
             return true;
         case WindowsSpeechHelperEventType::Error:

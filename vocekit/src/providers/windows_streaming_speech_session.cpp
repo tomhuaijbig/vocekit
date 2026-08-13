@@ -422,6 +422,14 @@ void WindowsStreamingSpeechSession::consumeLine(const QByteArray &line)
                  tr8("Windows 本地语音组件尚未就绪。"));
             return;
         }
+        if (!m_finishRequested || !m_inputClosed
+            || !event.inputStreamEnded) {
+            fail(
+                QStringLiteral("INVALID_RESPONSE"),
+                tr8("Windows 本地语音组件在输入结束前返回了最终结果。")
+            );
+            return;
+        }
         completeOnce(event.text.trimmed());
         return;
     case WindowsSpeechHelperEventType::Error:

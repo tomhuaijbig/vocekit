@@ -518,6 +518,70 @@ private slots:
         }
     }
 
+    void rejectsFinalBeforeFinishAndReapsProcess()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString pidPath = directory.path() + QStringLiteral("/pid.txt");
+        QStringList completed;
+        QStringList degraded;
+        StreamingSpeechCallbacks callbacks;
+        callbacks.completed = [&](const QString &text) {
+            completed.append(text);
+        };
+        callbacks.degraded = [&](const QString &message) {
+            degraded.append(message);
+        };
+        WindowsStreamingSpeechSession session(
+            fakeHelperPath(),
+            scenarioArguments(
+                QStringLiteral("premature-final-before-eof"),
+                QStringList() << QStringLiteral("--pid-file") << pidPath
+            ),
+            requestFor(QStringLiteral("premature-before-finish")),
+            callbacks,
+            fastTiming()
+        );
+        QVERIFY(session.start(nullptr));
+        QTRY_VERIFY(QFile::exists(pidPath));
+        const qint64 pid = readPid(pidPath);
+        QVERIFY(pid > 0);
+        QTest::qWait(300);
+        QCOMPARE(degraded.size(), 1);
+        QCOMPARE(completed.size(), 0);
+        QCOMPARE(session.state(), StreamingSpeechState::Degraded);
+        QTRY_VERIFY(!processIsRunning(pid));
+        QTest::qWait(100);
+        QCOMPARE(degraded.size(), 1);
+    }
+
+    void rejectsFinalWithoutHelperEofAfterFinish()
+    {
+        QStringList completed;
+        QStringList degraded;
+        StreamingSpeechCallbacks callbacks;
+        callbacks.completed = [&](const QString &text) {
+            completed.append(text);
+        };
+        callbacks.degraded = [&](const QString &message) {
+            degraded.append(message);
+        };
+        WindowsStreamingSpeechSession session(
+            fakeHelperPath(),
+            scenarioArguments(QStringLiteral("final-input-not-ended")),
+            requestFor(QStringLiteral("premature-after-finish")),
+            callbacks,
+            fastTiming()
+        );
+        QVERIFY(session.start(nullptr));
+        QTRY_COMPARE(session.state(), StreamingSpeechState::Streaming);
+        session.finish();
+        QTest::qWait(300);
+        QCOMPARE(degraded.size(), 1);
+        QCOMPARE(completed.size(), 0);
+        QCOMPARE(session.state(), StreamingSpeechState::Degraded);
+    }
+
     void cancelSuppressesCallbacksAndReapsProcess()
     {
         QTemporaryDir directory;

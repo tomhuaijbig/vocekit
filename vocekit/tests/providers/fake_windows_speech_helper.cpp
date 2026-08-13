@@ -235,6 +235,16 @@ int main(int argc, char *argv[])
         );
     }
 
+    if (scenario == QStringLiteral("premature-final-before-eof")) {
+        QJsonObject fields;
+        fields.insert(QStringLiteral("ok"), true);
+        fields.insert(QStringLiteral("text"), QStringLiteral("premature"));
+        fields.insert(QStringLiteral("inputStreamEnded"), false);
+        writeEvent(QStringLiteral("final"), runId, fields);
+        QThread::msleep(5000);
+        return 0;
+    }
+
     if (scenario == QStringLiteral("slow-read")
         || scenario == QStringLiteral("backpressure")) {
         QThread::msleep(5000);
@@ -269,6 +279,10 @@ int main(int argc, char *argv[])
                         )
                     : QString::fromUtf8("你好")
     );
+
+    if (scenario == QStringLiteral("final-input-not-ended")) {
+        finalFields.insert(QStringLiteral("inputStreamEnded"), false);
+    }
 
     if (scenario == QStringLiteral("ready-final")
         || scenario == QStringLiteral("echo-pcm-size")) {

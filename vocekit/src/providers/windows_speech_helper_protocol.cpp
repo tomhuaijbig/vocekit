@@ -228,6 +228,11 @@ WindowsSpeechHelperEvent parseWindowsSpeechHelperEvent(
         return WindowsSpeechHelperEvent();
     }
 
+    if (event.type == WindowsSpeechHelperEventType::Final
+        && !object.contains(QStringLiteral("inputStreamEnded"))) {
+        return WindowsSpeechHelperEvent();
+    }
+
     if (!parseOptionalBoolean(
             object,
             QStringLiteral("inputStreamEnded"),

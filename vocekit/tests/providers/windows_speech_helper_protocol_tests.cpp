@@ -107,14 +107,15 @@ private slots:
             QByteArray("{\"protocolVersion\":1,\"runId\":\"r1\","
                        "\"type\":\"final\",\"text\":\"")
                 + QString::fromUtf8("你好").toUtf8()
-                + QByteArray("\"}")
+                + QByteArray("\",\"inputStreamEnded\":true}")
         );
         QVERIFY(utf8.valid);
         QCOMPARE(utf8.text, QString::fromUtf8("你好"));
 
         const WindowsSpeechHelperEvent empty = parseWindowsSpeechHelperEvent(
             QByteArray("{\"protocolVersion\":1,\"runId\":\"r1\","
-                       "\"type\":\"final\",\"text\":\"\"}")
+                       "\"type\":\"final\",\"text\":\"\","
+                       "\"inputStreamEnded\":true}")
         );
         QVERIFY(empty.valid);
         QVERIFY(empty.text.isEmpty());
@@ -171,6 +172,7 @@ private slots:
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\",\"type\":\"hypothesis\"}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\",\"type\":\"recognized\",\"text\":4}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\",\"type\":\"final\"}")
+            << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\",\"type\":\"final\",\"text\":\"x\"}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\",\"type\":\"final\",\"text\":\"x\",\"inputStreamEnded\":\"yes\"}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\",\"type\":\"error\",\"message\":\"bad\"}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\",\"type\":\"error\",\"errorCode\":\"E\"}")
@@ -191,6 +193,7 @@ private slots:
             parseWindowsSpeechHelperEvent(QByteArray(
                 "{\"protocolVersion\":1,\"runId\":\"r\","
                 "\"type\":\"final\",\"text\":\"x\","
+                "\"inputStreamEnded\":true,"
                 "\"pcmBytes\":9223372036854774784}"
             ));
         QVERIFY(maximumValid.valid);
@@ -205,15 +208,19 @@ private slots:
         const QList<QByteArray> invalid = QList<QByteArray>()
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\","
                           "\"type\":\"final\",\"text\":\"x\","
+                          "\"inputStreamEnded\":true,"
                           "\"pcmBytes\":-1}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\","
                           "\"type\":\"final\",\"text\":\"x\","
+                          "\"inputStreamEnded\":true,"
                           "\"pcmBytes\":1.5}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\","
                           "\"type\":\"final\",\"text\":\"x\","
+                          "\"inputStreamEnded\":true,"
                           "\"pcmBytes\":1e300}")
             << QByteArray("{\"protocolVersion\":1,\"runId\":\"r\","
                           "\"type\":\"final\",\"text\":\"x\","
+                          "\"inputStreamEnded\":true,"
                           "\"pcmBytes\":9223372036854775808}");
 
         for (const QByteArray &line : invalid) {

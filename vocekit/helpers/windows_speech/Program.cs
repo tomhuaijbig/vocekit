@@ -703,6 +703,7 @@ namespace VoceKit.WindowsSpeech
                         producerFailure,
                         recognitionCancelled,
                         recognitionFailure,
+                        inputStreamEnded,
                         out errorCode);
                     if (errorExitCode != 0)
                     {
@@ -743,6 +744,7 @@ namespace VoceKit.WindowsSpeech
             Exception producerFailure,
             bool recognitionCancelled,
             Exception recognitionFailure,
+            bool inputStreamEnded,
             out string errorCode)
         {
             if (producerFailure is InputTooLargeException)
@@ -766,6 +768,11 @@ namespace VoceKit.WindowsSpeech
                 return 8;
             }
             if (recognitionFailure != null)
+            {
+                errorCode = "LOCAL_FAILURE";
+                return 1;
+            }
+            if (!inputStreamEnded)
             {
                 errorCode = "LOCAL_FAILURE";
                 return 1;
@@ -875,6 +882,15 @@ namespace VoceKit.WindowsSpeech
                 Assert(pump.IsStopped, "disposing blocked stdin did not stop the fake pump");
                 Assert(!pump.InputStreamEnded, "recognizer cancellation must not be reported as stdin EOF");
                 Assert(input.WasDisposed, "recognizer completion did not release stdin");
+
+                System.Reflection.MethodInfo classifier = typeof(Program).GetMethod(
+                    "ClassifyRecognitionFailure",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+                Assert(classifier != null, "recognition outcome classifier is missing");
+                object[] arguments = { null, false, null, false, null };
+                int exitCode = (int)classifier.Invoke(null, arguments);
+                Assert(exitCode == 1, "recognizer completion before stdin EOF must fail");
+                Assert((string)arguments[4] == "LOCAL_FAILURE", "early completion must use the stable local failure code");
             }
         }
 
@@ -896,10 +912,10 @@ namespace VoceKit.WindowsSpeech
                         "ClassifyRecognitionFailure",
                         System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
                     Assert(classifier != null, "producer/recognizer outcome classifier is missing");
-                    object[] arguments = { pump.Failure, true, null, null };
+                    object[] arguments = { pump.Failure, true, null, false, null };
                     int exitCode = (int)classifier.Invoke(null, arguments);
                     Assert(exitCode == 1, "producer IOException plus recognizer cancellation must exit 1");
-                    Assert((string)arguments[3] == "LOCAL_FAILURE", "producer IOException must take precedence over recognizer cancellation");
+                    Assert((string)arguments[4] == "LOCAL_FAILURE", "producer IOException must take precedence over recognizer cancellation");
                 }
             }
         }

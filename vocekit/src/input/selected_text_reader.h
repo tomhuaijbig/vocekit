@@ -1,9 +1,9 @@
 #ifndef VOCEKIT_SELECTED_TEXT_READER_H
 #define VOCEKIT_SELECTED_TEXT_READER_H
 
-#include <QString>
+#include "selection_snapshot.h"
 
-using SelectedTextNativeWindowHandle = void *;
+#include <QString>
 
 // Reads selected text without exposing Windows-specific APIs to callers.
 class SelectedTextReader
@@ -15,6 +15,9 @@ public:
     );
     static bool hasSelectionInWindow(
         SelectedTextNativeWindowHandle window
+    );
+    static SelectionPhysicalProbeResult probeUiAutomationPhysical(
+        const SelectionProbeRequest &request
     );
 };
 

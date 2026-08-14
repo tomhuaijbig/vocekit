@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QFileInfo>
 #include <QList>
 #include <QMap>
 #include <QMimeData>
@@ -9,6 +10,108 @@
 #include <QUrl>
 #include <QUuid>
 #include <QVariant>
+#include <QtMath>
+
+#include <limits>
+
+namespace {
+
+qint64 distanceToRectangleSquared(
+    const QRect &rectangle,
+    const QPoint &point)
+{
+    const int nearestX = qBound(
+        rectangle.left(),
+        point.x(),
+        rectangle.right()
+    );
+    const int nearestY = qBound(
+        rectangle.top(),
+        point.y(),
+        rectangle.bottom()
+    );
+    const qint64 dx = qint64(point.x()) - nearestX;
+    const qint64 dy = qint64(point.y()) - nearestY;
+    return dx * dx + dy * dy;
+}
+
+} // namespace
+
+QRect selectionAnchorRectangle(
+    const QVector<QRect> &rectangles,
+    const QPoint &cursorPosition)
+{
+    QRect best;
+    qint64 bestDistance = std::numeric_limits<qint64>::max();
+    for (const QRect &rectangle : rectangles) {
+        if (!rectangle.isValid()) {
+            continue;
+        }
+        const qint64 distance = distanceToRectangleSquared(
+            rectangle,
+            cursorPosition
+        );
+        if (distance <= bestDistance) {
+            best = rectangle;
+            bestDistance = distance;
+        }
+    }
+    return best.isValid()
+        ? best
+        : QRect(cursorPosition, QSize(1, 1));
+}
+
+QVector<QRect> selectionRectanglesFromFlatBounds(
+    const QVector<double> &values)
+{
+    QVector<QRect> rectangles;
+    for (int offset = 0; offset + 3 < values.size(); offset += 4) {
+        const double x = values.at(offset);
+        const double y = values.at(offset + 1);
+        const double width = values.at(offset + 2);
+        const double height = values.at(offset + 3);
+        if (!qIsFinite(x) || !qIsFinite(y)
+            || !qIsFinite(width) || !qIsFinite(height)
+            || width <= 0.0 || height <= 0.0) {
+            continue;
+        }
+        const QRect rectangle(
+            qRound(x),
+            qRound(y),
+            qRound(width),
+            qRound(height)
+        );
+        if (rectangle.isValid()) {
+            rectangles.append(rectangle);
+        }
+    }
+    return rectangles;
+}
+
+bool selectionInputDesktopIsSecure(
+    bool inputDesktopOpened,
+    const QString &desktopName)
+{
+    return !inputDesktopOpened
+        || desktopName.trimmed().compare(
+            QStringLiteral("default"),
+            Qt::CaseInsensitive
+        ) != 0;
+}
+
+bool selectionClipboardOwnershipMatches(
+    quint32 expectedSequence,
+    quint32 currentSequence,
+    quint32 targetProcessId,
+    quint32 clipboardOwnerProcessId,
+    bool targetStillForeground)
+{
+    return expectedSequence != 0
+        && expectedSequence == currentSequence
+        && targetProcessId != 0
+        && targetProcessId == clipboardOwnerProcessId
+        && targetStillForeground;
+}
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -29,6 +132,7 @@ typedef int PATTERNID;
 typedef int TEXTATTRIBUTEID;
 
 static const PATTERNID kUiaTextPatternId = 10014;
+static const PROPERTYID kUiaIsPasswordPropertyId = 30019;
 static const CLSID kClsidCuiAutomation = {0xff48dba4, 0x60ef, 0x4201, {0xaa, 0x87, 0x54, 0x10, 0x3e, 0xef, 0x59, 0x4e}};
 static const IID kIidIUiAutomation = {0x30cbe57d, 0xd9d0, 0x452a, {0xab, 0x13, 0x7a, 0xc5, 0xac, 0x48, 0x25, 0xee}};
 static const IID kIidIUiAutomationTextPattern = {0x32eba289, 0x3583, 0x42c9, {0x9c, 0x59, 0x3b, 0x6d, 0x9a, 0x1e, 0x9b, 0x6a}};
@@ -177,6 +281,206 @@ static QString selectedTextFromAutomationElement(IUIAutomationElement *element)
     }
     releaseComObject(selection);
     return result;
+}
+
+static SelectionPhysicalProbeResult selectionFromAutomationElement(
+    IUIAutomationElement *element,
+    const SelectionPhysicalProbeResult &base)
+{
+    SelectionPhysicalProbeResult result = base;
+    if (!element) {
+        return result;
+    }
+
+    VARIANT password;
+    VariantInit(&password);
+    const HRESULT passwordResult = element->GetCurrentPropertyValue(
+        kUiaIsPasswordPropertyId,
+        &password
+    );
+    if (SUCCEEDED(passwordResult)
+        && password.vt == VT_BOOL
+        && password.boolVal == VARIANT_TRUE) {
+        VariantClear(&password);
+        result.snapshotWithoutGeometry.sensitivity =
+            SelectionSensitivity::Password;
+        result.snapshotWithoutGeometry.text.clear();
+        result.physicalRectangles.clear();
+        return result;
+    }
+    VariantClear(&password);
+
+    IUnknown *patternUnknown = nullptr;
+    HRESULT hr = element->GetCurrentPattern(
+        kUiaTextPatternId,
+        &patternUnknown
+    );
+    if (FAILED(hr) || !patternUnknown) {
+        if (hr == E_ACCESSDENIED) {
+            result.snapshotWithoutGeometry.sensitivity =
+                SelectionSensitivity::Protected;
+        }
+        return result;
+    }
+
+    IUIAutomationTextPattern *textPattern = nullptr;
+    hr = patternUnknown->QueryInterface(
+        kIidIUiAutomationTextPattern,
+        reinterpret_cast<void **>(&textPattern)
+    );
+    releaseComObject(patternUnknown);
+    if (FAILED(hr) || !textPattern) {
+        return result;
+    }
+
+    IUIAutomationTextRangeArray *selection = nullptr;
+    hr = textPattern->GetSelection(&selection);
+    releaseComObject(textPattern);
+    if (FAILED(hr) || !selection) {
+        if (hr == E_ACCESSDENIED) {
+            result.snapshotWithoutGeometry.sensitivity =
+                SelectionSensitivity::Protected;
+        }
+        return result;
+    }
+
+    int length = 0;
+    selection->get_Length(&length);
+    QString text;
+    QVector<QRect> rectangles;
+    for (int i = 0; i < length; ++i) {
+        IUIAutomationTextRange *range = nullptr;
+        if (FAILED(selection->GetElement(i, &range)) || !range) {
+            continue;
+        }
+
+        BSTR selected = nullptr;
+        const HRESULT textResult = range->GetText(-1, &selected);
+        if (SUCCEEDED(textResult) && selected) {
+            text += textFromBstr(selected);
+            SysFreeString(selected);
+        } else if (textResult == E_ACCESSDENIED) {
+            result.snapshotWithoutGeometry.sensitivity =
+                SelectionSensitivity::Protected;
+        }
+
+        SAFEARRAY *bounds = nullptr;
+        if (SUCCEEDED(range->GetBoundingRectangles(&bounds)) && bounds) {
+            double *values = nullptr;
+            if (SUCCEEDED(SafeArrayAccessData(
+                    bounds,
+                    reinterpret_cast<void **>(&values)))) {
+                LONG lower = 0;
+                LONG upper = -1;
+                if (SUCCEEDED(SafeArrayGetLBound(bounds, 1, &lower))
+                    && SUCCEEDED(SafeArrayGetUBound(bounds, 1, &upper))) {
+                    const LONG count = upper >= lower
+                        ? upper - lower + 1
+                        : 0;
+                    QVector<double> flat;
+                    flat.reserve(count);
+                    for (LONG offset = 0; offset < count; ++offset) {
+                        flat.append(values[offset]);
+                    }
+                    rectangles += selectionRectanglesFromFlatBounds(flat);
+                }
+                SafeArrayUnaccessData(bounds);
+            }
+            SafeArrayDestroy(bounds);
+        }
+        releaseComObject(range);
+    }
+    releaseComObject(selection);
+
+    if (result.snapshotWithoutGeometry.sensitivity
+        == SelectionSensitivity::Normal) {
+        result.snapshotWithoutGeometry.text = text.trimmed();
+        result.physicalRectangles = rectangles;
+    } else {
+        result.snapshotWithoutGeometry.text.clear();
+        result.physicalRectangles.clear();
+    }
+    return result;
+}
+
+static bool currentInputDesktop(QString *name)
+{
+    if (name) {
+        name->clear();
+    }
+    HDESK desktop = OpenInputDesktop(
+        0,
+        FALSE,
+        DESKTOP_READOBJECTS
+    );
+    if (!desktop) {
+        return false;
+    }
+    DWORD required = 0;
+    GetUserObjectInformationW(desktop, UOI_NAME, nullptr, 0, &required);
+    QVector<wchar_t> buffer(qMax<DWORD>(required / sizeof(wchar_t), 2));
+    const BOOL ok = GetUserObjectInformationW(
+        desktop,
+        UOI_NAME,
+        buffer.data(),
+        DWORD(buffer.size() * sizeof(wchar_t)),
+        &required
+    );
+    CloseDesktop(desktop);
+    if (ok && name) {
+        *name = QString::fromWCharArray(buffer.constData()).trimmed();
+    }
+    return ok;
+}
+
+static void populateTargetIdentity(
+    HWND target,
+    SelectionSnapshot *snapshot)
+{
+    if (!target || !snapshot) {
+        return;
+    }
+    DWORD processId = 0;
+    GetWindowThreadProcessId(target, &processId);
+    snapshot->targetProcessId = processId;
+    if (!processId) {
+        return;
+    }
+    HANDLE process = OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE,
+        processId
+    );
+    if (!process) {
+        if (GetLastError() == ERROR_ACCESS_DENIED) {
+            snapshot->sensitivity = SelectionSensitivity::PermissionDenied;
+        }
+        return;
+    }
+    typedef BOOL (WINAPI *QueryImageName)(
+        HANDLE,
+        DWORD,
+        LPWSTR,
+        PDWORD
+    );
+    const QueryImageName queryImageName = reinterpret_cast<QueryImageName>(
+        GetProcAddress(
+            GetModuleHandleW(L"kernel32.dll"),
+            "QueryFullProcessImageNameW"
+        )
+    );
+    if (queryImageName) {
+        QVector<wchar_t> path(32768);
+        DWORD size = DWORD(path.size());
+        if (queryImageName(process, 0, path.data(), &size)) {
+            snapshot->targetExecutable = QFileInfo(
+                QString::fromWCharArray(path.constData(), int(size))
+            ).fileName().toLower();
+        } else if (GetLastError() == ERROR_ACCESS_DENIED) {
+            snapshot->sensitivity = SelectionSensitivity::PermissionDenied;
+        }
+    }
+    CloseHandle(process);
 }
 
 static QString selectedTextViaUiAutomation(
@@ -356,6 +660,117 @@ static QString selectedTextViaClipboardCopy(SelectedTextNativeWindowHandle windo
     return result.trimmed();
 }
 #endif
+
+SelectionPhysicalProbeResult SelectedTextReader::probeUiAutomationPhysical(
+    const SelectionProbeRequest &request)
+{
+    SelectionPhysicalProbeResult result;
+    result.cursorPhysicalPosition = request.cursorPhysicalPosition;
+    result.snapshotWithoutGeometry.targetWindow = request.targetWindow;
+    result.snapshotWithoutGeometry.method =
+        SelectionAcquisitionMethod::UiAutomation;
+#ifdef Q_OS_WIN
+    QString desktopName;
+    const bool desktopOpened = currentInputDesktop(&desktopName);
+    if (selectionInputDesktopIsSecure(desktopOpened, desktopName)) {
+        result.snapshotWithoutGeometry.sensitivity =
+            SelectionSensitivity::SecureDesktop;
+        return result;
+    }
+
+    const HWND target = static_cast<HWND>(request.targetWindow);
+    if (!target || !IsWindow(target) || GetForegroundWindow() != target) {
+        return result;
+    }
+    populateTargetIdentity(target, &result.snapshotWithoutGeometry);
+    if (result.snapshotWithoutGeometry.sensitivity
+        != SelectionSensitivity::Normal) {
+        return result;
+    }
+
+    const HRESULT initResult = CoInitializeEx(
+        nullptr,
+        COINIT_APARTMENTTHREADED
+    );
+    const bool shouldUninitialize = SUCCEEDED(initResult);
+    if (FAILED(initResult) && initResult != RPC_E_CHANGED_MODE) {
+        return result;
+    }
+
+    IUIAutomation *automation = nullptr;
+    const HRESULT createResult = CoCreateInstance(
+        kClsidCuiAutomation,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        kIidIUiAutomation,
+        reinterpret_cast<void **>(&automation)
+    );
+    if (FAILED(createResult) || !automation) {
+        if (createResult == E_ACCESSDENIED) {
+            result.snapshotWithoutGeometry.sensitivity =
+                SelectionSensitivity::PermissionDenied;
+        }
+        if (shouldUninitialize) {
+            CoUninitialize();
+        }
+        return result;
+    }
+
+    IUIAutomationElement *focused = nullptr;
+    if (GetForegroundWindow() == target
+        && SUCCEEDED(automation->GetFocusedElement(&focused))
+        && focused) {
+        result = selectionFromAutomationElement(focused, result);
+    }
+    releaseComObject(focused);
+
+    if (GetForegroundWindow() == target
+        && result.snapshotWithoutGeometry.sensitivity
+            == SelectionSensitivity::Normal
+        && result.snapshotWithoutGeometry.text.trimmed().isEmpty()) {
+        POINT cursorPoint;
+        cursorPoint.x = request.cursorPhysicalPosition.x();
+        cursorPoint.y = request.cursorPhysicalPosition.y();
+        IUIAutomationElement *element = nullptr;
+        if (SUCCEEDED(automation->ElementFromPoint(cursorPoint, &element))
+            && element) {
+            IUIAutomationTreeWalker *walker = nullptr;
+            automation->get_RawViewWalker(&walker);
+            for (int depth = 0; depth < 12 && element; ++depth) {
+                const SelectionPhysicalProbeResult candidate =
+                    selectionFromAutomationElement(element, result);
+                if (candidate.snapshotWithoutGeometry.sensitivity
+                        != SelectionSensitivity::Normal
+                    || !candidate.snapshotWithoutGeometry.text
+                            .trimmed().isEmpty()) {
+                    result = candidate;
+                    break;
+                }
+                if (!walker) {
+                    break;
+                }
+                IUIAutomationElement *parent = nullptr;
+                if (FAILED(walker->GetParentElement(element, &parent))
+                    || !parent) {
+                    break;
+                }
+                releaseComObject(element);
+                element = parent;
+            }
+            releaseComObject(element);
+            releaseComObject(walker);
+        }
+    }
+
+    releaseComObject(automation);
+    if (shouldUninitialize) {
+        CoUninitialize();
+    }
+#else
+    Q_UNUSED(request);
+#endif
+    return result;
+}
 
 QString SelectedTextReader::read(
     bool strongSelectionEnabled,

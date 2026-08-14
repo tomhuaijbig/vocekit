@@ -13,6 +13,7 @@ private slots:
     void aiModeGeneratesAndSavesEntry();
     void askModeCanCancelWithoutSideEffects();
     void hotkeyReportsMissingSelectedText();
+    void forcedLocalModeAlwaysOpensEditorWithoutChoiceAiOrAppend();
     void voiceControllerNoLongerOwnsVocabularyQuickAdd();
 };
 
@@ -190,6 +191,55 @@ hotkeyReportsMissingSelectedText()
 }
 
 void VocabularyQuickAddControllerTests::
+forcedLocalModeAlwaysOpensEditorWithoutChoiceAiOrAppend()
+{
+    int choiceCalls = 0;
+    int aiCalls = 0;
+    int appendCalls = 0;
+    int editorCalls = 0;
+    VocabularyEntry opened;
+    VocabularyQuickAddAccess access;
+    access.askChoice = [&]() {
+        ++choiceCalls;
+        return VocabularyQuickAddChoice::UseAi;
+    };
+    access.requestSuggestion = [&aiCalls](
+        const VocabularySuggestionTaskRequest &,
+        QString *) {
+        ++aiCalls;
+        return VocabularySuggestion();
+    };
+    access.appendEntry = [&appendCalls](VocabularyEntry *, QString *) {
+        ++appendCalls;
+        return true;
+    };
+    access.openEditor = [&](const VocabularyEntry &entry) {
+        ++editorCalls;
+        opened = entry;
+    };
+
+    VocabularyQuickAddController controller(access);
+    AppSettingsData settings;
+    settings.vocabularyAddMode = QStringLiteral("ai");
+    controller.updateConfiguration(settings);
+
+    const VocabularyQuickAddOutcome outcome = controller.addTextLocally(
+        QStringLiteral("  private source  "),
+        QString(),
+        QStringLiteral("edited value")
+    );
+
+    QCOMPARE(outcome, VocabularyQuickAddOutcome::EditorOpened);
+    QCOMPARE(choiceCalls, 0);
+    QCOMPARE(aiCalls, 0);
+    QCOMPARE(appendCalls, 0);
+    QCOMPARE(editorCalls, 1);
+    QCOMPARE(opened.source, QStringLiteral("private source"));
+    QCOMPARE(opened.target, QStringLiteral("edited value"));
+    QCOMPARE(opened.scopeId, QStringLiteral("__global"));
+}
+
+void VocabularyQuickAddControllerTests::
 voiceControllerNoLongerOwnsVocabularyQuickAdd()
 {
     const QString path = QFINDTESTDATA(
@@ -229,6 +279,16 @@ voiceControllerNoLongerOwnsVocabularyQuickAdd()
         )
     );
     QVERIFY(!contents.contains("refreshVocabularyForVoiceController"));
+    QVERIFY(contents.contains("addVocabularyLocallyForFlow("));
+    QVERIFY(contents.contains("m_vocabularyQuickAdd->addTextLocally("));
+
+    const QString headerPath = QFINDTESTDATA(
+        "../../src/controllers/voice_controller.h"
+    );
+    QVERIFY2(!headerPath.isEmpty(), "找不到 VoiceController 头文件");
+    QFile header(headerPath);
+    QVERIFY(header.open(QIODevice::ReadOnly));
+    QVERIFY(header.readAll().contains("addVocabularyLocallyForFlow("));
 }
 
 QTEST_APPLESS_MAIN(VocabularyQuickAddControllerTests)

@@ -651,6 +651,20 @@ public:
         }
     }
 
+    void addVocabularyLocallyForFlow(
+        const QString &sourceText,
+        const QString &scopeId,
+        const QString &editedText)
+    {
+        if (m_vocabularyQuickAdd) {
+            m_vocabularyQuickAdd->addTextLocally(
+                sourceText,
+                scopeId,
+                editedText
+            );
+        }
+    }
+
     VocabularySuggestion suggestVocabularyEntry(
         const QString &sourceText,
         const QString &scopeId,
@@ -1155,6 +1169,18 @@ void VoiceController::addVocabularyForFlow(
     const QString &editedText)
 {
     d->addVocabularyForFlow(
+        sourceText,
+        scopeId,
+        editedText
+    );
+}
+
+void VoiceController::addVocabularyLocallyForFlow(
+    const QString &sourceText,
+    const QString &scopeId,
+    const QString &editedText)
+{
+    d->addVocabularyLocallyForFlow(
         sourceText,
         scopeId,
         editedText

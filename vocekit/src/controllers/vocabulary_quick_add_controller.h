@@ -70,6 +70,11 @@ public:
         const QString &scopeId,
         const QString &editedText = QString()
     );
+    VocabularyQuickAddOutcome addTextLocally(
+        const QString &sourceText,
+        const QString &scopeId,
+        const QString &editedText = QString()
+    );
     VocabularySuggestion suggest(
         const QString &sourceText,
         const QString &scopeId,

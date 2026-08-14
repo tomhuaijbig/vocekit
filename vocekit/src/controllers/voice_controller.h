@@ -69,6 +69,11 @@ public:
         const QString &scopeId,
         const QString &editedText
     );
+    void addVocabularyLocallyForFlow(
+        const QString &sourceText,
+        const QString &scopeId,
+        const QString &editedText
+    );
     VocabularySuggestion suggestVocabularyEntry(
         const QString &sourceText,
         const QString &scopeId,

@@ -215,6 +215,38 @@ VocabularyQuickAddOutcome VocabularyQuickAddController::addText(
     return VocabularyQuickAddOutcome::Saved;
 }
 
+VocabularyQuickAddOutcome VocabularyQuickAddController::addTextLocally(
+    const QString &sourceText,
+    const QString &scopeId,
+    const QString &editedText)
+{
+    const QString source = sourceText.trimmed();
+    if (source.isEmpty()) {
+        if (m_access.showWarning) {
+            m_access.showWarning(
+                quickAddText("无法加入词库"),
+                quickAddText("没有可用的原词或错词。")
+            );
+        }
+        return VocabularyQuickAddOutcome::Failed;
+    }
+    if (!m_access.openEditor) {
+        return VocabularyQuickAddOutcome::Failed;
+    }
+
+    m_access.openEditor(manualEntry(source, scopeId, editedText));
+    if (m_access.setStatus) {
+        m_access.setStatus(
+            quickAddText("手动加入词库"),
+            quickAddText("请在弹出的词条窗口中确认并保存。")
+        );
+    }
+    if (m_access.hideStatusLater) {
+        m_access.hideStatusLater();
+    }
+    return VocabularyQuickAddOutcome::EditorOpened;
+}
+
 VocabularySuggestion VocabularyQuickAddController::suggest(
     const QString &sourceText,
     const QString &scopeId,

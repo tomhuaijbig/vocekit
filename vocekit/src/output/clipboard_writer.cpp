@@ -266,6 +266,30 @@ ClipboardWriteResult writeToTarget(
 
 } // namespace
 
+bool ClipboardWriter::copyText(const QString &text)
+{
+    if (!QApplication::instance()
+        || QThread::currentThread()
+            != QApplication::instance()->thread()) {
+        return false;
+    }
+    QClipboard *clipboard = QApplication::clipboard();
+    if (!clipboard) {
+        return false;
+    }
+    abandonLease();
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        clipboard->setText(text, QClipboard::Clipboard);
+        QApplication::processEvents();
+        if (clipboard->text(QClipboard::Clipboard) == text
+            && currentLeaseToken(clipboard).isEmpty()) {
+            return true;
+        }
+        QThread::msleep(15);
+    }
+    return false;
+}
+
 bool ClipboardWriter::isUsableExternalWindow(
     ClipboardWindowHandle window)
 {

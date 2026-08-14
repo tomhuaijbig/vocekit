@@ -14,6 +14,7 @@ struct ClipboardWriteResult
 class ClipboardWriter
 {
 public:
+    static bool copyText(const QString &text);
     static bool isUsableExternalWindow(
         ClipboardWindowHandle window
     );

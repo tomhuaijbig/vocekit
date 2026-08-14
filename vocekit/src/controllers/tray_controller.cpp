@@ -48,6 +48,27 @@ TrayController::TrayController(
     proxyAction->setCheckable(true);
     auto *floatingBarAction = menu->addAction(QString::fromUtf8("浮动条：语音时显示"));
     floatingBarAction->setCheckable(true);
+    auto *selectionMenu = menu->addMenu(QString::fromUtf8("选中文字工具"));
+    auto *selectionEnable = selectionMenu->addAction(
+        QString::fromUtf8("启用选中文字工具")
+    );
+    selectionEnable->setData(QStringLiteral("selection-context-enable"));
+    selectionEnable->setCheckable(true);
+    selectionMenu->addSeparator();
+    auto *selectionPause = selectionMenu->addAction(
+        QString::fromUtf8("暂停 30 分钟")
+    );
+    selectionPause->setData(QStringLiteral("selection-context-pause-30"));
+    selectionPause->setCheckable(true);
+    auto *selectionResume = selectionMenu->addAction(
+        QString::fromUtf8("继续显示")
+    );
+    selectionResume->setData(QStringLiteral("selection-context-resume"));
+    selectionResume->setCheckable(true);
+    auto *selectionStateGroup = new QActionGroup(selectionMenu);
+    selectionStateGroup->setExclusive(true);
+    selectionPause->setActionGroup(selectionStateGroup);
+    selectionResume->setActionGroup(selectionStateGroup);
     menu->addSeparator();
 
     auto *showBar = menu->addAction(QString::fromUtf8("测试浮动条"));
@@ -62,7 +83,13 @@ TrayController::TrayController(
         menu,
         &QMenu::aboutToShow,
         this,
-        [this, speechActions, proxyAction, floatingBarAction]() {
+        [this,
+         speechActions,
+         proxyAction,
+         floatingBarAction,
+         selectionEnable,
+         selectionPause,
+         selectionResume]() {
             const QString provider = normalizeSpeechProvider(
                 m_callbacks.speechProvider
                     ? m_callbacks.speechProvider()
@@ -85,6 +112,16 @@ TrayController::TrayController(
             floatingBarAction->setText(floatingEnabled
                 ? QString::fromUtf8("浮动条：语音时显示")
                 : QString::fromUtf8("浮动条：已关闭"));
+
+            const bool selectionEnabled =
+                m_callbacks.selectionContextEnabled
+                && m_callbacks.selectionContextEnabled();
+            const bool selectionPaused =
+                m_callbacks.selectionContextPaused
+                && m_callbacks.selectionContextPaused();
+            selectionEnable->setChecked(selectionEnabled);
+            selectionPause->setChecked(selectionPaused);
+            selectionResume->setChecked(!selectionPaused);
         }
     );
     connect(proxyAction, &QAction::triggered, this, [this](bool checked) {
@@ -102,6 +139,26 @@ TrayController::TrayController(
         applyQuickSetting(checked
             ? QString::fromUtf8("浮动条已启用")
             : QString::fromUtf8("浮动条已关闭"));
+    });
+    connect(selectionEnable, &QAction::triggered, this, [this](bool checked) {
+        if (m_callbacks.setSelectionContextEnabled) {
+            m_callbacks.setSelectionContextEnabled(checked);
+        }
+        applyQuickSetting(checked
+            ? QString::fromUtf8("选中文字工具已启用")
+            : QString::fromUtf8("选中文字工具已关闭"));
+    });
+    connect(selectionPause, &QAction::triggered, this, [this]() {
+        if (m_callbacks.pauseSelectionContextThirtyMinutes) {
+            m_callbacks.pauseSelectionContextThirtyMinutes();
+        }
+        applyQuickSetting(QString::fromUtf8("选中文字工具已暂停 30 分钟"));
+    });
+    connect(selectionResume, &QAction::triggered, this, [this]() {
+        if (m_callbacks.resumeSelectionContext) {
+            m_callbacks.resumeSelectionContext();
+        }
+        applyQuickSetting(QString::fromUtf8("选中文字工具已继续显示"));
     });
     connect(showBar, &QAction::triggered, this, [this]() {
         if (m_callbacks.showFloatingBarTest) {

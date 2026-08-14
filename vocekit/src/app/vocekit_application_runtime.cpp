@@ -1,6 +1,7 @@
 #include "vocekit_application_runtime.h"
 
 #include "application_events.h"
+#include "selection_context_feature.h"
 #include "../capture/screenshot_launcher.h"
 #include "../capture/screenshot_types.h"
 #include "../config/app_settings_defaults.h"
@@ -1116,10 +1117,123 @@ int runVocekitApplication(int argc, char *argv[])
         hub->openFaqById(faqId);
     });
 
+    SelectionContextFeatureAccess selectionFeatureAccess;
+    selectionFeatureAccess.settingsSnapshot = [&settingsStore]() {
+        return settingsStore.snapshot();
+    };
+    selectionFeatureAccess.promptSnapshot = [
+        &settingsStore,
+        &promptLibraryStore
+    ]() {
+        PromptRuntimeSnapshot snapshot;
+        snapshot.settings = settingsStore.snapshot();
+        snapshot.libraryItems = promptLibraryStore.items();
+        return snapshot;
+    };
+    selectionFeatureAccess.saveVocabulary = [&voice](const QString &text) {
+        voice.addVocabularyLocallyForFlow(
+            text,
+            QStringLiteral("__global"),
+            QString()
+        );
+    };
+    selectionFeatureAccess.blockApplication = [
+        &settingsStore,
+        &settings,
+        &settingsChanged
+    ](const QString &executable) {
+        const QString normalized = executable.trimmed().toLower();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        AppSettingsData next = settingsStore.snapshot();
+        QStringList blocked;
+        for (const QString &entry :
+             next.selectionContext.blockedApplications) {
+            const QString value = entry.trimmed().toLower();
+            if (!value.isEmpty() && !blocked.contains(value)) {
+                blocked.append(value);
+            }
+        }
+        if (!blocked.contains(normalized)) {
+            blocked.append(normalized);
+        }
+        next.selectionContext.blockedApplications = blocked;
+        OperationError error;
+        if (!settingsStore.replaceNonFlowSettingsAndSave(next, &error)) {
+            return false;
+        }
+        settings.load();
+        if (settingsChanged) {
+            settingsChanged();
+        }
+        return true;
+    };
+    selectionFeatureAccess.openSettings = [&hub]() {
+        hub->showSettingsPage(0);
+    };
+    selectionFeatureAccess.ensureNetworkConsent = [
+        &hub,
+        &settingsStore,
+        &settings,
+        &settingsChanged
+    ](const QString &, const QString &) {
+        if (settingsStore.snapshot()
+                .selectionContext.networkConsentAcknowledged) {
+            return true;
+        }
+        const QMessageBox::StandardButton choice = QMessageBox::question(
+            hub.data(),
+            tr8("允许发送选中文字吗？"),
+            tr8(
+                "此操作会把当前选中的文字发送到你配置的大模型服务。"
+                "不会在提示框或运行日志中显示原文。是否继续？"
+            ),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No
+        );
+        if (choice != QMessageBox::Yes) {
+            return false;
+        }
+        AppSettingsData next = settingsStore.snapshot();
+        next.selectionContext.networkConsentAcknowledged = true;
+        OperationError error;
+        if (!settingsStore.replaceNonFlowSettingsAndSave(next, &error)) {
+            return false;
+        }
+        settings.load();
+        if (settingsChanged) {
+            settingsChanged();
+        }
+        return true;
+    };
+    selectionFeatureAccess.logMetadata = [](
+        const QString &eventId,
+        const QString &actionId,
+        int textLength,
+        qint64 elapsedMs) {
+        logRuntimeEvent(
+            tr8("选中文字"),
+            eventId,
+            QStringLiteral("action=%1,textLength=%2,elapsedMs=%3")
+                .arg(actionId)
+                .arg(textLength)
+                .arg(elapsedMs)
+        );
+    };
+    SelectionContextFeature selectionContextFeature(
+        selectionFeatureAccess
+    );
+
     hotkeys.setCallback(
         [controllerGuard,
+         &selectionContextFeature,
          &hotkeys,
          &hotkeyRefreshCoordinator](const QString &id) {
+            if (id == QStringLiteral("selection_toolbar")) {
+                selectionContextFeature.triggerFallbackShortcut();
+                return;
+            }
             dispatchRegisteredHotkeyPress(
                 id,
                 hotkeys.activeHoldFunctions(),
@@ -1232,6 +1346,7 @@ int runVocekitApplication(int argc, char *argv[])
         refreshFunctionFlowRuntime(QStringList());
         refreshFunctionFlowHotkeys(QStringList());
         bar.setEnabledVisible(settings.floatingBarEnabled());
+        selectionContextFeature.refresh();
         SettingsChangeSet change;
         events.publishSettingsChanged(change);
         logRuntimeEvent(
@@ -1242,6 +1357,7 @@ int runVocekitApplication(int argc, char *argv[])
                 + QStringLiteral("，浮动条=") + (settings.floatingBarEnabled() ? QStringLiteral("开") : QStringLiteral("关"))
         );
     };
+    selectionContextFeature.start();
     settingsChanged();
 
     TrayController::Callbacks trayCallbacks;
@@ -1253,6 +1369,12 @@ int runVocekitApplication(int argc, char *argv[])
     };
     trayCallbacks.floatingBarEnabled = [&settings]() {
         return settings.floatingBarEnabled();
+    };
+    trayCallbacks.selectionContextEnabled = [&settingsStore]() {
+        return settingsStore.snapshot().selectionContext.enabled;
+    };
+    trayCallbacks.selectionContextPaused = [&selectionContextFeature]() {
+        return selectionContextFeature.isPaused();
     };
     trayCallbacks.setSpeechProvider = [&settings, &settingsChanged](const QString &provider) {
         settings.load();
@@ -1277,6 +1399,30 @@ int runVocekitApplication(int argc, char *argv[])
         if (settingsChanged) {
             settingsChanged();
         }
+    };
+    trayCallbacks.setSelectionContextEnabled = [
+        &settingsStore,
+        &settings,
+        &settingsChanged
+    ](bool enabled) {
+        AppSettingsData next = settingsStore.snapshot();
+        next.selectionContext.enabled = enabled;
+        OperationError error;
+        if (!settingsStore.replaceNonFlowSettingsAndSave(next, &error)) {
+            return;
+        }
+        settings.load();
+        if (settingsChanged) {
+            settingsChanged();
+        }
+    };
+    trayCallbacks.pauseSelectionContextThirtyMinutes = [
+        &selectionContextFeature
+    ]() {
+        selectionContextFeature.pauseForMinutes(30);
+    };
+    trayCallbacks.resumeSelectionContext = [&selectionContextFeature]() {
+        selectionContextFeature.resume();
     };
     trayCallbacks.showFloatingBarTest = [&hub, &bar, &settings]() {
         if (!settings.floatingBarEnabled()) {
@@ -1306,6 +1452,7 @@ int runVocekitApplication(int argc, char *argv[])
     bar.setEnabledVisible(settings.floatingBarEnabled());
 
     const int exitCode = app.exec();
+    selectionContextFeature.stop();
     logRuntimeEvent(tr8("程序"), tr8("退出"), QStringLiteral("exitCode=") + QString::number(exitCode));
     setAttentionFaqCallback(AttentionFaqCallback());
     hotkeys.setHoldCallback(std::function<void(const QString &, HoldShortcutTransition)>());

@@ -8,6 +8,7 @@ TEMPLATE = app
 SOURCES += \
     src/api/api_client_utils.cpp \
     src/app/application_events.cpp \
+    src/app/selection_context_feature.cpp \
     src/app/vocekit_application_runtime.cpp \
     src/capture/screen_capture_overlay.cpp \
     src/capture/screenshot_launcher.cpp \
@@ -33,6 +34,9 @@ SOURCES += \
     src/controllers/selected_text_workflow_adapters.cpp \
     src/controllers/selected_text_workflow_controller.cpp \
     src/controllers/screenshot_workflow_controller.cpp \
+    src/controllers/selection_context_action_controller.cpp \
+    src/controllers/selection_context_coordinator.cpp \
+    src/controllers/selection_context_policy.cpp \
     src/controllers/tray_controller.cpp \
     src/controllers/vocabulary_quick_add_adapters.cpp \
     src/controllers/vocabulary_quick_add_controller.cpp \
@@ -85,6 +89,9 @@ SOURCES += \
     src/input/hotkey_settings_snapshot.cpp \
     src/input/hold_to_talk.cpp \
     src/input/selected_text_reader.cpp \
+    src/input/selection_coordinate_mapper.cpp \
+    src/input/selection_observer.cpp \
+    src/input/selection_probe_runner.cpp \
     src/input/voice_input_collector.cpp \
     src/main.cpp \
     src/ocr/ocr_cloud_client.cpp \
@@ -98,6 +105,8 @@ SOURCES += \
     src/output/result_output_router.cpp \
     src/output/voice_result_output_dispatcher.cpp \
     src/output/classic_auto_write_executor.cpp \
+    src/tasks/selection_context_model_request.cpp \
+    src/tasks/selection_context_model_runner.cpp \
     src/platform/windows_autostart.cpp \
     src/providers/built_in_provider_factory.cpp \
     src/providers/baidu_realtime_speech_protocol.cpp \
@@ -256,6 +265,10 @@ SOURCES += \
     src/ui/result_choice_popup.cpp \
     src/ui/result_popup_test_card.cpp \
     src/ui/selection_input_test_card.cpp \
+    src/ui/selection_context_placement.cpp \
+    src/ui/selection_context_settings_card.cpp \
+    src/ui/selection_context_toolbar.cpp \
+    src/ui/selection_result_card.cpp \
     src/ui/settings_panel_access_factory.cpp \
     src/ui/settings_panel.cpp \
     src/ui/shortcut_display.cpp \
@@ -303,6 +316,9 @@ HEADERS += \
     src/controllers/function_flow_runtime_adapters.h \
     src/controllers/selected_text_workflow_controller.h \
     src/controllers/screenshot_workflow_controller.h \
+    src/controllers/selection_context_action_controller.h \
+    src/controllers/selection_context_coordinator.h \
+    src/controllers/selection_context_policy.h \
     src/controllers/tray_controller.h \
     src/controllers/vocabulary_quick_add_controller.h \
     src/controllers/voice_controller.h \
@@ -351,6 +367,12 @@ HEADERS += \
     src/domain/voice_run_planner.h \
     src/file_utils.h \
     src/faq_paging.h \
+    src/input/selection_coordinate_mapper.h \
+    src/input/selection_observer.h \
+    src/input/selection_probe_runner.h \
+    src/input/selection_snapshot.h \
+    src/tasks/selection_context_model_request.h \
+    src/tasks/selection_context_model_runner.h \
     src/input/global_hotkeys.h \
     src/input/hotkey_definitions.h \
     src/input/hotkey_parser.h \
@@ -456,6 +478,7 @@ HEADERS += \
     src/ui/command_search_router.h \
     src/ui/current_status_panel.h \
     src/ui/current_status_snapshot.h \
+    src/app/selection_context_feature.h \
     src/ui/diagnostic_action_card.h \
     src/ui/diagnostics_page_factory.h \
     src/ui/diagnostics_panel.h \
@@ -536,6 +559,10 @@ HEADERS += \
     src/ui/reorderable_card_column.h \
     src/ui/result_popup_test_card.h \
     src/ui/selection_input_test_card.h \
+    src/ui/selection_context_placement.h \
+    src/ui/selection_context_settings_card.h \
+    src/ui/selection_context_toolbar.h \
+    src/ui/selection_result_card.h \
     src/ui/screen_position.h \
     src/ui/settings_panel_access_factory.h \
     src/ui/settings_panel.h \
@@ -555,4 +582,4 @@ HEADERS += \
     src/ui/write_input_test_card.h \
     src/voiceassistant.h
 
-win32:LIBS += -luser32 -lole32 -loleaut32 -luuid
+win32:LIBS += -luser32 -lwtsapi32 -lole32 -loleaut32 -luuid

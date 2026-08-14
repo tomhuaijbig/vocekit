@@ -21,6 +21,11 @@ public:
         std::function<void(const QString &)> setSpeechProvider;
         std::function<void(bool)> setUseSystemProxy;
         std::function<void(bool)> setFloatingBarEnabled;
+        std::function<bool()> selectionContextEnabled;
+        std::function<bool()> selectionContextPaused;
+        std::function<void(bool)> setSelectionContextEnabled;
+        std::function<void()> pauseSelectionContextThirtyMinutes;
+        std::function<void()> resumeSelectionContext;
         std::function<void()> showFloatingBarTest;
         std::function<void()> openSettings;
         std::function<void()> requestApplicationQuit;

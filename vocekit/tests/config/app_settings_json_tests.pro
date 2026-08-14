@@ -14,6 +14,7 @@ SOURCES += \
     ../../src/config/function_flow_json.cpp \
     ../../src/domain/function_flow_graph.cpp \
     ../../src/domain/function_flow_ports.cpp \
+    ../../src/domain/selection_context_actions.cpp \
     ../../src/domain/function_settings.cpp \
     ../../src/result_flow_config.cpp
 
@@ -25,6 +26,7 @@ HEADERS += \
     ../../src/config/function_flow_json.h \
     ../../src/domain/function_flow_graph.h \
     ../../src/domain/function_flow_ports.h \
+    ../../src/domain/selection_context_actions.h \
     ../../src/domain/function_settings.h \
     ../../src/domain/operation_error.h \
     ../../src/result_flow_config.h

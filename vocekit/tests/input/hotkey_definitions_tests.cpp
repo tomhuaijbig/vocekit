@@ -23,12 +23,13 @@ private slots:
     void containsAllDefaultHotkeys()
     {
         const QStringList ids = idsOf(hotkeyDefs());
-        QCOMPARE(ids.size(), 5);
+        QCOMPARE(ids.size(), 6);
         QVERIFY(ids.contains(QStringLiteral("dictate")));
         QVERIFY(ids.contains(QStringLiteral("translate")));
         QVERIFY(ids.contains(QStringLiteral("ask")));
         QVERIFY(ids.contains(QStringLiteral("vocabulary_add")));
         QVERIFY(ids.contains(QStringLiteral("hub")));
+        QVERIFY(ids.contains(QStringLiteral("selection_toolbar")));
     }
 
     void builtInFunctionTitlesUseChineseOnly()
@@ -47,6 +48,27 @@ private slots:
             << QStringLiteral("dictate")
             << QStringLiteral("translate")
             << QStringLiteral("ask"));
+    }
+
+    void exposesSelectionToolbarFallbackWithoutMakingItAFunction()
+    {
+        const QString id = QStringLiteral("selection_toolbar");
+        QVERIFY(idsOf(hotkeyDefs()).contains(id));
+        QVERIFY(!idsOf(coreFunctionDefs()).contains(id));
+
+        HotkeyDef found;
+        for (const HotkeyDef &def : hotkeyDefs()) {
+            if (def.id == id) {
+                found = def;
+                break;
+            }
+        }
+        QCOMPARE(found.title, QString::fromUtf8("选中文字工具条"));
+        QCOMPARE(found.defaultValue, QStringLiteral("Ctrl+Alt+E"));
+        QCOMPARE(
+            found.hint,
+            QString::fromUtf8("读取当前选中文字并显示快捷工具条")
+        );
     }
 
     void returnsDefaultScreenshotShortcuts()

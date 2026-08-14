@@ -21,6 +21,7 @@ SOURCES += \
     ../../src/input/hotkey_definitions.cpp \
     ../../src/domain/function_flow_graph.cpp \
     ../../src/domain/function_flow_ports.cpp \
+    ../../src/domain/selection_context_actions.cpp \
     ../../src/domain/function_settings.cpp \
     ../../src/ocr/ocr_batch_queue.cpp \
     ../../src/ocr/ocr_batch_text.cpp \
@@ -49,6 +50,7 @@ HEADERS += \
     ../../src/input/hotkey_definitions.h \
     ../../src/domain/function_flow_graph.h \
     ../../src/domain/function_flow_ports.h \
+    ../../src/domain/selection_context_actions.h \
     ../../src/domain/function_settings.h \
     ../../src/ocr/ocr_cloud_client.h \
     ../../src/ocr/ocr_batch_queue.h \

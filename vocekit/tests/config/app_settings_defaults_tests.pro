@@ -8,7 +8,10 @@ INCLUDEPATH += ../..
 
 SOURCES += \
     app_settings_defaults_tests.cpp \
-    ../../src/config/app_settings_defaults.cpp
+    ../../src/config/app_settings_defaults.cpp \
+    ../../src/domain/selection_context_actions.cpp
 
 HEADERS += \
-    ../../src/config/app_settings_defaults.h
+    ../../src/config/app_settings_defaults.h \
+    ../../src/config/app_settings_data.h \
+    ../../src/domain/selection_context_actions.h

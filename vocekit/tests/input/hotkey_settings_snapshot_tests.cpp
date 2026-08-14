@@ -17,6 +17,19 @@ GlobalHotkeyFunction functionById(
     return GlobalHotkeyFunction();
 }
 
+int functionCountById(
+    const GlobalHotkeySettingsSnapshot &snapshot,
+    const QString &id)
+{
+    int count = 0;
+    for (const GlobalHotkeyFunction &function : snapshot.functions) {
+        if (function.id == id) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 } // namespace
 
 class HotkeySettingsSnapshotTests : public QObject
@@ -57,7 +70,7 @@ private slots:
         const GlobalHotkeySettingsSnapshot snapshot =
             globalHotkeySnapshotFromData(settings);
 
-        QCOMPARE(snapshot.functions.size(), 6);
+        QCOMPARE(snapshot.functions.size(), 7);
         const GlobalHotkeyFunction dictateHotkey =
             functionById(snapshot, QStringLiteral("dictate"));
         QCOMPARE(dictateHotkey.shortcut, QStringLiteral("Alt+X"));
@@ -89,6 +102,29 @@ private slots:
         const GlobalHotkeyFunction hub =
             functionById(snapshot, QStringLiteral("hub"));
         QCOMPARE(hub.shortcut, QStringLiteral("Ctrl+Alt+S"));
+    }
+
+    void selectionToolbarFallbackAppearsExactlyOnceWithoutVoiceInputs()
+    {
+        AppSettingsData settings;
+        settings.applicationHotkeys.insert(
+            QStringLiteral("selection_toolbar"),
+            QStringLiteral("Alt+E")
+        );
+        const GlobalHotkeySettingsSnapshot snapshot =
+            globalHotkeySnapshotFromData(settings);
+
+        QCOMPARE(
+            functionCountById(snapshot, QStringLiteral("selection_toolbar")),
+            1
+        );
+        const GlobalHotkeyFunction function = functionById(
+            snapshot,
+            QStringLiteral("selection_toolbar")
+        );
+        QCOMPARE(function.shortcut, QStringLiteral("Alt+E"));
+        QVERIFY(!function.useVoice);
+        QVERIFY(!function.useScreenshot);
     }
 
     void canvasModeClearsClassicScreenshotEntrancesWithoutPublishedTrigger()

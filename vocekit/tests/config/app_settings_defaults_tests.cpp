@@ -1,12 +1,118 @@
 #include <QtTest>
 
+#include "../../src/config/app_settings_data.h"
 #include "../../src/config/app_settings_defaults.h"
+#include "../../src/domain/selection_context_actions.h"
 
 class AppSettingsDefaultsTests : public QObject
 {
     Q_OBJECT
 
 private slots:
+    void defaultsKeepAutomaticSelectionToolbarOptIn()
+    {
+        const AppSettingsData data;
+
+        QVERIFY(!data.selectionContext.enabled);
+        QVERIFY(data.selectionContext.keyboardSelectionEnabled);
+        QCOMPARE(data.selectionContext.minimumTextLength, 2);
+        QVERIFY(data.selectionContext.closeOnOutsideClick);
+        QVERIFY(data.selectionContext.pinEnabled);
+        QVERIFY(!data.selectionContext.networkConsentAcknowledged);
+        QCOMPARE(data.selectionContext.pauseMinutes, 30);
+        QCOMPARE(
+            data.selectionContext.actionOrder,
+            QStringList()
+                << selectionContextActionAiSearch()
+                << selectionContextActionTranslate()
+                << selectionContextActionExplain()
+                << selectionContextActionSave()
+                << selectionContextActionCopy()
+        );
+    }
+
+    void selectionContextActionCatalogIsStableAndRejectsMalformedFunctions()
+    {
+        QCOMPARE(
+            defaultSelectionContextActionOrder(),
+            QStringList()
+                << QStringLiteral("ai-search")
+                << QStringLiteral("translate")
+                << QStringLiteral("explain")
+                << QStringLiteral("save")
+                << QStringLiteral("copy")
+        );
+        QCOMPARE(
+            normalizeSelectionContextActionOrder(
+                QStringList()
+                    << QStringLiteral("unknown")
+                    << selectionContextActionCopy()
+                    << selectionContextActionCopy()
+            ),
+            QStringList()
+                << selectionContextActionCopy()
+                << selectionContextActionAiSearch()
+                << selectionContextActionTranslate()
+                << selectionContextActionExplain()
+                << selectionContextActionSave()
+        );
+
+        const QString action = selectionContextActionForFunction(
+            QStringLiteral(" custom-action ")
+        );
+        QCOMPARE(action, QStringLiteral("function:custom-action"));
+        QVERIFY(isSelectionContextFunctionAction(action));
+        QCOMPARE(
+            selectionContextFunctionId(action),
+            QStringLiteral("custom-action")
+        );
+        QVERIFY(selectionContextActionForFunction(QString()).isEmpty());
+        QVERIFY(selectionContextFunctionId(QStringLiteral("function:")).isEmpty());
+        QVERIFY(!isSelectionContextFunctionAction(QStringLiteral("function:")));
+        QVERIFY(!isSelectionContextFunctionAction(QStringLiteral("function:a:b")));
+        QVERIFY(selectionContextActionForFunction(QStringLiteral("a:b")).isEmpty());
+        QVERIFY(selectionContextFunctionId(selectionContextActionCopy()).isEmpty());
+        QCOMPARE(
+            selectionContextActionTitle(selectionContextActionAiSearch()),
+            QString::fromUtf8("AI 搜索")
+        );
+        QCOMPARE(
+            selectionContextActionTitle(selectionContextActionTranslate()),
+            QString::fromUtf8("翻译")
+        );
+        QCOMPARE(
+            selectionContextActionTitle(selectionContextActionExplain()),
+            QString::fromUtf8("解释")
+        );
+        QCOMPARE(
+            selectionContextActionTitle(selectionContextActionSave()),
+            QString::fromUtf8("保存")
+        );
+        QCOMPARE(
+            selectionContextActionTitle(selectionContextActionCopy()),
+            QString::fromUtf8("复制")
+        );
+        QCOMPARE(
+            selectionContextMenuBlockApplication(),
+            QStringLiteral("block-application")
+        );
+        QCOMPARE(
+            selectionContextActionTitle(
+                selectionContextMenuBlockApplication()
+            ),
+            QString::fromUtf8("在此应用中禁用")
+        );
+        QCOMPARE(
+            selectionContextMenuOpenSettings(),
+            QStringLiteral("open-settings")
+        );
+        QCOMPARE(
+            selectionContextActionTitle(selectionContextMenuOpenSettings()),
+            QString::fromUtf8("打开设置")
+        );
+        QVERIFY(selectionContextActionTitle(QStringLiteral("unknown")).isEmpty());
+    }
+
     void normalizesSpeechProviderIds()
     {
         QCOMPARE(normalizeSpeechProvider(QStringLiteral("xfyun")), speechProviderXfyun());

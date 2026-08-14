@@ -43,6 +43,12 @@ const QVector<HotkeyDef> &hotkeyDefs()
             text8("打开主界面"),
             QStringLiteral("Ctrl+Alt+S"),
             text8("打开主界面和设置入口")
+        },
+        {
+            QStringLiteral("selection_toolbar"),
+            text8("选中文字工具条"),
+            QStringLiteral("Ctrl+Alt+E"),
+            text8("读取当前选中文字并显示快捷工具条")
         }
     };
     return defs;
@@ -54,7 +60,8 @@ const QVector<HotkeyDef> &coreFunctionDefs()
         QVector<HotkeyDef> items = hotkeyDefs();
         for (int i = items.size() - 1; i >= 0; --i) {
             if (items.at(i).id == QStringLiteral("hub")
-                || items.at(i).id == QStringLiteral("vocabulary_add")) {
+                || items.at(i).id == QStringLiteral("vocabulary_add")
+                || items.at(i).id == QStringLiteral("selection_toolbar")) {
                 items.remove(i);
             }
         }

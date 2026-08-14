@@ -111,6 +111,9 @@ Expected GREEN output for every QtTest executable: exit code `0`, `0 failed`, `0
 - Modify: `tests/input/hotkey_definitions_tests.pro`
 - Modify: `tests/input/hotkey_settings_snapshot_tests.cpp`
 - Modify: `tests/input/hotkey_settings_snapshot_tests.pro`
+- Modify: `tests/config/function_flow_json_tests.pro`
+- Modify: `tests/ocr/ocr_core_tests.pro`
+- Modify: `vocekit.pro`
 
 - [ ] **Step 1: Write RED settings and hotkey tests**
 
@@ -295,7 +298,9 @@ git add src/domain/selection_context_actions.* src/config/app_settings_data.h `
   tests/input/hotkey_definitions_tests.cpp `
   tests/input/hotkey_definitions_tests.pro `
   tests/input/hotkey_settings_snapshot_tests.cpp `
-  tests/input/hotkey_settings_snapshot_tests.pro
+  tests/input/hotkey_settings_snapshot_tests.pro `
+  tests/config/function_flow_json_tests.pro tests/ocr/ocr_core_tests.pro `
+  vocekit.pro
 git commit -m "feat: define selection context settings"
 ```
 

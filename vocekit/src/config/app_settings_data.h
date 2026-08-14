@@ -24,6 +24,24 @@ struct WindowStateSettings
     QPoint screenshotLauncherPosition;
 };
 
+struct SelectionContextSettings
+{
+    bool enabled = false;
+    bool keyboardSelectionEnabled = true;
+    bool closeOnOutsideClick = true;
+    bool pinEnabled = true;
+    bool networkConsentAcknowledged = false;
+    int minimumTextLength = 2;
+    int pauseMinutes = 30;
+    QStringList blockedApplications;
+    QStringList actionOrder = QStringList()
+        << QStringLiteral("ai-search")
+        << QStringLiteral("translate")
+        << QStringLiteral("explain")
+        << QStringLiteral("save")
+        << QStringLiteral("copy");
+};
+
 // 应用级设置。每个具体功能的设置统一放在 functions 中。
 struct AppSettingsData
 {
@@ -63,6 +81,7 @@ struct AppSettingsData
     QVector<FunctionSettings> functions;
     QStringList functionOrder;
     WindowStateSettings windows;
+    SelectionContextSettings selectionContext;
 
     // 迁移期间保留尚未建模的新字段，防止旧版本设置被重写丢失。
     QJsonObject retainedRootValues;

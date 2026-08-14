@@ -4,6 +4,7 @@
 #include "../../src/config/app_settings_defaults.h"
 #include "../../src/config/app_settings_json.h"
 #include "../../src/config/app_settings_store.h"
+#include "../../src/domain/selection_context_actions.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -29,6 +30,71 @@ class AppSettingsJsonTests : public QObject
     Q_OBJECT
 
 private slots:
+    void selectionContextSettingsRoundTripAndNormalize()
+    {
+        AppSettingsData data;
+        data.selectionContext.enabled = true;
+        data.selectionContext.networkConsentAcknowledged = true;
+        data.selectionContext.minimumTextLength = 0;
+        data.selectionContext.pauseMinutes = 2000;
+        data.selectionContext.blockedApplications =
+            QStringList() << QStringLiteral(" WeChat.exe ")
+                          << QStringLiteral("wechat.exe")
+                          << QStringLiteral("C:/Apps/CHROME.EXE");
+        data.selectionContext.actionOrder =
+            QStringList() << QStringLiteral("unknown")
+                          << selectionContextActionCopy();
+
+        const QJsonObject written = appSettingsDataToJson(data);
+        const AppSettingsData restored = appSettingsDataFromJson(written);
+
+        QVERIFY(restored.selectionContext.enabled);
+        QVERIFY(restored.selectionContext.networkConsentAcknowledged);
+        QCOMPARE(restored.selectionContext.minimumTextLength, 1);
+        QCOMPARE(restored.selectionContext.pauseMinutes, 1440);
+        QCOMPARE(
+            restored.selectionContext.blockedApplications,
+            QStringList() << QStringLiteral("wechat.exe")
+                          << QStringLiteral("chrome.exe")
+        );
+        QCOMPARE(
+            restored.selectionContext.actionOrder.first(),
+            selectionContextActionCopy()
+        );
+        QCOMPARE(restored.selectionContext.actionOrder.size(), 5);
+    }
+
+    void selectionContextUnknownNestedFieldsSurviveKnownFieldUpdates()
+    {
+        const QJsonObject futureObject{
+            {QStringLiteral("mode"), QStringLiteral("future")},
+            {QStringLiteral("enabled"), true}
+        };
+        const QJsonArray futureArray{
+            QStringLiteral("one"),
+            QJsonObject{{QStringLiteral("two"), 2}}
+        };
+        QJsonObject nested;
+        nested.insert(QStringLiteral("enabled"), false);
+        nested.insert(QStringLiteral("futureObject"), futureObject);
+        nested.insert(QStringLiteral("futureArray"), futureArray);
+        QJsonObject root;
+        root.insert(QStringLiteral("selectionContextToolbar"), nested);
+
+        AppSettingsData data = appSettingsDataFromJson(root);
+        data.selectionContext.enabled = true;
+        const QJsonObject written = appSettingsDataToJson(data);
+        const QJsonObject restored = written
+            .value(QStringLiteral("selectionContextToolbar"))
+            .toObject();
+
+        QVERIFY(restored.value(QStringLiteral("enabled")).toBool());
+        QCOMPARE(restored.value(QStringLiteral("futureObject")),
+                 QJsonValue(futureObject));
+        QCOMPARE(restored.value(QStringLiteral("futureArray")),
+                 QJsonValue(futureArray));
+    }
+
     void missingStreamingSpeechSettingDefaultsToEnabled()
     {
         const AppSettingsData restored = appSettingsDataFromJson(

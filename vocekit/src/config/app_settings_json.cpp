@@ -1,8 +1,10 @@
 #include "app_settings_json.h"
 #include "app_settings_defaults.h"
 #include "function_flow_json.h"
+#include "../domain/selection_context_actions.h"
 
 #include <QJsonArray>
+#include <QFileInfo>
 #include <QSet>
 #include <QtGlobal>
 
@@ -87,6 +89,20 @@ QJsonArray stringListToJson(const QStringList &values)
         array.append(value);
     }
     return array;
+}
+
+QStringList normalizeExecutableList(const QStringList &values)
+{
+    QStringList normalized;
+    for (const QString &value : values) {
+        const QString executable = QFileInfo(value.trimmed())
+            .fileName()
+            .toLower();
+        if (!executable.isEmpty() && !normalized.contains(executable)) {
+            normalized.append(executable);
+        }
+    }
+    return normalized;
 }
 
 void applyCommonFunctionJson(
@@ -424,6 +440,45 @@ AppSettingsData appSettingsDataFromJson(
         root.value(QStringLiteral("favoriteFolders")).toArray()
     );
 
+    const QJsonObject selection = root
+        .value(QStringLiteral("selectionContextToolbar"))
+        .toObject();
+    data.selectionContext.enabled = selection
+        .value(QStringLiteral("enabled"))
+        .toBool(false);
+    data.selectionContext.keyboardSelectionEnabled = selection
+        .value(QStringLiteral("keyboardSelectionEnabled"))
+        .toBool(true);
+    data.selectionContext.minimumTextLength = qBound(
+        1,
+        selection.value(QStringLiteral("minimumTextLength")).toInt(2),
+        1000
+    );
+    data.selectionContext.closeOnOutsideClick = selection
+        .value(QStringLiteral("closeOnOutsideClick"))
+        .toBool(true);
+    data.selectionContext.pinEnabled = selection
+        .value(QStringLiteral("pinEnabled"))
+        .toBool(true);
+    data.selectionContext.networkConsentAcknowledged = selection
+        .value(QStringLiteral("networkConsentAcknowledged"))
+        .toBool(false);
+    data.selectionContext.pauseMinutes = qBound(
+        1,
+        selection.value(QStringLiteral("pauseMinutes")).toInt(30),
+        1440
+    );
+    data.selectionContext.actionOrder = normalizeSelectionContextActionOrder(
+        stringListFromJson(
+            selection.value(QStringLiteral("actionOrder")).toArray()
+        )
+    );
+    data.selectionContext.blockedApplications = normalizeExecutableList(
+        stringListFromJson(
+            selection.value(QStringLiteral("blockedApplications")).toArray()
+        )
+    );
+
     data.windows.hasFloatingBarPosition = readPoint(
         root.value(QStringLiteral("floatingBarPosition")).toObject(),
         &data.windows.floatingBarPosition
@@ -654,6 +709,55 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
 {
     QJsonObject root = data.retainedRootValues;
     root.remove(QStringLiteral("functionFlows"));
+    QJsonObject selection = root
+        .value(QStringLiteral("selectionContextToolbar"))
+        .toObject();
+    selection.insert(
+        QStringLiteral("enabled"),
+        data.selectionContext.enabled
+    );
+    selection.insert(
+        QStringLiteral("keyboardSelectionEnabled"),
+        data.selectionContext.keyboardSelectionEnabled
+    );
+    selection.insert(
+        QStringLiteral("minimumTextLength"),
+        qBound(1, data.selectionContext.minimumTextLength, 1000)
+    );
+    selection.insert(
+        QStringLiteral("closeOnOutsideClick"),
+        data.selectionContext.closeOnOutsideClick
+    );
+    selection.insert(
+        QStringLiteral("pinEnabled"),
+        data.selectionContext.pinEnabled
+    );
+    selection.insert(
+        QStringLiteral("networkConsentAcknowledged"),
+        data.selectionContext.networkConsentAcknowledged
+    );
+    selection.insert(
+        QStringLiteral("pauseMinutes"),
+        qBound(1, data.selectionContext.pauseMinutes, 1440)
+    );
+    selection.insert(
+        QStringLiteral("actionOrder"),
+        stringListToJson(
+            normalizeSelectionContextActionOrder(
+                data.selectionContext.actionOrder
+            )
+        )
+    );
+    selection.insert(
+        QStringLiteral("blockedApplications"),
+        stringListToJson(
+            normalizeExecutableList(
+                data.selectionContext.blockedApplications
+            )
+        )
+    );
+    root.remove(QStringLiteral("selectionContextToolbar"));
+    root.insert(QStringLiteral("selectionContextToolbar"), selection);
     QJsonObject hotkeys;
     for (auto it = data.applicationHotkeys.constBegin();
          it != data.applicationHotkeys.constEnd();

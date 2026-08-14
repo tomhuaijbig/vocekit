@@ -51,6 +51,7 @@ SOURCES += \
     src/domain/function_flow_scheduler.cpp \
     src/domain/function_flow_validation.cpp \
     src/domain/function_settings.cpp \
+    src/domain/selection_context_actions.cpp \
     src/domain/history_filter.cpp \
     src/domain/history_modes.cpp \
     src/domain/history_record_builder.cpp \
@@ -322,6 +323,7 @@ HEADERS += \
     src/domain/function_flow_scheduler.h \
     src/domain/function_flow_validation.h \
     src/domain/function_settings.h \
+    src/domain/selection_context_actions.h \
     src/domain/history_filter.h \
     src/domain/history_modes.h \
     src/domain/history_record_builder.h \

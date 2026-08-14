@@ -7,6 +7,7 @@ class HubSettingsStateTests : public QObject
     Q_OBJECT
 
 private slots:
+    void readsAndNormalizesSelectionContextSettings();
     void reloadFunctionFlowStateSynchronizesOnlyModeAndFlow();
     void reloadFunctionFlowStateRejectsMissingFunctions();
     void readsAndSavesTypedSettings();
@@ -23,6 +24,44 @@ private slots:
     void staleReplaceReloadsLatestStateWithoutReplayingEdits();
     void normalizesWindowsSpeechLanguage();
 };
+
+void HubSettingsStateTests::readsAndNormalizesSelectionContextSettings()
+{
+    AppSettingsData source;
+    source.selectionContext.enabled = true;
+    source.selectionContext.minimumTextLength = 0;
+    source.selectionContext.pauseMinutes = 9000;
+    source.selectionContext.actionOrder = QStringList()
+        << QStringLiteral("copy")
+        << QStringLiteral("copy")
+        << QStringLiteral("unknown");
+    source.selectionContext.blockedApplications = QStringList()
+        << QStringLiteral("C:/Program Files/Browser/Chrome.EXE")
+        << QStringLiteral("chrome.exe")
+        << QStringLiteral("WORD.EXE");
+    HubWindowAccess access;
+    access.settingsSnapshotProvider = [source]() { return source; };
+    HubSettingsState state(access);
+
+    SelectionContextSettings normalized = state.selectionContextSettings();
+    QVERIFY(normalized.enabled);
+    QCOMPARE(normalized.minimumTextLength, 1);
+    QCOMPARE(normalized.pauseMinutes, 1440);
+    QCOMPARE(normalized.actionOrder, QStringList()
+        << QStringLiteral("copy")
+        << QStringLiteral("ai-search")
+        << QStringLiteral("translate")
+        << QStringLiteral("explain")
+        << QStringLiteral("save"));
+    QCOMPARE(normalized.blockedApplications, QStringList()
+        << QStringLiteral("chrome.exe")
+        << QStringLiteral("word.exe"));
+
+    normalized.keyboardSelectionEnabled = false;
+    state.setSelectionContextSettings(normalized);
+    QVERIFY(!state.selectionContextSettings().keyboardSelectionEnabled);
+    QCOMPARE(state.toData().selectionContext.minimumTextLength, 1);
+}
 
 void HubSettingsStateTests::normalizesWindowsSpeechLanguage()
 {

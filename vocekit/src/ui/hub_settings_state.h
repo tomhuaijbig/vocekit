@@ -138,6 +138,10 @@ public:
     bool autoStartEnabled() const;
     bool strongSelectionEnabled() const;
     void setStrongSelectionEnabled(bool enabled);
+    SelectionContextSettings selectionContextSettings() const;
+    void setSelectionContextSettings(
+        const SelectionContextSettings &settings
+    );
     bool floatingBarEnabled() const;
     void setFloatingBarEnabled(bool enabled);
     bool promptLocked() const;

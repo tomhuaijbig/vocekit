@@ -7,6 +7,7 @@
 #include "../recording/segmented_recording.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QKeySequence>
 
 namespace {
@@ -19,6 +20,44 @@ QString titleForFunction(const QString &id)
         }
     }
     return id;
+}
+
+SelectionContextSettings normalizedSelectionContextSettings(
+    const SelectionContextSettings &source)
+{
+    SelectionContextSettings result = source;
+    result.minimumTextLength = qBound(1, result.minimumTextLength, 1000);
+    result.pauseMinutes = qBound(1, result.pauseMinutes, 1440);
+    const QStringList defaults = QStringList()
+        << QStringLiteral("ai-search")
+        << QStringLiteral("translate")
+        << QStringLiteral("explain")
+        << QStringLiteral("save")
+        << QStringLiteral("copy");
+    QStringList actionOrder;
+    for (const QString &value : result.actionOrder) {
+        const QString id = value.trimmed();
+        if (defaults.contains(id) && !actionOrder.contains(id)) {
+            actionOrder.append(id);
+        }
+    }
+    for (const QString &id : defaults) {
+        if (!actionOrder.contains(id)) {
+            actionOrder.append(id);
+        }
+    }
+    result.actionOrder = actionOrder;
+    QStringList applications;
+    for (const QString &value : result.blockedApplications) {
+        const QString executable = QFileInfo(value.trimmed())
+            .fileName()
+            .toLower();
+        if (!executable.isEmpty() && !applications.contains(executable)) {
+            applications.append(executable);
+        }
+    }
+    result.blockedApplications = applications;
+    return result;
 }
 
 CustomFunctionDef toCustomFunction(const FunctionSettings &source)
@@ -888,6 +927,15 @@ bool HubSettingsState::trayResident() const { return m_data.trayResident; }
 bool HubSettingsState::autoStartEnabled() const { return m_data.autoStartEnabled; }
 bool HubSettingsState::strongSelectionEnabled() const { return m_data.strongSelectionEnabled; }
 void HubSettingsState::setStrongSelectionEnabled(bool enabled) { m_data.strongSelectionEnabled = enabled; }
+SelectionContextSettings HubSettingsState::selectionContextSettings() const
+{
+    return normalizedSelectionContextSettings(m_data.selectionContext);
+}
+void HubSettingsState::setSelectionContextSettings(
+    const SelectionContextSettings &settings)
+{
+    m_data.selectionContext = normalizedSelectionContextSettings(settings);
+}
 bool HubSettingsState::floatingBarEnabled() const { return m_data.floatingBarEnabled; }
 void HubSettingsState::setFloatingBarEnabled(bool enabled) { m_data.floatingBarEnabled = enabled; }
 bool HubSettingsState::promptLocked() const { return m_data.promptLocked; }

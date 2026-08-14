@@ -415,6 +415,7 @@ QString normalizedRecordDirectorySetting(const QString &path)
             snapshot.recordingBeepEnabled = settings.recordingBeepEnabled;
             snapshot.dictatePolishEnabled = settings.dictatePolishEnabled;
             snapshot.useSystemProxy = settings.useSystemProxy;
+            snapshot.selectionContext = settings.selectionContext;
             return snapshot;
         };
         callbacks.applySnapshot = [this](const BasicSettingsSnapshot &snapshot) {
@@ -441,6 +442,7 @@ QString normalizedRecordDirectorySetting(const QString &path)
                     snapshot.recordingBeepEnabled;
                 settings.dictatePolishEnabled = snapshot.dictatePolishEnabled;
                 settings.useSystemProxy = snapshot.useSystemProxy;
+                settings.selectionContext = snapshot.selectionContext;
             });
         };
         callbacks.saveAndRefresh = [this]() {

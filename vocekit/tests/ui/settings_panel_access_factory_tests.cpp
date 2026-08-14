@@ -2,8 +2,13 @@
 
 #include "../../src/ui/hub_settings_state.h"
 #include "../../src/ui/settings_panel_access_factory.h"
+#include "../../src/ui/attention_message.h"
+#include "../../src/ui/selection_context_settings_card.h"
 
 #include <QFile>
+#include <QCheckBox>
+#include <QMessageBox>
+#include <QSpinBox>
 
 class SettingsPanelAccessFactoryTests : public QObject
 {
@@ -16,12 +21,15 @@ private slots:
     void handlesMissingDependencies();
     void utilityControllerUsesIndependentFactory();
     void forwardsFloatingBarPreviewCallback();
+    void realSettingsPanelSubmitsWholeSelectionValueAndRollsBackFailure();
 };
 
 void SettingsPanelAccessFactoryTests::providesSnapshotAndPersistsSettings()
 {
     AppSettingsData initial;
     initial.trayResident = false;
+    initial.selectionContext.enabled = false;
+    initial.selectionContext.minimumTextLength = 2;
     AppSettingsData saved;
 
     HubWindowAccess settingsAccess;
@@ -45,15 +53,22 @@ void SettingsPanelAccessFactoryTests::providesSnapshotAndPersistsSettings()
 
     AppSettingsData changed = initial;
     changed.trayResident = true;
+    changed.selectionContext.enabled = true;
+    changed.selectionContext.minimumTextLength = 19;
     QVERIFY(assembly.access.applyAndSave(changed));
     QVERIFY(saved.trayResident);
+    QVERIFY(saved.selectionContext.enabled);
+    QCOMPARE(saved.selectionContext.minimumTextLength, 19);
     QVERIFY(settings.toData().trayResident);
+    QVERIFY(settings.selectionContextSettings().enabled);
 }
 
 void SettingsPanelAccessFactoryTests::preservesFailedSaveState()
 {
     AppSettingsData initial;
     initial.resultPopupOpacity = 90;
+    initial.selectionContext.enabled = false;
+    initial.selectionContext.pauseMinutes = 30;
 
     HubWindowAccess settingsAccess;
     settingsAccess.settingsSnapshotProvider = [initial]() {
@@ -71,8 +86,12 @@ void SettingsPanelAccessFactoryTests::preservesFailedSaveState()
 
     AppSettingsData changed = initial;
     changed.resultPopupOpacity = 65;
+    changed.selectionContext.enabled = true;
+    changed.selectionContext.pauseMinutes = 180;
     QVERIFY(!assembly.access.applyAndSave(changed));
     QCOMPARE(settings.toData().resultPopupOpacity, 90);
+    QVERIFY(!settings.selectionContextSettings().enabled);
+    QCOMPARE(settings.selectionContextSettings().pauseMinutes, 30);
 }
 
 void SettingsPanelAccessFactoryTests::publishesOneSettingsChange()
@@ -144,6 +163,60 @@ void SettingsPanelAccessFactoryTests::forwardsFloatingBarPreviewCallback()
     QCOMPARE(styles, QStringList() << QStringLiteral("statusPill"));
 }
 
-QTEST_APPLESS_MAIN(SettingsPanelAccessFactoryTests)
+void SettingsPanelAccessFactoryTests::
+realSettingsPanelSubmitsWholeSelectionValueAndRollsBackFailure()
+{
+    AppSettingsData persisted;
+    persisted.selectionContext.enabled = false;
+    persisted.selectionContext.keyboardSelectionEnabled = true;
+    persisted.selectionContext.minimumTextLength = 2;
+    persisted.selectionContext.pauseMinutes = 30;
+    persisted.selectionContext.blockedApplications = QStringList()
+        << QStringLiteral("private.exe");
+    AppSettingsData submitted;
+    int saveCalls = 0;
+
+    SettingsPanelAccess access;
+    access.snapshotProvider = [&]() { return persisted; };
+    access.applyAndSave = [&](const AppSettingsData &next) {
+        submitted = next;
+        ++saveCalls;
+        return false;
+    };
+    setAttentionMessageBoxClickCallbackForTests([](QWidget *widget) {
+        QMessageBox *box = qobject_cast<QMessageBox *>(widget);
+        if (box) {
+            box->done(QMessageBox::Ok);
+        }
+    });
+    SettingsPanel panel(access, std::function<void()>());
+    SelectionContextSettingsCard *card =
+        panel.findChild<SelectionContextSettingsCard *>(
+            QStringLiteral("selectionContextSettingsCard")
+        );
+    QVERIFY(card);
+    QSpinBox *minimum = card->findChild<QSpinBox *>(
+        QStringLiteral("selectionContextMinimumLengthSpin")
+    );
+    QVERIFY(minimum);
+    minimum->setValue(41);
+
+    QCOMPARE(saveCalls, 1);
+    QCOMPARE(submitted.selectionContext.minimumTextLength, 41);
+    QVERIFY(submitted.selectionContext.keyboardSelectionEnabled);
+    QCOMPARE(submitted.selectionContext.pauseMinutes, 30);
+    QCOMPARE(
+        submitted.selectionContext.blockedApplications,
+        QStringList() << QStringLiteral("private.exe")
+    );
+    QCOMPARE(persisted.selectionContext.minimumTextLength, 2);
+    QCOMPARE(minimum->value(), 2);
+    QCOMPARE(card->settings().minimumTextLength, 2);
+    setAttentionMessageBoxClickCallbackForTests(
+        std::function<void(QWidget *)>()
+    );
+}
+
+QTEST_MAIN(SettingsPanelAccessFactoryTests)
 
 #include "settings_panel_access_factory_tests.moc"

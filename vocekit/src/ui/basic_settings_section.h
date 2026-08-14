@@ -8,6 +8,8 @@
 
 #include <functional>
 
+#include "../config/app_settings_data.h"
+
 class QVBoxLayout;
 
 struct BasicSettingsSnapshot
@@ -27,6 +29,7 @@ struct BasicSettingsSnapshot
     bool recordingBeepEnabled = false;
     bool dictatePolishEnabled = false;
     bool useSystemProxy = false;
+    SelectionContextSettings selectionContext;
 };
 
 // 设置页中的基础分区：常用设置、词库、语音录音、写入和网络。
@@ -109,6 +112,7 @@ private:
     Callbacks m_callbacks;
     QCheckBox *m_autoStartBox = nullptr;
     QCheckBox *m_strongSelectionBox = nullptr;
+    class SelectionContextSettingsCard *m_selectionContextCard = nullptr;
     class FloatingBarStyleSelector *m_floatingBarStyleSelector = nullptr;
     QCheckBox *m_writeFailurePopupFallbackBox = nullptr;
 };

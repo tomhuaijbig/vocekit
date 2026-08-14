@@ -2,6 +2,7 @@
 
 #include "attention_message.h"
 #include "floating_bar_style_selector.h"
+#include "selection_context_settings_card.h"
 #include "ui_style.h"
 
 #include "../config/app_settings_defaults.h"
@@ -42,6 +43,9 @@ void BasicSettingsSection::refreshFromSettings()
         m_strongSelectionBox->blockSignals(true);
         m_strongSelectionBox->setChecked(current.strongSelectionEnabled);
         m_strongSelectionBox->blockSignals(false);
+    }
+    if (m_selectionContextCard) {
+        m_selectionContextCard->setSettings(current.selectionContext);
     }
     if (m_floatingBarStyleSelector
         && m_floatingBarStyleSelector->currentStyle()
@@ -126,6 +130,27 @@ void BasicSettingsSection::addGeneralRows(QVBoxLayout *layout)
     ));
     layout->addWidget(autoStartRow());
     layout->addWidget(strongSelectionRow());
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.settingsChanged = [this](
+        const SelectionContextSettings &settings) {
+        BasicSettingsSnapshot next = snapshot();
+        next.selectionContext = settings;
+        applyAndRefresh(next);
+    };
+    callbacks.showStrongSelectionDetails = [this]() {
+        if (m_callbacks.showDetail) {
+            m_callbacks.showDetail(
+                bssTr8("强力选中"),
+                strongSelectionDetailText()
+            );
+        }
+    };
+    m_selectionContextCard = new SelectionContextSettingsCard(
+        current.selectionContext,
+        callbacks,
+        this
+    );
+    layout->addWidget(m_selectionContextCard);
 }
 
 void BasicSettingsSection::addVocabularyRows(QVBoxLayout *layout)
@@ -499,6 +524,7 @@ QWidget *BasicSettingsSection::strongSelectionRow()
 
     auto *box = new QCheckBox;
     m_strongSelectionBox = box;
+    box->setObjectName(QStringLiteral("strongSelectionToggle"));
     box->setChecked(snapshot().strongSelectionEnabled);
     box->setFont(appFont(10, QFont::DemiBold));
     connect(box, &QCheckBox::toggled, this, [this](bool enabled) {

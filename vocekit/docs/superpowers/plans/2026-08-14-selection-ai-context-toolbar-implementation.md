@@ -8,13 +8,17 @@
 
 **Tech Stack:** Qt 5.9 Widgets、QtConcurrent、Windows UI Automation/Win32 hooks、C++11、qmake、QtTest、MinGW 5.3 32-bit。
 
+**Working directory:** Run source, qmake, test and documentation commands from `C:\Users\13736\Desktop\tts\vocekit`. The Git repository root is its parent `C:\Users\13736\Desktop\tts`, so `git diff --cached --name-only` reports paths with the `vocekit/` prefix even though task paths below are relative to the working directory.
+
 ---
 
 ## Scope boundary
 
 本计划实现设计文档中的阶段一和阶段二，并完成阶段四中与这两阶段直接相关的安全、DPI 和回归门禁。
 
-真实联网 Search Provider 不在本计划中。第一轮仍显示“AI 搜索”按钮；触发时结果卡必须明确显示“未联网，已使用普通 AI 解答”，并运行普通模型分析，不能显示来源或声称完成了联网检索。真实搜索、来源验证、Search Secret/Base URL 和网络限额使用独立实施计划。
+真实联网 Search Provider 不在本计划中。第一轮仍显示“AI 搜索”按钮；触发时结果卡必须明确显示“未进行联网搜索，已使用普通 AI 解答”，并运行普通模型分析，不能显示来源或声称完成了联网检索。该文案只描述没有网页搜索，不暗示普通模型请求在本地执行；首次发送选中文字前仍须经过数据传输授权。真实搜索、来源验证、Search Secret/Base URL 和网络限额使用独立实施计划。
+
+“更多”中的自定义动作第一轮只列 `FunctionExecutionMode::Classic` 的非内置功能，并复用其模型与提示词配置、改由选择结果卡承载输出。画布模式不能被压扁为一次模型请求；它需要预装选区值、流程取消与结果桥接的独立实施计划，因此本轮不显示画布模式自定义功能，也不伪装成已支持。
 
 设计依据：`docs/superpowers/specs/2026-08-14-selection-ai-context-toolbar-design.md`。
 
@@ -23,6 +27,8 @@
 ### New production files
 
 - `src/input/selection_snapshot.h`：不可变选区快照、采集方式和敏感状态。
+- `src/input/selection_coordinate_mapper.h/.cpp`：把 UIA/Win32 物理像素按目标显示器映射为 Qt 逻辑坐标。
+- `src/input/selection_probe_runner.h/.cpp`：后台 UIA、主线程异步强力选中、超时和 latest-wins 代际隔离。
 - `src/input/selection_observer.h/.cpp`：鼠标/键盘候选事件、Win32 hooks、去抖输入。
 - `src/controllers/selection_context_policy.h/.cpp`：最小长度、黑名单、自身进程、敏感控件和重复选区决策。
 - `src/controllers/selection_context_coordinator.h/.cpp`：自动/快捷键探测、generation、关闭、固定和取消状态机。
@@ -38,7 +44,7 @@
 
 ### Modified production files
 
-- `src/input/selected_text_reader.h/.cpp`：新增 `probe()`，保留 `read()` 兼容包装。
+- `src/input/selected_text_reader.h/.cpp`：新增不激活窗口的物理坐标 UIA probe，保留 `read()` 兼容入口。
 - `src/output/clipboard_writer.h/.cpp`：新增明确的持久复制 API，不模拟粘贴。
 - `src/config/app_settings_data.h`：增加类型化 `SelectionContextSettings`。
 - `src/config/app_settings_json.cpp`：读写选中文字工具条设置并保留旧配置。
@@ -48,6 +54,7 @@
 - `src/ui/settings_panel.cpp`：在 `BasicSettingsSnapshot` 和 `AppSettingsData` 间传递新设置。
 - `src/ui/hub_settings_state.h/.cpp`：提供整组选择工具条设置的读取、更新和持久化入口。
 - `src/controllers/tray_controller.h/.cpp`：启用/暂停/恢复快捷入口。
+- `src/controllers/vocabulary_quick_add_controller.h/.cpp`、`src/controllers/voice_controller.h/.cpp`：增加强制本地手动词条编辑桥接，避免“保存”隐式调用 AI。
 - `src/app/vocekit_application_runtime.cpp`：创建 feature、拦截兜底快捷键、刷新设置和按顺序销毁。
 - `vocekit.pro`：注册所有新增生产文件。
 - `docs/AI_PROJECT_GUIDE.md`、`docs/TESTING.md`：记录使用方式、安全边界和验收矩阵。
@@ -97,10 +104,13 @@ Expected GREEN output for every QtTest executable: exit code `0`, `0 failed`, `0
 - Modify: `src/input/hotkey_definitions.cpp`
 - Modify: `src/input/hotkey_settings_snapshot.cpp`
 - Modify: `tests/config/app_settings_defaults_tests.cpp`
+- Modify: `tests/config/app_settings_defaults_tests.pro`
 - Modify: `tests/config/app_settings_json_tests.cpp`
+- Modify: `tests/config/app_settings_json_tests.pro`
 - Modify: `tests/input/hotkey_definitions_tests.cpp`
+- Modify: `tests/input/hotkey_definitions_tests.pro`
 - Modify: `tests/input/hotkey_settings_snapshot_tests.cpp`
-- Modify: the corresponding four existing `.pro` files to link `selection_context_actions.cpp` where required.
+- Modify: `tests/input/hotkey_settings_snapshot_tests.pro`
 
 - [ ] **Step 1: Write RED settings and hotkey tests**
 
@@ -154,6 +164,8 @@ void selectionContextSettingsRoundTripAndNormalize()
     QCOMPARE(restored.selectionContext.actionOrder.size(), 5);
 }
 
+void selectionContextUnknownNestedFieldsSurviveKnownFieldUpdates();
+
 void exposesSelectionToolbarFallbackWithoutMakingItAFunction()
 {
     const QString id = QStringLiteral("selection_toolbar");
@@ -205,7 +217,7 @@ QString selectionContextActionCopy();
 QString selectionContextActionForFunction(const QString &functionId);
 QString selectionContextFunctionId(const QString &actionId);
 bool isSelectionContextFunctionAction(const QString &actionId);
-QString selectionContextMenuPauseApplication();
+QString selectionContextMenuBlockApplication();
 QString selectionContextMenuOpenSettings();
 QStringList defaultSelectionContextActionOrder();
 QStringList normalizeSelectionContextActionOrder(const QStringList &values);
@@ -249,7 +261,7 @@ data.selectionContext.blockedApplications = normalizeExecutableList(
 );
 ```
 
-When writing, insert every normalized field into the same nested object. Remove `selectionContextToolbar` from `retainedRootValues` before overlaying known values so legacy unknown root fields remain preserved without overwriting the typed object.
+When writing, start the nested object from `data.retainedRootValues.value("selectionContextToolbar").toObject()`, overwrite only known normalized keys, then remove `selectionContextToolbar` from the retained root before inserting the merged nested object. This preserves unknown fields both at the root and inside the new object. The round-trip test must put an unknown nested object and array beside the known keys and assert equal `QJsonValue`s after a known-field update.
 
 - [ ] **Step 5: Register the fallback hotkey**
 
@@ -293,6 +305,10 @@ git commit -m "feat: define selection context settings"
 
 **Files:**
 - Create: `src/input/selection_snapshot.h`
+- Create: `src/input/selection_coordinate_mapper.h`
+- Create: `src/input/selection_coordinate_mapper.cpp`
+- Create: `src/input/selection_probe_runner.h`
+- Create: `src/input/selection_probe_runner.cpp`
 - Modify: `src/input/selected_text_reader.h`
 - Modify: `src/input/selected_text_reader.cpp`
 - Create: `tests/input/selected_text_probe_tests.cpp`
@@ -300,7 +316,7 @@ git commit -m "feat: define selection context settings"
 
 - [ ] **Step 1: Write the RED contract tests**
 
-The test project must expose injectable normalization helpers rather than requiring an external application. Add tests for multiple ranges, malformed SAFEARRAY-like values, password rejection, cursor fallback, clipboard method, and compatibility `read()`:
+The test project must expose injectable normalization helpers rather than requiring an external application. Add tests for multiple ranges, malformed SAFEARRAY-like values, password rejection, cursor fallback, clipboard method, compatibility `read()`, mixed-DPI physical-to-logical mapping, background UIA responsiveness, soft timeout, latest-wins delivery, and clipboard ownership races:
 
 ```cpp
 void choosesLastValidRectangleNearestCursor()
@@ -324,11 +340,34 @@ void rejectsSensitiveSelectionEvenWhenTextExists()
     snapshot.sensitivity = SelectionSensitivity::Password;
     QVERIFY(!snapshot.isUsable());
 }
+
+void mapsPhysicalSelectionToTheMatchedQtScreen()
+{
+    SelectionMonitorGeometry monitor;
+    monitor.deviceName = QStringLiteral("\\\\.\\DISPLAY2");
+    monitor.physicalGeometry = QRect(-2560, 0, 2560, 1440);
+    monitor.logicalGeometry = QRect(-1707, 0, 1707, 960);
+    monitor.logicalAvailableGeometry = QRect(-1707, 0, 1707, 920);
+    QCOMPARE(
+        selectionPhysicalToLogical(
+            QRect(-1280, 720, 300, 60), monitor),
+        QRect(-854, 480, 200, 40)
+    );
+}
+
+void uiAutomationProbeNeverBlocksTheOwnerThread();
+void multiRectangleSelectionMapsEachRectangleThroughItsOwnMonitor();
+void displayDeviceNamesNormalizePrefixCaseAndMissingMatchFallback();
+void softTimeoutDoesNotStartUnboundedParallelProbes();
+void softTimeoutRequestsComCallCancellationExactlyOnce();
+void strongFallbackRestoresFormatsOnlyWhileItStillOwnsTheClipboard();
+void externalClipboardChangeIsNeverOverwrittenByFallbackRestore();
+void probeAndReplaceValidationNeverActivateAnotherWindow();
 ```
 
 - [ ] **Step 2: Build and verify RED**
 
-Target: `selected_text_probe_tests`; project: `selected_text_probe_tests.pro`. Expected RED: `selection_snapshot.h` and `SelectedTextReader::probe` are missing.
+Target: `selected_text_probe_tests`; project: `selected_text_probe_tests.pro`. Expected RED: snapshot, coordinate mapper, probe runner and non-activating reader APIs are missing.
 
 - [ ] **Step 3: Add the immutable snapshot contract**
 
@@ -371,9 +410,15 @@ struct SelectionSnapshot
 
 struct SelectionProbeRequest
 {
-    bool strongSelectionEnabled = false;
     SelectedTextNativeWindowHandle targetWindow = nullptr;
-    QPoint cursorPosition;
+    QPoint cursorPhysicalPosition;
+};
+
+struct SelectionPhysicalProbeResult
+{
+    SelectionSnapshot snapshotWithoutGeometry;
+    QVector<QRect> physicalRectangles;
+    QPoint cursorPhysicalPosition;
 };
 
 QRect selectionAnchorRectangle(
@@ -387,15 +432,49 @@ bool selectionInputDesktopIsSecure(
     bool inputDesktopOpened,
     const QString &desktopName
 );
+bool selectionClipboardOwnershipMatches(
+    quint32 expectedSequence,
+    quint32 currentSequence,
+    quint32 targetProcessId,
+    quint32 clipboardOwnerProcessId,
+    bool targetStillForeground
+);
+
+struct SelectionMonitorGeometry
+{
+    QString deviceName;
+    QRect physicalGeometry;
+    QRect logicalGeometry;
+    QRect logicalAvailableGeometry;
+};
+
+QPoint selectionPhysicalToLogical(
+    const QPoint &physicalPoint,
+    const SelectionMonitorGeometry &monitor
+);
+QRect selectionPhysicalToLogical(
+    const QRect &physicalRect,
+    const SelectionMonitorGeometry &monitor
+);
+SelectionMonitorGeometry selectionMonitorForPhysicalPoint(
+    const QPoint &physicalPoint,
+    const QVector<SelectionMonitorGeometry> &monitors
+);
+QVector<SelectionMonitorGeometry> selectionMonitorGeometries();
+SelectionSnapshot selectionSnapshotFromPhysicalProbe(
+    const SelectionPhysicalProbeResult &physical,
+    const QVector<SelectionMonitorGeometry> &monitors
+);
 ```
 
-Add `static SelectionSnapshot probe(const SelectionProbeRequest &request);` to `SelectedTextReader`. Preserve current callers by implementing `read()` as `probe(...).text`.
+Add `static SelectionPhysicalProbeResult probeUiAutomationPhysical(const SelectionProbeRequest &request);` to `SelectedTextReader`. It requires the supplied target to still be the foreground window and returns without calling `SetForegroundWindow`. It runs on the worker and therefore must not access `QScreen`, `QWidget`, `QClipboard`, or any GUI-thread object. `SelectionProbeRunner` receives the raw result on its owner thread, builds the Win32-device-name/QScreen map, converts each rectangle through the monitor containing that rectangle's center, converts the cursor through its own monitor, and then calls `selectionAnchorRectangle`. Normalize device names case-insensitively and tolerate the `\\.\` prefix difference; when no name matches, use maximum geometry overlap and then nearest-center fallback, never a hard-coded primary screen. Preserve the existing `read()` API for classic callers, but the new automatic feature must use `SelectionProbeRunner` and must never call synchronous `read()` or the focus-changing `hasSelectionInWindow()`.
 
 - [ ] **Step 4: Extend UI Automation without duplicating the reader**
 
-Inside the existing TextPattern range loop:
+Inside the existing TextPattern range loop, normalize and return only physical UIA values. On the probe runner's owner thread, map them through the monitor whose Win32 device name matches `QScreen::name()`. `SelectionSnapshot::rectangles`, `anchorRect`, and `cursorPosition` are always Qt logical coordinates; no physical coordinate may escape the mapper. The bounds extraction remains:
 
 ```cpp
+QVector<QRect> physicalRectangles;
 SAFEARRAY *bounds = nullptr;
 if (SUCCEEDED(range->GetBoundingRectangles(&bounds)) && bounds) {
     double *values = nullptr;
@@ -415,46 +494,95 @@ if (SUCCEEDED(range->GetBoundingRectangles(&bounds)) && bounds) {
                 qRound(values[offset + 3])
             );
             if (rect.width() > 0 && rect.height() > 0) {
-                snapshot.rectangles.append(rect.normalized());
+                physicalRectangles.append(rect.normalized());
             }
         }
         SafeArrayUnaccessData(bounds);
     }
     SafeArrayDestroy(bounds);
 }
+physicalResult.physicalRectangles = physicalRectangles;
+physicalResult.cursorPhysicalPosition =
+    request.cursorPhysicalPosition;
 ```
 
-Read `UIA_IsPasswordPropertyId` (`30019`) before TextPattern access. A `VT_BOOL/VARIANT_TRUE` value sets `Password`, clears text and rectangles, and skips clipboard fallback. Before UIA access, inspect the active input desktop with `OpenInputDesktop` and `GetUserObjectInformation(UOI_NAME)`; failure to open it or a non-default secure/lock desktop sets `SecureDesktop` and returns without UIA or clipboard access. Production must call the two pure helpers above so malformed bounds and desktop-name decisions are testable without opening another application's UI. Query foreground HWND process ID and executable basename with `GetWindowThreadProcessId` and `QueryFullProcessImageNameW`. Failure caused by access denial sets `PermissionDenied`; ordinary missing TextPattern stays `Normal` with empty text.
+Read `UIA_IsPasswordPropertyId` (`30019`) before TextPattern access. A `VT_BOOL/VARIANT_TRUE` value sets `Password`, clears text and rectangles, and skips clipboard fallback. Before UIA access, inspect the active input desktop with `OpenInputDesktop` and `GetUserObjectInformation(UOI_NAME)`; failure to open it or a non-default secure/lock desktop sets `SecureDesktop` and returns without UIA or clipboard access. Production must call the pure helpers above so malformed bounds, desktop decisions and coordinate conversion are testable without opening another application's UI. Query foreground HWND process ID and executable basename with `GetWindowThreadProcessId` and `QueryFullProcessImageNameW`. Failure caused by access denial sets `PermissionDenied`; ordinary missing TextPattern stays `Normal` with empty text.
 
 - [ ] **Step 5: Preserve strong-selection safety**
 
-Only call the existing clipboard-copy path when all conditions are true:
+Do not call the existing synchronous clipboard-copy path from the automatic feature. `SelectionProbeRunner` first runs `probeUiAutomationPhysical()` through `QtConcurrent` with one in-flight request, latest-pending replacement, generation checks and an 800 ms soft deadline. If the owner-thread-normalized snapshot is empty and strong selection is enabled, start a GUI-thread `QTimer` state machine only when all conditions are true:
 
 ```cpp
 if (snapshot.sensitivity == SelectionSensitivity::Normal
     && snapshot.text.trimmed().isEmpty()
-    && request.strongSelectionEnabled
+    && strongSelectionEnabled
     && request.targetWindow) {
-    snapshot.text = selectedTextViaClipboardCopy(
-        request.targetWindow
-    ).trimmed();
-    if (!snapshot.text.isEmpty()) {
-        snapshot.method =
-            SelectionAcquisitionMethod::ClipboardFallback;
-    }
+    beginStrongSelectionFallback(
+        request, snapshot, generation
+    );
 }
 ```
 
-Never use clipboard fallback for password/protected/permission-denied/secure-desktop snapshots.
+The async fallback captures every MIME format, sets a unique sentinel, waits 60 ms, sends Ctrl+C, then polls at 40 ms up to ten times without `QThread::msleep()` or nested `QApplication::processEvents()`. Accept a non-sentinel result only while the target is still foreground and `GetClipboardOwner()` belongs to the target process. Record `GetClipboardSequenceNumber()` after that owned copy result; restore the original MIME snapshot only if the sequence number and clipboard owner are still unchanged. If another application, clipboard manager, or the user changes ownership/content, keep the newer clipboard untouched. Cancellation restores only while ownership is still proven. Never use clipboard fallback for password/protected/permission-denied/secure-desktop snapshots.
 
-- [ ] **Step 6: Run the focused tests and existing selection tests**
+- [ ] **Step 6: Implement the asynchronous probe runner contract**
+
+```cpp
+struct SelectionProbeRunnerCallbacks
+{
+    std::function<void(quint64 generation,
+                       const SelectionSnapshot &snapshot)> completed;
+    std::function<void(quint64 generation)> timedOut;
+};
+
+struct SelectionProbeRunnerAccess
+{
+    std::function<SelectionPhysicalProbeResult(
+        const SelectionProbeRequest &request
+    )> probeUiAutomationPhysical;
+    std::function<void(quint32 workerThreadId)> cancelComCall;
+    std::function<quint32()> clipboardSequenceNumber;
+    std::function<quint32()> clipboardOwnerProcessId;
+    std::function<bool(SelectedTextNativeWindowHandle)>
+        targetStillForeground;
+    std::function<void()> sendCopyShortcut;
+};
+
+class SelectionProbeRunner : public QObject
+{
+    Q_OBJECT
+public:
+    explicit SelectionProbeRunner(
+        const SelectionProbeRunnerAccess &access =
+            SelectionProbeRunnerAccess(),
+        QObject *parent = nullptr
+    );
+    void start(const SelectionProbeRequest &request,
+               bool strongSelectionEnabled,
+               quint64 generation,
+               const SelectionProbeRunnerCallbacks &callbacks);
+    void cancel();
+    bool isRunning() const;
+    void validateSelectionAsync(
+        SelectedTextNativeWindowHandle window,
+        quint64 generation,
+        const std::function<void(quint64, bool)> &completed
+    );
+};
+```
+
+The worker may deliver only the newest generation. Inside the worker call `CoEnableCallCancellation`, publish its Windows thread ID, and call `CoDisableCallCancellation` on exit. On the 800 ms soft deadline, request `CoCancelCall(workerThreadId, 0)` exactly once, hide the attempt, and do not spawn unlimited replacements while the underlying UIA call remains in flight; retain at most one pending latest request. `validateSelectionAsync` uses the same non-activating UIA worker boundary, verifies that the supplied window remains foreground, and never calls `SetForegroundWindow`. Teardown clears callbacks, requests COM cancellation, and ignores late completion.
+
+- [ ] **Step 7: Run the focused tests and existing selection tests**
 
 Run `selected_text_probe_tests`, `selected_text_workflow_controller_tests`, and `selected_text_diagnostic_task_tests`. Expected: all GREEN.
 
-- [ ] **Step 7: Commit Task 2**
+- [ ] **Step 8: Commit Task 2**
 
 ```powershell
-git add src/input/selection_snapshot.h src/input/selected_text_reader.* `
+git add src/input/selection_snapshot.h `
+  src/input/selection_coordinate_mapper.* `
+  src/input/selection_probe_runner.* src/input/selected_text_reader.* `
   tests/input/selected_text_probe_tests.*
 git commit -m "feat: expose structured selected text snapshots"
 ```
@@ -472,11 +600,11 @@ git commit -m "feat: expose structured selected text snapshots"
 - [ ] **Step 1: Write RED tests for the pure matcher**
 
 ```cpp
-void mouseClickWithoutDragDoesNotProbe()
+void everyExternalMouseReleaseCreatesOneDebouncedProbeCandidate()
 {
     SelectionObservationMatcher matcher;
     matcher.mousePressed(QPoint(40, 40));
-    QVERIFY(!matcher.mouseReleased(QPoint(42, 42)));
+    QVERIFY(matcher.mouseReleased(QPoint(42, 42)));
 }
 
 void mouseDragAndKeyboardSelectionEachEmitOnce()
@@ -497,8 +625,12 @@ void shortcutCandidateIsIndependentOfAutomaticPause()
     QVERIFY(matcher.fallbackShortcutReleased());
 }
 
-void plainPointerReleaseEmitsOutsideEventButNotSelectionProbe();
+void plainPointerReleaseEmitsOutsideAndCandidateExactlyOnce();
+void doubleClickWordSelectionIsNotMissed();
+void childControlWindowIsNormalizedToItsRootForegroundWindow();
 void foregroundChangeCarriesTheNewNativeWindowOnce();
+void sessionLockAndSuspendEmitUnavailableAndClearMatcherState();
+void unlockAndResumeEmitAvailableWithoutProbingOldSelection();
 ```
 
 - [ ] **Step 2: Build and verify RED**
@@ -515,14 +647,16 @@ enum class SelectionObservationReason
     FallbackShortcut,
     OutsidePointerRelease,
     ForegroundChanged,
-    EscapePressed
+    EscapePressed,
+    SystemUnavailable,
+    SystemAvailable
 };
 
 struct SelectionObservation
 {
     SelectionObservationReason reason =
         SelectionObservationReason::MouseSelection;
-    QPoint cursorPosition;
+    QPoint cursorPhysicalPosition;
     SelectedTextNativeWindowHandle targetWindow = nullptr;
 };
 
@@ -530,7 +664,10 @@ class SelectionObserver
 {
 public:
     ~SelectionObserver();
-    bool install(QString *error = nullptr);
+    bool install(
+        SelectedTextNativeWindowHandle notificationWindow,
+        QString *error = nullptr
+    );
     void uninstall();
     void setAutomaticEnabled(bool enabled);
     void setKeyboardSelectionEnabled(bool enabled);
@@ -543,14 +680,15 @@ public:
     void processForegroundWindowChanged(
         SelectedTextNativeWindowHandle window
     );
+    void processSystemAvailabilityChanged(bool available);
 };
 ```
 
-The Win32 callback filters only left-button down/up and Shift-selection keys (`VK_LEFT`, `VK_RIGHT`, `VK_UP`, `VK_DOWN`, `VK_HOME`, `VK_END`, `VK_PRIOR`, `VK_NEXT`) plus Ctrl+A completion and Esc close. Every left-button release emits one `OutsidePointerRelease` carrying `WindowFromPoint`; a qualifying drag additionally emits one `MouseSelection`. Esc emits `EscapePressed` only while a selection surface is visible. It must not retain ordinary typed keys. Queue callbacks through `QTimer::singleShot(0, QCoreApplication::instance(), ...)`; do not run COM, clipboard, UI, or network work in a hook callback.
+The Win32 callback filters only left-button down/up and Shift-selection keys (`VK_LEFT`, `VK_RIGHT`, `VK_UP`, `VK_DOWN`, `VK_HOME`, `VK_END`, `VK_PRIOR`, `VK_NEXT`) plus Ctrl+A completion and Esc close. Every external left-button release emits one `OutsidePointerRelease` and one debounced `MouseSelection` candidate. Resolve `WindowFromPoint` through `GetAncestor(hwnd, GA_ROOT)` before storing `targetWindow`, otherwise child edit/render HWNDs would fail the foreground check. Empty single clicks are discarded later by the probe/policy, while this rule preserves double-click and triple-click word/paragraph selection. Esc emits `EscapePressed` only while a selection surface is visible. It must not retain ordinary typed keys. Queue callbacks through `QTimer::singleShot(0, QCoreApplication::instance(), ...)`; do not run COM, clipboard, UI, or network work in a hook callback.
 
-- [ ] **Step 4: Install and uninstall both hooks as one unit**
+- [ ] **Step 4: Install and uninstall both low-level hooks plus the foreground event hook as one unit**
 
-Use `WH_MOUSE_LL`, `WH_KEYBOARD_LL`, and `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, ...)`. If any installation fails, unhook every earlier handle before returning failure. `uninstall()` must be idempotent, release all three handles, clear callbacks and reset matcher state. Keep the existing `HoldToTalkHook` untouched; Windows supports the additional keyboard hook chain.
+Use `WH_MOUSE_LL`, `WH_KEYBOARD_LL`, and `SetWinEventHook(EVENT_SYSTEM_FOREGROUND, ...)`. Register the supplied stable Qt top-level HWND with `WTSRegisterSessionNotification` and use a `QAbstractNativeEventFilter` for `WM_WTSSESSION_CHANGE` (`WTS_SESSION_LOCK/UNLOCK`) plus `WM_POWERBROADCAST` (`PBT_APMSUSPEND/PBT_APMRESUMEAUTOMATIC`). Lock/suspend immediately emits unavailable, clears matcher state and prevents probes; unlock/resume emits available but does not replay a prior candidate. If any installation fails, unhook/unregister every earlier handle before returning failure. `uninstall()` must be idempotent, release all hooks/session registration/native filter, clear callbacks and reset matcher state. Keep the existing `HoldToTalkHook` untouched; Windows supports the additional keyboard hook chain. Add `-lwtsapi32` only to Windows application/test link settings that compile this observer.
 
 - [ ] **Step 5: Run repeated lifecycle tests**
 
@@ -575,12 +713,14 @@ git commit -m "feat: observe selection completion candidates"
 
 - [ ] **Step 1: Write RED policy tests**
 
-Cover empty text, whitespace, min length, own PID, password/protected input, permission denial, secure desktop, blocked executable, identical snapshot deduplication, changed rectangle, and changed target window:
+Cover empty text, whitespace, min length, missing/invalid target window, foreground changed during probe, own PID, password/protected input, permission denial, secure desktop, blocked executable, identical snapshot deduplication, changed rectangle, and changed target window:
 
 ```cpp
 void passwordAndOwnProcessAreNeverEligible()
 {
     SelectionContextPolicyInput input;
+    input.targetWindowValid = true;
+    input.targetWindowForeground = true;
     input.minimumTextLength = 2;
     input.currentProcessId = 42;
     input.snapshot.text = QStringLiteral("private");
@@ -618,6 +758,8 @@ enum class SelectionContextEligibility
     Eligible,
     Empty,
     TooShort,
+    InvalidTargetWindow,
+    StaleForeground,
     Sensitive,
     PermissionDenied,
     SecureDesktop,
@@ -628,6 +770,8 @@ enum class SelectionContextEligibility
 struct SelectionContextPolicyInput
 {
     SelectionSnapshot snapshot;
+    bool targetWindowValid = false;
+    bool targetWindowForeground = false;
     int minimumTextLength = 2;
     quint32 currentProcessId = 0;
     QStringList blockedApplications;
@@ -780,8 +924,11 @@ void toolbarUsesCatalogOrderWithoutTakingFocus()
 void everyClickEmitsExactlyOneStableActionId();
 void busyStateDisablesOtherActionsAndKeepsCloseAvailable();
 void dragHandleMovesTheToolbarButDraggingAButtonDoesNot();
+void narrowScreenMovesTrailingPrimaryActionsIntoMoreWithoutDuplication();
+void twoHundredPercentFontStillFitsTheAvailableScreen();
 void fallbackShortcutModeCanReceiveKeyboardNavigationAndEscape();
 void moreMenuEmitsCustomPauseAndSettingsIdsExactlyOnce();
+void ownsNativeWindowIncludesTheTransientMoreMenu();
 void callbackMayDeleteToolbarSynchronously();
 ```
 
@@ -829,7 +976,7 @@ public:
 
 Normal automatic mode uses `Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::WindowDoesNotAcceptFocus` and `WA_ShowWithoutActivating`. Explicit fallback-shortcut mode may temporarily omit `WindowDoesNotAcceptFocus` and focus the first action for keyboard navigation; closing restores the non-activating default. Apply the drag event filter only to `selectionContextDragHandle`; never install it on an action button. Use `QPointer<SelectionContextToolbar>` immediately before invoking a callback and return if the callback destroys the widget.
 
-Always render `selectionContextDragHandle`, `selectionContextIdentity`, the ordered five primary actions, and `selectionContextMoreButton`; More is not part of the reorderable primary list. Required button object names are `selectionActionAiSearchButton`, `selectionActionTranslateButton`, `selectionActionExplainButton`, `selectionActionSaveButton`, `selectionActionCopyButton`, and `selectionToolbarCloseButton`. The More menu receives dynamic `function:<id>` items plus pause-current-application and open-settings IDs. The first-round AI Search button remains enabled; its honest offline degradation is handled by Task 9.
+Create `selectionContextDragHandle`, `selectionContextIdentity`, the ordered five primary actions, and `selectionContextMoreButton`; More is not part of the reorderable primary list. Required button object names are `selectionActionAiSearchButton`, `selectionActionTranslateButton`, `selectionActionExplainButton`, `selectionActionSaveButton`, `selectionActionCopyButton`, and `selectionToolbarCloseButton`. Before showing, measure the real size hints against `availableGeometry.width() - 16`; if the row does not fit, hide the identity text first and then move trailing primary actions into the top of More while preserving order. If the minimal drag/first-action/More/close row still does not fit, render the first action icon-only with its full text in tooltip and accessible name. Every primary action must remain reachable exactly once across visible buttons plus overflow menu without horizontal clipping. The More menu then receives dynamic `function:<id>` items plus persistent “在此应用中禁用” and open-settings IDs; do not label a permanent blacklist mutation as a temporary pause. `ownsNativeWindow()` covers the toolbar and its transient `QMenu`; Task 13 aggregates result cards and explicit consent dialogs. The first-round AI Search button remains enabled; its honest non-search degradation is handled by Task 9.
 
 - [ ] **Step 4: Run the complete toolbar project**
 
@@ -867,6 +1014,8 @@ void callbackMayDeleteCardSynchronously();
 void longTextConfirmationOffersProcessFullTextOrCancelWithoutTruncation();
 void rapidDeltasCoalesceVisualLayoutWithoutDroppingCommittedText();
 void longChineseTextIsNotClippedAtTwoHundredPercentFont();
+void streamingGrowthRemainsInsideTheStoredAvailableGeometry();
+void narrowScreenWrapsActionButtonsWithoutClippingOrDuplication();
 ```
 
 The long-text test must instantiate the real card, set at least 400 Chinese characters, and assert that its text widget has a vertical scroll bar rather than expanding beyond the supplied available geometry.
@@ -902,11 +1051,25 @@ struct SelectionResultCardCallbacks
     std::function<void(const QString &question)> followUpRequested;
     std::function<void()> processFullTextRequested;
 };
+
+class SelectionResultCard : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit SelectionResultCard(QWidget *parent = nullptr);
+    void setCallbacks(const SelectionResultCardCallbacks &callbacks);
+    void setState(const SelectionResultCardState &state);
+    SelectionResultCardState state() const;
+    void showAt(const QPoint &topLeft,
+                const QRect &availableGeometry);
+    void closeIfUnpinned();
+    bool ownsNativeWindow(SelectedTextNativeWindowHandle window) const;
+};
 ```
 
-The card starts with the same non-activating window flags as the toolbar. Only an explicit click in the follow-up input may activate it. Put result text in a scrollable `QTextBrowser` or `QPlainTextEdit`; do not use a fixed result-label height. Required object names: `selectionResultCard`, `selectionResultCommittedText`, `selectionResultProvisionalText`, `selectionResultStatus`, `selectionResultCancelButton`, `selectionResultRegenerateButton`, `selectionResultCopyButton`, `selectionResultReplaceButton`, `selectionResultPinButton`, `selectionResultCloseButton`, `selectionResultFollowUpInput`, and `selectionResultFollowUpButton`.
+The card starts with the same non-activating window flags as the toolbar. Only an explicit click in the follow-up input may activate it. Put result text in a scrollable `QTextBrowser` or `QPlainTextEdit`; do not use a fixed result-label height. Lay out action buttons in a measured one- or two-row grid so real size hints fit the stored available width at 200%; no button may be shrunk below its size hint or duplicated. Required object names: `selectionResultCard`, `selectionResultCommittedText`, `selectionResultProvisionalText`, `selectionResultStatus`, `selectionResultCancelButton`, `selectionResultRegenerateButton`, `selectionResultCopyButton`, `selectionResultReplaceButton`, `selectionResultPinButton`, `selectionResultCloseButton`, `selectionResultFollowUpInput`, and `selectionResultFollowUpButton`.
 
-Use a 33-50 ms single-shot render coalescer for streaming text so bursts do not relayout the window per token; the underlying committed/provisional strings must retain every accepted delta. For over-limit input, show an in-card confirmation with “处理全文” and “取消”; never silently truncate. Clear terminal callbacks before invoking them, and protect every synchronous callback boundary with `QPointer`.
+Use a 33-50 ms single-shot render coalescer for streaming text so bursts do not relayout the window per token; the underlying committed/provisional strings must retain every accepted delta. Store the target monitor's available geometry in `showAt`, cap the card before every coalesced resize, and clamp its final top-left so streaming growth cannot cross a screen/taskbar edge. For over-limit input, show an in-card confirmation with “处理全文” and “取消”; never silently truncate. Clear terminal callbacks before invoking them, and protect every synchronous callback boundary with `QPointer`.
 
 - [ ] **Step 4: Run the result-card tests**
 
@@ -941,12 +1104,15 @@ void equivalentSnapshotDoesNotReopenTheToolbar();
 void aNewSnapshotCancelsOnlyAnUnpinnedActiveRequest();
 void pinnedResultDetachesFromLaterSelectionChanges();
 void outsideClickClosesUnpinnedSurfacesButNotOwnedWindows();
+void ownedSurfaceReleaseDoesNotStartProbeIncrementGenerationOrCancelAction();
 void escapeAndForegroundChangeCloseOnlyUnpinnedSurfaces();
 void destroyedTargetWindowClosesAndCancelsTheUnpinnedSession();
 void sensitiveOwnProcessAndBlockedSnapshotsNeverShowUi();
 void automaticPermissionFailureIsSilentButManualShortcutExplainsItOnce();
 void secureDesktopNeverShowsUiOrUsesClipboardFallback();
 void staleProbeAndStaleTerminalCallbacksAreIgnoredByGeneration();
+void targetLosingForegroundDuringProbeRejectsTheResultWithoutFocusRestore();
+void slowProbeDoesNotBlockToolbarButtonsOrTheOwnerEventLoop();
 void stoppingUninstallsObservationAndCancelsExactlyOnce();
 void callbackMayDestroyCoordinatorSynchronously();
 ```
@@ -961,8 +1127,16 @@ Run target `selection_context_coordinator_tests`. Expected RED: coordinator API 
 struct SelectionContextCoordinatorAccess
 {
     std::function<SelectionContextSettings()> settingsSnapshot;
-    std::function<SelectionSnapshot(const QPoint &, bool)> probe;
+    std::function<void(
+        const SelectionProbeRequest &request,
+        bool strongSelectionEnabled,
+        quint64 generation,
+        const SelectionProbeRunnerCallbacks &callbacks
+    )> startProbe;
+    std::function<void()> cancelProbe;
     std::function<quint32()> currentProcessId;
+    std::function<bool(SelectedTextNativeWindowHandle)> targetWindowValid;
+    std::function<SelectedTextNativeWindowHandle()> currentForegroundWindow;
     std::function<void(const SelectionSnapshot &,
                        bool keyboardNavigationMode)> showToolbar;
     std::function<void()> hideToolbar;
@@ -992,7 +1166,7 @@ public:
 };
 ```
 
-Use a single-shot 160 ms timer after a candidate mouse or keyboard event. Increment `m_generation` before every probe, new action cancellation, and stop. Automatic observation respects `enabled` and pause; manual shortcut bypasses pause but still enforces sensitivity, own-process and block-list policy, and calls `showToolbar(snapshot, true)` so keyboard navigation is available. Automatic probes call `showToolbar(snapshot, false)`. Automatic permission/secure-desktop failures are silent; a manual permission failure invokes `showManualFailure(PermissionDenied)` at most once per trigger and never reveals selected text. Esc, foreground change, or an invalid target window closes and cancels an unpinned session; pinned results remain. Logs contain only event ID and text length.
+Use a single-shot 160 ms timer after a candidate mouse or keyboard event. Reject owned toolbar/card/menu/modal windows before changing generation or cancelling anything. Increment `m_generation` before every accepted probe, new action cancellation, and stop; call `cancelProbe()` whenever generation is invalidated. At probe delivery require both `targetWindowValid(snapshot.targetWindow)` and `currentForegroundWindow()==snapshot.targetWindow`; never restore focus to make a stale result pass. Automatic observation respects `enabled` and pause; manual shortcut bypasses pause but still enforces sensitivity, own-process and block-list policy, and calls `showToolbar(snapshot, true)` so keyboard navigation is available. Automatic probes call `showToolbar(snapshot, false)`. Automatic permission/secure-desktop failures are silent; a manual permission failure invokes `showManualFailure(PermissionDenied)` at most once per trigger and never reveals selected text. Esc, foreground change, or an invalid/non-foreground target closes and cancels an unpinned session; pinned results remain. Logs contain only event ID and text length.
 
 - [ ] **Step 4: Run coordinator tests three consecutive times**
 
@@ -1012,7 +1186,7 @@ git commit -m "feat: coordinate selection context lifecycle"
 
 ---
 
-### Task 9: Build honest model requests for translate, explain, custom actions, and offline AI Search
+### Task 9: Build honest model requests for translate, explain, custom actions, and non-search AI fallback
 
 **Files:**
 - Create: `src/tasks/selection_context_model_request.h`
@@ -1026,6 +1200,7 @@ git commit -m "feat: coordinate selection context lifecycle"
 void translateUsesTranslatePromptModelAndConfiguredTargetLanguage();
 void explainUsesAskPromptAndPreservesTheOriginalSelection();
 void customFunctionUsesTheNamedFunctionRuntimeWithoutChangingSettings();
+void canvasModeCustomFunctionReturnsStableUnsupportedWithoutProviderCall();
 void aiSearchExplicitlyDegradesToOrdinaryAiWithoutSources();
 void followUpIncludesOriginalSelectionPreviousAnswerAndQuestion();
 void unknownActionReturnsAStableLocalErrorWithoutCallingAProvider();
@@ -1039,12 +1214,15 @@ const SelectionContextModelRequest built = buildSelectionContextModelRequest(inp
 QVERIFY(built.valid);
 QVERIFY(built.degraded);
 QCOMPARE(built.degradedMessage,
-         QStringLiteral("未联网，已使用普通 AI 解答"));
+         QStringLiteral("未进行联网搜索，已使用普通 AI 解答"));
 const QString completePrompt = built.modelRequest.systemPrompt
     + QLatin1Char('\n') + built.modelRequest.userPrompt;
 QVERIFY(!completePrompt.contains(QStringLiteral("来源：")));
 QVERIFY(!completePrompt.contains(QStringLiteral("已联网")));
 QVERIFY(!completePrompt.contains(QStringLiteral("搜索结果")));
+QVERIFY(completePrompt.contains(
+    QStringLiteral("没有进行实时网页检索，不得编造来源或时效性事实")
+));
 ```
 
 - [ ] **Step 2: Build and verify RED**
@@ -1079,7 +1257,7 @@ SelectionContextModelRequest buildSelectionContextModelRequest(
 );
 ```
 
-Map Translate to the existing translate function runtime, Explain and offline AI Search to the existing ask runtime, and custom IDs in the form `function:<stable-id>` to that function's runtime. Use `promptRuntimeForFunction`, the function-specific model selection, `targetLanguage`, `useSystemProxy`, streaming enabled, and the existing provider request boundary. Diagnostic strings expose action ID and text length only.
+Map Translate to the existing translate function runtime, Explain and non-search AI fallback to the existing ask runtime, and `function:<stable-id>` only when the referenced non-built-in function uses `FunctionExecutionMode::Classic`. A missing, built-in, or Canvas-mode function returns a stable local error and never starts a provider. The fallback system prompt must explicitly say it has not performed live web retrieval and must not invent sources or current facts. Use `promptRuntimeForFunction`, the function-specific model selection, `targetLanguage`, `useSystemProxy`, streaming enabled, and the existing provider request boundary. Diagnostic strings expose action ID and text length only.
 
 - [ ] **Step 4: Run request tests**
 
@@ -1109,6 +1287,7 @@ git commit -m "feat: build selection context model requests"
 void deltasArriveOnTheOwnerThreadInProviderOrder();
 void terminalCallbackRunsAfterAllQueuedDeltas();
 void cancellingDropsLateDeltaAndTerminalCallbacks();
+void cancellingSetsTheExactTokenObservedByTheProvider();
 void startingAgainCancelsThePreviousExecutionExactlyOnce();
 void providerErrorPreservesTheExistingErrorMessageWithoutSelectedTextInLogs();
 void callbackMayDeleteRunnerSynchronously();
@@ -1150,7 +1329,7 @@ public:
 };
 ```
 
-Follow the proven `FunctionFlowModelTaskRunner` ownership pattern without importing flow state. Use `QtConcurrent`, a unique execution ID, a shared cancellation state, queued owner-thread delivery, a pending-delta counter, and a generation check. Never deliver `finished` before the last accepted delta. Clear callbacks before invoking terminal callbacks and use `QPointer` afterward.
+Follow the proven `FunctionFlowModelTaskRunner` ownership pattern without importing flow state, but do not copy its weak `QFutureWatcher::cancel()`-only behavior. The selection runner owns a `CancellationSource` for every start, writes its token and execution ID into a private copy of `ModelRequestTaskRequest`, and calls `CancellationSource::cancel()` before invalidating callbacks or replacing the watcher. Use `QtConcurrent`, queued owner-thread delivery, a pending-delta counter, and a generation check. Never deliver `finished` before the last accepted delta. Clear callbacks before invoking terminal callbacks and use `QPointer` afterward.
 
 - [ ] **Step 4: Run runner tests three consecutive times**
 
@@ -1177,6 +1356,12 @@ git commit -m "feat: run selection context model tasks"
 - Create: `tests/controllers/selection_context_action_controller_tests.pro`
 - Modify: `tests/output/clipboard_writer_tests.cpp`
 - Modify: `tests/output/clipboard_writer_tests.pro`
+- Modify: `src/controllers/vocabulary_quick_add_controller.h`
+- Modify: `src/controllers/vocabulary_quick_add_controller.cpp`
+- Modify: `src/controllers/voice_controller.h`
+- Modify: `src/controllers/voice_controller.cpp`
+- Modify: `tests/controllers/vocabulary_quick_add_controller_tests.cpp`
+- Modify: `tests/controllers/vocabulary_quick_add_controller_tests.pro`
 
 - [ ] **Step 1: Write RED action and clipboard tests**
 
@@ -1186,12 +1371,14 @@ Cover all action paths:
 void persistentCopyWritesTextWithoutPasteOrRestoreLease();
 void copyClosesTheToolbarAndShowsNoModelResult();
 void saveUsesTheGlobalVocabularyBridgeExactlyOnce();
+void saveAlwaysOpensTheLocalEditorAndNeverRequestsAiEvenWhenAiModeIsConfigured();
 void firstModelActionRequiresExplicitNetworkConsentBeforeProviderStart();
 void declinedNetworkConsentSendsNothingAndKeepsLocalActionsAvailable();
 void acknowledgedConsentDoesNotPromptAgain();
 void modelActionShowsDegradedBannerBeforeOfflineAiSearchDeltas();
 void aNewActionCancelsTheOldRunnerAndIgnoresLateCallbacks();
 void replaceRequiresOriginalWindowAndLiveSelection();
+void replaceRevalidationNeverCallsSetForegroundWindowOrChangesFocus();
 void pinnedCardNeverOffersReplace();
 void replaceUsesCheckedClipboardWriteAndKeepsResultOnFailure();
 void followUpCarriesOriginalSelectionAndPreviousAnswer();
@@ -1216,14 +1403,38 @@ static bool copyText(const QString &text);
 
 `copyText` must execute on the GUI thread, set only the clipboard text, and return whether the clipboard readback matches. It must not send Ctrl+V, change focus, create a restore lease, or overwrite other formats after returning.
 
-- [ ] **Step 4: Implement the action controller**
+- [ ] **Step 4: Add a forced-local vocabulary bridge**
+
+```cpp
+// VocabularyQuickAddController
+VocabularyQuickAddOutcome addTextLocally(
+    const QString &sourceText,
+    const QString &scopeId,
+    const QString &editedText = QString()
+);
+
+// VoiceController
+void addVocabularyLocallyForFlow(
+    const QString &sourceText,
+    const QString &scopeId,
+    const QString &editedText
+);
+```
+
+`addTextLocally` validates the source and opens the existing manual vocabulary editor with a prefilled entry. It must not consult `vocabularyAddMode`, call `askChoice`, call `requestSuggestion`, or append an AI-generated entry. The existing hotkey/flow `addText` behavior remains unchanged.
+
+- [ ] **Step 5: Implement the action controller**
 
 ```cpp
 struct SelectionContextActionAccess
 {
     std::function<bool(const QString &)> copyText;
     std::function<void(const QString &)> saveVocabulary;
-    std::function<bool(SelectedTextNativeWindowHandle)> selectionStillExists;
+    std::function<void(
+        SelectedTextNativeWindowHandle window,
+        quint64 generation,
+        const std::function<void(quint64, bool)> &completed
+    )> validateSelectionAsync;
     std::function<ClipboardWriteResult(
         const QString &,
         SelectedTextNativeWindowHandle
@@ -1260,18 +1471,21 @@ public:
 };
 ```
 
-Copy calls `ClipboardWriter::copyText`. Save calls the existing vocabulary bridge with scope `"__global"`; neither local action may invoke network consent or a provider. Replace is available only while the card is unpinned, the original native window still exists, and `SelectedTextReader::hasSelectionInWindow` succeeds; then call `ClipboardWriter::pasteTextToWindowChecked(result, originalWindow, true, true)`. On failure retain the result card and show a local status. AI actions first build Task 9 requests, then call `ensureNetworkConsent(actionId, modelId)` before Task 10; declining sends no text and starts no provider. If selected text exceeds 12,000 UTF-16 code units, first render `requiresLongTextConfirmation=true`; only `processFullTextConfirmed()` may send the complete original text, and Cancel sends nothing. Follow-up includes original selection, previous committed answer, and explicit question. All callbacks carry the current generation and stale events are ignored.
+Copy calls `ClipboardWriter::copyText`. Save calls `VoiceController::addVocabularyLocallyForFlow(text, "__global", "")`; neither local action may invoke network consent or a provider. Replace is available only while the card is unpinned. Call `validateSelectionAsync(originalWindow, generation, ...)`; only a current-generation true result may call `ClipboardWriter::pasteTextToWindowChecked(result, originalWindow, true, true)`. Never use the existing focus-changing `hasSelectionInWindow` here. On validation or write failure retain the result card and show a local status. For model actions, handle the 12,000-code-unit confirmation first, then build Task 9 requests and call `ensureNetworkConsent(actionId, modelId)` before Task 10; declining sends no text and starts no provider. Only `processFullTextConfirmed()` may send the complete original long text, and Cancel sends nothing. Follow-up includes original selection, previous committed answer, and explicit question. All callbacks carry the current generation and stale events are ignored.
 
-- [ ] **Step 5: Run both complete test projects**
+- [ ] **Step 6: Run all three complete test projects**
 
-Expected: GREEN; no test sends real keys, reads real secrets, or calls a network provider.
+Run `clipboard_writer_tests`, `selection_context_action_controller_tests`, and `vocabulary_quick_add_controller_tests`. Expected: GREEN; no test sends real keys, reads real secrets, or calls a network provider.
 
-- [ ] **Step 6: Commit Task 11**
+- [ ] **Step 7: Commit Task 11**
 
 ```powershell
 git add src/controllers/selection_context_action_controller.* `
   src/output/clipboard_writer.* `
+  src/controllers/vocabulary_quick_add_controller.* `
+  src/controllers/voice_controller.h src/controllers/voice_controller.cpp `
   tests/controllers/selection_context_action_controller_tests.* `
+  tests/controllers/vocabulary_quick_add_controller_tests.* `
   tests/output/clipboard_writer_tests.*
 git commit -m "feat: execute selection context actions"
 ```
@@ -1311,6 +1525,7 @@ void settingsPanelSavePassesTheWholeSelectionContextValue();
 void failedSaveRestoresPersistedValuesAndVisibleWidgets();
 void strongSelectionRemainsTheExistingGlobalCompatibilitySetting();
 void buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent();
+void smallWindowAndManyCustomFunctionsRemainScrollableAndReachable();
 ```
 
 The save test must capture the real `AppSettingsData` submitted by the section, return `false`, and then verify every visible control rolled back. Source-text `contains` assertions do not count.
@@ -1327,7 +1542,7 @@ Embed the card in the General/Basic settings section. Add `HubSettingsState::sel
 
 - [ ] **Step 4: Run native Windows visual tests at four scales**
 
-Set the test font to 100%, 125%, 150%, and 200%; save one PNG per scale under an ignored `build-selection-context-visual` directory. Assert each label/button height is at least its size hint, CJK glyphs have non-zero advance, and title foreground pixels exist. Inspect every image for clipping, overlap, and unreachable controls.
+Set the test font to 100%, 125%, 150%, and 200%; render both compact and maximized settings windows plus a dense catalog with at least 20 custom functions, and save PNGs under an ignored `build-selection-context-visual` directory. Assert each label/button height is at least its size hint, CJK glyphs have non-zero advance, scroll bars make every control reachable, and title foreground pixels exist. Inspect every image for clipping, overlap, and unreachable controls.
 
 - [ ] **Step 5: Run all affected settings tests**
 
@@ -1370,17 +1585,25 @@ Before committing, replace wildcard staging with the exact changed existing test
 
 ```cpp
 void startAndStopOwnExactlyOneObserverAndRunner();
+void disabledAutomaticModeInstallsHooksOnlyForAnActiveFallbackSession();
+void observerInstallFailureStillAllowsTheFallbackHotkeyAndCloseButton();
+void lockOrSuspendCancelsProbesAndSessionsAndUnlockRestartsOnlyWhenEnabled();
 void refreshAppliesSettingsWithoutRecreatingVisiblePinnedResult();
 void pinDetachesCurrentCardAndNextActionUsesANewCardUpToThreePinned();
 void fallbackHotkeyRoutesToFeatureInsteadOfFunctionDispatcher();
 void moreMenuListsEachCustomFunctionOnceAndRoutesStableIds();
-void pauseCurrentApplicationPersistsItsExecutableAndClosesSurfaces();
+void builtInFunctionsDoNotDuplicatePrimaryActionsInMoreMenu();
+void canvasModeCustomFunctionsAreNotShownAsSupportedActions();
+void blockCurrentApplicationPersistsItsExecutableAndClosesSurfaces();
+void failedConsentOrBlockPersistenceLeavesStateAndSurfacesUnchanged();
 void openSettingsMenuActionInvokesTheExistingSettingsEntry();
 void trayShowsEnablePauseThirtyMinutesAndResumeActions();
 void trayCheckStateRefreshesBeforeEveryShow();
-void runtimeSaveVocabularyUsesVoiceControllerGlobalBridgeExactlyOnce();
+void runtimeSaveVocabularyUsesForcedLocalVoiceControllerBridgeExactlyOnce();
 void runtimeReplaceRevalidatesTheOriginalWindowSelection();
 void runtimeConsentPromptPersistsAcceptanceAndDeclineSendsNothing();
+void featureOwnsToolbarMenusAndCardsAndSuppressesObserverDuringConsent();
+void modalVocabularyAndSettingsInteractionsAlsoSuppressNativeCandidates();
 void settingsChangeRefreshesFeatureAndHotkeyRegistration();
 void teardownStopsHooksBeforeDestroyingUiAndModelRunner();
 ```
@@ -1425,9 +1648,9 @@ public:
 };
 ```
 
-`SelectionContextFeature` owns observer, coordinator, toolbar, one current unpinned session, and up to three detached pinned sessions in destruction-safe order. Each session owns its own result card, model runner, action controller, immutable snapshot, and generation; pinning therefore does not cancel an in-flight request. The next model action creates a fresh current session. When three are pinned, disable Pin on the current card instead of silently deleting an older result. Closing a pinned session first cancels its runner, clears callbacks, then removes its widgets/objects with `deleteLater` and `QPointer` guards.
+`SelectionContextFeature` owns observer, asynchronous probe runner, coordinator, toolbar, one current unpinned session, and up to three detached pinned sessions in destruction-safe order. Each session owns its own result card, model runner, action controller, immutable snapshot, and generation; pinning therefore does not cancel an in-flight request. The next model action creates a fresh current session. When three are pinned, disable Pin on the current card instead of silently deleting an older result. Closing a pinned session first cancels its runner, clears callbacks, then removes its widgets/objects with `deleteLater` and `QPointer` guards. SystemUnavailable cancels probes and all in-flight sessions, closes every sensitive surface including pinned cards, and uninstalls hooks; SystemAvailable refreshes settings and reinstalls observation only when automatic mode is enabled.
 
-The runtime constructs the feature after `VoiceController`, supplies `voiceController.addVocabularyForFlow(text, "__global", "")`, and supplies an `ensureNetworkConsent` callback. That callback returns immediately when `settings.toData().selectionContext.networkConsentAcknowledged` is true; otherwise it shows an explicit modal saying the selected text will be sent to the configured model service, and only on acceptance sets the typed setting true, calls `settings.save()`, and refreshes settings. It must not include selected text in the dialog or logs. Build the More menu from every current `FunctionSettings` as `function:<id>` exactly once, then append pause-current-application and open-settings actions. Feature routing intercepts only those two menu IDs; every `function:<id>` is forwarded unchanged to the action controller. Pausing the current application normalizes its executable into `blockedApplications`, saves, refreshes, and closes unpinned surfaces. The runtime intercepts only hotkey ID `selection_toolbar` before the function dispatcher, refreshes the feature after settings changes, and calls `stop()` before application teardown.
+The runtime constructs the feature after `VoiceController`, supplies `voiceController.addVocabularyLocallyForFlow(text, "__global", "")`, and supplies an `ensureNetworkConsent` callback. That callback returns immediately when `settings.toData().selectionContext.networkConsentAcknowledged` is true; otherwise it shows an explicit modal saying the selected text will be sent to the configured model service, creates a modified `AppSettingsData` copy, and returns true only after `settings.replaceAndSave(next)` succeeds. It must not include selected text in the dialog or logs, and a save failure leaves the prior in-memory/persisted value unchanged. Feature pauses observation, clears pending native candidates, invokes consent, vocabulary or settings modal interactions, then resumes observation and advances generation so queued modal clicks cannot close or reopen surfaces. Build the More menu from every non-built-in `FunctionSettings` with a non-empty ID and `FunctionExecutionMode::Classic` as `function:<id>` exactly once; built-in dictate/translate/ask and Canvas-mode functions must not appear as supported toolbar actions. Then append block-current-application and open-settings actions. Feature routing intercepts only those two menu IDs; every displayed `function:<id>` is forwarded unchanged to the action controller. Blocking the current application likewise modifies a copied settings value and uses `replaceAndSave`; only success refreshes and closes unpinned surfaces. When automatic mode is disabled, do not leave global hooks installed while idle; the fallback hotkey may install them for the visible session and uninstall after close. Hook installation failure must not disable the registered fallback hotkey or the toolbar's own close button. The feature aggregates toolbar/menu/card native windows for coordinator filtering. The runtime intercepts only hotkey ID `selection_toolbar` before the function dispatcher, refreshes the feature after settings changes, and calls `stop()` before application teardown.
 
 Add tray actions for Enable, Pause 30 minutes, and Resume. They must have stable `data()` IDs, live in one exclusive state group where appropriate, connect exactly once, and refresh from feature state on `aboutToShow`.
 
@@ -1474,7 +1697,7 @@ Add the exact runtime assembly test files if changed; verify `git diff --cached 
 
 - [ ] **Step 1: Document the delivered behavior and explicit search boundary**
 
-Document automatic selection, fallback hotkey, supported local/AI actions, pause, block list, pin/follow-up, strong-selection opt-in, replace safety, and the exact first-round message `未联网，已使用普通 AI 解答`. State that real web search and source citations are not delivered by this phase.
+Document automatic selection, fallback hotkey, supported local/AI actions, pause, block list, pin/follow-up, strong-selection opt-in, replace safety, and the exact first-round message `未进行联网搜索，已使用普通 AI 解答`. Explain that this means no web search was performed, not that the configured ordinary model necessarily runs locally. State that real web search/source citations and Canvas-mode custom-function bridging are not delivered by this phase; only Classic-mode custom model actions appear in More.
 
 - [ ] **Step 2: Run all focused projects from fresh object/MOC directories**
 
@@ -1490,7 +1713,7 @@ Expected summary: every project verified, `Failed=0`, `Skipped=0`, and `Infrastr
 
 - [ ] **Step 4: Perform the native Windows interaction matrix**
 
-Use a packaged or isolated settings root. Verify automatic mouse selection, keyboard Shift selection, fallback hotkey, copy, save, translate, explain, offline AI Search degradation, cancel, pin, follow-up, replace success/failure, outside close, pause/resume and stale selection cancellation in:
+Use a packaged or isolated settings root. Verify drag, double-click and triple-click selection; keyboard Shift selection; fallback hotkey; copy; save; translate; explain; non-search AI fallback; cancel; pin; follow-up; replace success/failure; outside close; pause/resume; UI responsiveness during delayed UIA; and stale selection cancellation in:
 
 - Notepad
 - Edge and Chrome editable/non-editable text
@@ -1498,11 +1721,11 @@ Use a packaged or isolated settings root. Verify automatic mouse selection, keyb
 - one PDF viewer
 - one Electron application
 
-Also verify password fields never show the toolbar, the app's own windows never trigger it, elevated targets fail safely, keyboard-only selection honors its setting, and clipboard strong fallback restores text plus non-text formats.
+Also verify password fields never show the toolbar, the app's own windows never trigger it, elevated targets fail safely, keyboard-only selection honors its setting, session lock/suspend closes all surfaces and cancels work, unlock/resume does not replay old selections, and clipboard strong fallback restores text plus non-text formats without overwriting a clipboard change made during the probe.
 
 - [ ] **Step 5: Perform the native multi-monitor and scaled-font visual gate**
 
-Capture toolbar and card screenshots at 100%, 125%, 150%, and 200% with Chinese text. Include left/right screen edges, taskbar bottom, negative-coordinate monitor, long streaming text, completed text, degraded AI Search banner, error state, pinned follow-up, and replacement-disabled state. Inspect every PNG with `view_image`; no label/button text may clip, no surface may escape the available screen, and long text must scroll inside a bounded card.
+Capture toolbar and card screenshots at 100%, 125%, 150%, and 200% with Chinese text. Include a mixed-DPI two-monitor arrangement, left/right screen edges, taskbar bottom, negative-coordinate monitor, long streaming text, completed text, degraded AI Search banner, error state, pinned follow-up, and replacement-disabled state. Inspect every PNG with `view_image`; no label/button text may clip, no surface may escape the target monitor's available screen, and long text must scroll inside a bounded card.
 
 - [ ] **Step 6: Audit privacy, focus, and process cleanup**
 
@@ -1553,4 +1776,5 @@ Stage any regression-test or production fixes as explicit paths in the same fina
 - The four-scale visual evidence directory and the inspected state matrix.
 - Interaction results for every target application in Task 14.
 - Privacy scan, clipboard-format restoration, focus-retention, and residual-process results.
-- A clear statement that AI Search is an offline ordinary-AI degradation in this release and that real search/provider/citation work remains outside this implementation plan.
+- A clear statement that AI Search uses an ordinary-model, non-search degradation in this release and that real search/provider/citation work remains outside this implementation plan.
+- A clear statement that Canvas-mode custom functions remain hidden until a separate preloaded-selection and result-bridge plan is implemented.

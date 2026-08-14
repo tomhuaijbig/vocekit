@@ -81,6 +81,19 @@ private slots:
         QVERIFY(pushButton(card, "selectionResultReplaceButton")->isEnabled());
     }
 
+    void translucentWindowStillPaintsItsCardBackground()
+    {
+        SelectionResultCard card;
+        card.setState(completedState(QStringLiteral("done")));
+        card.showAt(QPoint(40, 40), QRect(0, 0, 900, 700));
+        QVERIFY(QTest::qWaitForWindowExposed(&card));
+        const QImage image = card.grab().toImage().convertToFormat(
+            QImage::Format_ARGB32
+        );
+        QVERIFY(!image.isNull());
+        QVERIFY(qAlpha(image.pixel(image.width() / 2, 5)) > 240);
+    }
+
     void completedStateRegeneratesOnlyAfterExplicitClick()
     {
         SelectionResultCard card;

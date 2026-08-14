@@ -7,6 +7,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
@@ -15,6 +17,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QStyleOption>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -50,6 +53,7 @@ SelectionResultCard::SelectionResultCard(QWidget *parent)
     setObjectName(QStringLiteral("selectionResultCard"));
     setAttribute(Qt::WA_ShowWithoutActivating, true);
     setAttribute(Qt::WA_TranslucentBackground, true);
+    setAttribute(Qt::WA_StyledBackground, true);
     setStyleSheet(QString::fromUtf8(
         "QWidget#selectionResultCard { background: #ffffff;"
         " border: 1px solid #d0d5dd; border-radius: 12px; }"
@@ -244,6 +248,15 @@ SelectionResultCard::SelectionResultCard(QWidget *parent)
 }
 
 SelectionResultCard::~SelectionResultCard() = default;
+
+void SelectionResultCard::paintEvent(QPaintEvent *event)
+{
+    QStyleOption option;
+    option.init(this);
+    QPainter painter(this);
+    style()->drawPrimitive(QStyle::PE_Widget, &option, &painter, this);
+    QWidget::paintEvent(event);
+}
 
 void SelectionResultCard::setCallbacks(
     const SelectionResultCardCallbacks &callbacks)

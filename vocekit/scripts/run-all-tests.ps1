@@ -96,6 +96,10 @@ function Invoke-CapturedCommand {
         $target = $targetMatch.Matches[0].Groups[1].Value.Trim()
         $makefileName = "Makefile.codex.$target"
         $makefilePath = Join-Path $project.DirectoryName $makefileName
+        $targetWrapperPath = Join-Path (
+            $project.DirectoryName
+        ) "target_wrapper.sh"
+        $targetWrapperExisted = Test-Path -LiteralPath $targetWrapperPath
 
         Push-Location $project.DirectoryName
         try {
@@ -124,6 +128,10 @@ function Invoke-CapturedCommand {
                     $_.Name -like "object_script.$target.*"
                 } |
                 ForEach-Object { $generatedFiles.Add($_.FullName) }
+            if (!$targetWrapperExisted -and
+                (Test-Path -LiteralPath $targetWrapperPath -PathType Leaf)) {
+                $generatedFiles.Add($targetWrapperPath)
+            }
 
             $makeResult = Invoke-CapturedCommand $make @(
                 "-f",
@@ -165,7 +173,21 @@ function Invoke-CapturedCommand {
                 continue
             }
 
-            $runResult = Invoke-CapturedCommand $executable @("-maxwarnings", "0")
+            $projectQpaPlatform = $env:QT_QPA_PLATFORM
+            try {
+                # Native observer tests require a real HWND. The offscreen
+                # plugin returns a synthetic winId that Windows correctly
+                # rejects, so run only this target on the native platform.
+                if ($target -eq "selection_observer_tests") {
+                    $env:QT_QPA_PLATFORM = "windows"
+                }
+                $runResult = Invoke-CapturedCommand $executable @(
+                    "-maxwarnings",
+                    "0"
+                )
+            } finally {
+                $env:QT_QPA_PLATFORM = $projectQpaPlatform
+            }
             $runText = $runResult.Output -join "`n"
             $summary = [regex]::Match(
                 $runText,

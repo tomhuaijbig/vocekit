@@ -234,6 +234,21 @@ private slots:
         }
     }
 
+    void translucentWindowStillPaintsItsCardBackground()
+    {
+        SelectionContextToolbar toolbar;
+        SelectionSnapshot snapshot;
+        snapshot.anchorRect = QRect(300, 80, 100, 24);
+        snapshot.cursorPosition = QPoint(350, 90);
+        toolbar.showForSnapshot(snapshot, QRect(0, 0, 1000, 700));
+        QVERIFY(QTest::qWaitForWindowExposed(&toolbar));
+        const QImage image = toolbar.grab().toImage().convertToFormat(
+            QImage::Format_ARGB32
+        );
+        QVERIFY(!image.isNull());
+        QVERIFY(qAlpha(image.pixel(image.width() / 2, 5)) > 240);
+    }
+
     void everyClickEmitsExactlyOneStableActionId()
     {
         SelectionContextToolbar toolbar;

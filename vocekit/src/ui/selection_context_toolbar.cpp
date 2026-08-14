@@ -11,9 +11,12 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QPointer>
 #include <QSet>
 #include <QStyle>
+#include <QStyleOption>
 #include <QToolButton>
 #include <QKeyEvent>
 
@@ -95,6 +98,7 @@ SelectionContextToolbar::SelectionContextToolbar(QWidget *parent)
     setObjectName(QStringLiteral("selectionContextToolbar"));
     setAttribute(Qt::WA_ShowWithoutActivating, true);
     setAttribute(Qt::WA_TranslucentBackground, true);
+    setAttribute(Qt::WA_StyledBackground, true);
     setFocusPolicy(Qt::NoFocus);
     setStyleSheet(QString::fromUtf8(
         "QWidget#selectionContextToolbar {"
@@ -190,6 +194,15 @@ SelectionContextToolbar::SelectionContextToolbar(QWidget *parent)
 }
 
 SelectionContextToolbar::~SelectionContextToolbar() = default;
+
+void SelectionContextToolbar::paintEvent(QPaintEvent *event)
+{
+    QStyleOption option;
+    option.init(this);
+    QPainter painter(this);
+    style()->drawPrimitive(QStyle::PE_Widget, &option, &painter, this);
+    QWidget::paintEvent(event);
+}
 
 void SelectionContextToolbar::setCallbacks(
     const SelectionContextToolbarCallbacks &callbacks)

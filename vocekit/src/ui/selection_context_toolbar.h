@@ -14,6 +14,7 @@ class QEvent;
 class QHBoxLayout;
 class QLabel;
 class QMenu;
+class QPaintEvent;
 class QToolButton;
 
 struct SelectionContextToolbarCallbacks
@@ -53,6 +54,7 @@ public:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void changeEvent(QEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
 
 private:
     void applyWindowMode(bool keyboardNavigationMode);

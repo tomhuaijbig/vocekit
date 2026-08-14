@@ -13,6 +13,7 @@ class QEvent;
 class QGridLayout;
 class QLabel;
 class QLineEdit;
+class QPaintEvent;
 class QPlainTextEdit;
 class QPushButton;
 class QTimer;
@@ -64,6 +65,7 @@ public:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
 
 private:

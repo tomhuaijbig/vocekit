@@ -282,6 +282,19 @@ saveNormalizesScopeAfterCustomFunctionRemoval()
     QCOMPARE(persisted.selectionContext.actionCustomizations.value(
         selectionContextActionSave()).vocabularyScopeId,
         QStringLiteral("__global"));
+
+    CustomFunctionDef recreated;
+    recreated.id = custom.id;
+    recreated.name = QString::fromUtf8("重建词库范围");
+    state.addCustomFunction(recreated);
+    QCOMPARE(state.selectionContextSettings().actionCustomizations.value(
+        selectionContextActionSave()).vocabularyScopeId,
+        QStringLiteral("__global"));
+
+    QVERIFY(state.save());
+    QCOMPARE(persisted.selectionContext.actionCustomizations.value(
+        selectionContextActionSave()).vocabularyScopeId,
+        QStringLiteral("__global"));
 }
 
 void HubSettingsStateTests::readsAndNormalizesSelectionContextSettings()

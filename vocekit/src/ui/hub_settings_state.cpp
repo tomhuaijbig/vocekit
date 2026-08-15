@@ -443,6 +443,10 @@ void HubSettingsState::removeCustomFunction(const QString &id)
         m_data.functions.remove(index);
     }
     m_data.functionOrder.removeAll(id);
+    m_data.selectionContext = normalizedHubSelectionContextSettings(
+        m_data.selectionContext,
+        m_data
+    );
     refreshCustomFunctions();
 }
 

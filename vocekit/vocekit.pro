@@ -267,6 +267,7 @@ SOURCES += \
     src/ui/result_popup_test_card.cpp \
     src/ui/selection_input_test_card.cpp \
     src/ui/selection_context_placement.cpp \
+    src/ui/selection_context_action_editor.cpp \
     src/ui/selection_context_settings_card.cpp \
     src/ui/selection_context_toolbar.cpp \
     src/ui/selection_result_card.cpp \
@@ -562,6 +563,7 @@ HEADERS += \
     src/ui/result_popup_test_card.h \
     src/ui/selection_input_test_card.h \
     src/ui/selection_context_placement.h \
+    src/ui/selection_context_action_editor.h \
     src/ui/selection_context_settings_card.h \
     src/ui/selection_context_toolbar.h \
     src/ui/selection_result_card.h \

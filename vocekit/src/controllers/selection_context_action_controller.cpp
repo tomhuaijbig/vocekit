@@ -75,7 +75,7 @@ void SelectionContextActionController::triggerAction(
     if (id == selectionContextActionCopy()) {
         cancelActiveWithoutRendering();
         m_actionId = id;
-        if (m_snapshot.text.isEmpty() || !m_access.copyText) {
+        if (m_snapshot.text.isEmpty()) {
             return;
         }
         AppSettingsData settings;
@@ -92,14 +92,22 @@ void SelectionContextActionController::triggerAction(
             settings.selectionContext,
             settings
         );
+        if (!m_access.copyText) {
+            reportCopyFailure(settings);
+            return;
+        }
         QString text = m_snapshot.text;
         if (settings.selectionContext.actionCustomizations
                 .value(id).copyMode == QStringLiteral("trim")) {
             text = text.trimmed();
         }
         const std::function<bool(const QString &)> copy = m_access.copyText;
-        copy(text);
+        const bool copied = copy(text);
         if (!guard) {
+            return;
+        }
+        if (!copied) {
+            reportCopyFailure(settings);
             return;
         }
         logSafely(QStringLiteral("selection.action.copy"), 0);
@@ -569,6 +577,18 @@ bool SelectionContextActionController::logSafely(
     const QPointer<SelectionContextActionController> guard(this);
     log(eventId, actionId, textLength, elapsedMs);
     return bool(guard);
+}
+
+void SelectionContextActionController::reportCopyFailure(
+    const AppSettingsData &settings)
+{
+    m_title = actionTitle(m_actionId, settings);
+    m_statusText = text8("复制失败：未能写入剪贴板。");
+    const QPointer<SelectionContextActionController> guard(this);
+    if (!renderCurrent() || !guard) {
+        return;
+    }
+    logSafely(QStringLiteral("selection.action.copy.failed"), 0);
 }
 
 void SelectionContextActionController::setStatus(const QString &status)

@@ -86,6 +86,7 @@ private:
     bool renderCurrent();
     bool closeToolbarSafely();
     bool logSafely(const QString &eventId, qint64 elapsedMs);
+    void reportCopyFailure(const AppSettingsData &settings);
     void setStatus(const QString &status);
 
     QPointer<SelectionContextModelRunner> m_runner;

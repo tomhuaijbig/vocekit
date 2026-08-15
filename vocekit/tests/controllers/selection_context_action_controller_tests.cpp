@@ -86,6 +86,7 @@ struct Harness
     QString providerText = QStringLiteral("provider answer");
     QString providerError;
     bool blockFirstProvider = false;
+    bool copySucceeds = true;
     bool consentAllowed = true;
     int consentCalls = 0;
     QStringList sequence;
@@ -172,7 +173,7 @@ struct Harness
         SelectionContextActionAccess access;
         access.copyText = [this](const QString &value) {
             copied.append(value);
-            return true;
+            return copySucceeds;
         };
         access.openVocabularyEditor = [this](
             const QString &value,
@@ -249,7 +250,10 @@ class SelectionContextActionControllerTests : public QObject
 
 private slots:
     void copyTrimModeUsesLocalClipboardAndNeverRunsModel();
+    void copyTrimModeCanProduceAnEmptyLocalClipboardPayload();
     void copyOriginalModePreservesWhitespaceAndNewlinesExactly();
+    void missingCopyCallbackReportsLocalFailureWithoutModelFallback();
+    void copyFailureReportsLocalFailureWithoutClosingOrLoggingSuccess();
     void saveOpensLocalEditorOnceWithConfiguredScope();
     void deletedScopeIsNormalizedToGlobalBeforeOpeningEditor();
     void missingVocabularyEditorReportsLocalFailureWithoutModelFallback();
@@ -295,13 +299,32 @@ copyTrimModeUsesLocalClipboardAndNeverRunsModel()
 }
 
 void SelectionContextActionControllerTests::
+copyTrimModeCanProduceAnEmptyLocalClipboardPayload()
+{
+    Harness h;
+    h.settings.selectionContext.actionCustomizations[
+        selectionContextActionCopy()
+    ].copyMode = QStringLiteral("trim");
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionController controller(&runner, h.actionAccess());
+    controller.setSelection(snapshot(QStringLiteral(" \t\r\n  \n\t ")));
+    controller.triggerAction(selectionContextActionCopy());
+    QCOMPARE(h.copied, QStringList() << QString());
+    QCOMPARE(h.closeToolbarCalls, 1);
+    QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.consentCalls, 0);
+}
+
+void SelectionContextActionControllerTests::
 copyOriginalModePreservesWhitespaceAndNewlinesExactly()
 {
     Harness h;
     h.settings.selectionContext.actionCustomizations[
         selectionContextActionCopy()
     ].copyMode = QStringLiteral("original");
-    const QString original = QStringLiteral("  first line\r\nsecond line  \n");
+    const QString original = QString::fromUtf8(
+        "  中文🙂\r\n第二行\t \n"
+    );
     SelectionContextModelRunner runner(h.runnerAccess());
     SelectionContextActionController controller(&runner, h.actionAccess());
     controller.setSelection(snapshot(original));
@@ -310,6 +333,63 @@ copyOriginalModePreservesWhitespaceAndNewlinesExactly()
     QCOMPARE(h.providerCalls.loadAcquire(), 0);
     QCOMPARE(h.consentCalls, 0);
     QCOMPARE(h.settingsSnapshotCalls, 1);
+}
+
+void SelectionContextActionControllerTests::
+missingCopyCallbackReportsLocalFailureWithoutModelFallback()
+{
+    Harness h;
+    const QString privateText = QStringLiteral("never-show-this-selection");
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionAccess access = h.actionAccess();
+    access.copyText = std::function<bool(const QString &)>();
+    SelectionContextActionController controller(&runner, access);
+    controller.setSelection(snapshot(privateText));
+    controller.triggerAction(selectionContextActionCopy());
+    QCOMPARE(h.copied.size(), 0);
+    QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.consentCalls, 0);
+    QCOMPARE(h.closeToolbarCalls, 0);
+    QCOMPARE(h.settingsSnapshotCalls, 1);
+    QVERIFY(!h.renders.isEmpty());
+    QCOMPARE(h.renders.constLast().actionId, selectionContextActionCopy());
+    QCOMPARE(
+        h.renders.constLast().statusText,
+        text8("复制失败：未能写入剪贴板。")
+    );
+    QVERIFY(!h.renders.constLast().statusText.contains(privateText));
+    QCOMPARE(h.logs.size(), 1);
+    QCOMPARE(
+        h.logs.constLast().eventId,
+        QStringLiteral("selection.action.copy.failed")
+    );
+}
+
+void SelectionContextActionControllerTests::
+copyFailureReportsLocalFailureWithoutClosingOrLoggingSuccess()
+{
+    Harness h;
+    h.copySucceeds = false;
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionController controller(&runner, h.actionAccess());
+    controller.setSelection(snapshot(QStringLiteral("copy locally")));
+    controller.triggerAction(selectionContextActionCopy());
+    QCOMPARE(h.copied, QStringList() << QStringLiteral("copy locally"));
+    QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.consentCalls, 0);
+    QCOMPARE(h.closeToolbarCalls, 0);
+    QVERIFY(!h.renders.isEmpty());
+    QCOMPARE(
+        h.renders.constLast().statusText,
+        text8("复制失败：未能写入剪贴板。")
+    );
+    QCOMPARE(h.logs.size(), 1);
+    QCOMPARE(
+        h.logs.constLast().eventId,
+        QStringLiteral("selection.action.copy.failed")
+    );
+    QVERIFY(h.logs.constLast().eventId
+        != QStringLiteral("selection.action.copy"));
 }
 
 void SelectionContextActionControllerTests::

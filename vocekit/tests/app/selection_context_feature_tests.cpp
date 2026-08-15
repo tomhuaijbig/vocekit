@@ -158,7 +158,7 @@ public:
         };
         dependencies.copyText = [this](const QString &text) {
             copied.append(text);
-            return true;
+            return copySucceeds;
         };
         dependencies.replaceSelection = [this](
             const QString &text,
@@ -251,6 +251,7 @@ public:
     QStringList blockedAttempts;
     QStringList events;
     bool installSucceeds = true;
+    bool copySucceeds = true;
     bool installed = false;
     bool observerPaused = false;
     bool observerSurfaceVisible = false;
@@ -286,6 +287,7 @@ private slots:
     void builtInAndCanvasFunctionsDoNotAppearInMoreMenu();
     void blockCurrentApplicationPersistsAndFailedPersistenceLeavesSurface();
     void openSettingsAndVocabularyInteractionsSuppressNativeCandidates();
+    void copyFailureKeepsLocalErrorVisibleWithoutModelFallback();
     void missingVocabularyEditorShowsLocalFailureWithoutModelFallback();
     void consentPromptSuppressesObserverAndDeclineSendsNothing();
     void replaceRevalidatesTheOriginalWindowSelection();
@@ -650,6 +652,31 @@ openSettingsAndVocabularyInteractionsSuppressNativeCandidates()
     QCOMPARE(h.modelRuns, 0);
     QCOMPARE(h.consentCount, 0);
     QVERIFY(h.vocabularySawPausedObserver);
+}
+
+void SelectionContextFeatureTests::
+copyFailureKeepsLocalErrorVisibleWithoutModelFallback()
+{
+    Harness h;
+    h.copySucceeds = false;
+    QScopedPointer<SelectionContextFeature> feature(h.create());
+    feature->start();
+    h.showSelection(feature.data());
+    QToolButton *copy = h.toolbar(feature.data())->findChild<QToolButton *>(
+        QStringLiteral("selectionActionCopyButton")
+    );
+    QVERIFY(copy);
+    copy->click();
+    QCOMPARE(h.copied, QStringList() << QStringLiteral("selected text"));
+    SelectionResultCard *card = h.visibleCard(feature.data());
+    QVERIFY(card);
+    QCOMPARE(
+        card->state().statusText,
+        QString::fromUtf8("复制失败：未能写入剪贴板。")
+    );
+    QCOMPARE(h.modelRuns, 0);
+    QCOMPARE(h.consentCount, 0);
+    QVERIFY(h.toolbar(feature.data())->isVisible());
 }
 
 void SelectionContextFeatureTests::

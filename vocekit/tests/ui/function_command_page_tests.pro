@@ -11,6 +11,7 @@ SOURCES += \
     ../../src/capture/screenshot_types.cpp \
     ../../src/config/app_paths.cpp \
     ../../src/config/app_settings_defaults.cpp \
+    ../../src/config/selection_context_action_customization.cpp \
     ../../src/config/prompt_save_route.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
@@ -20,6 +21,7 @@ SOURCES += \
     ../../src/domain/function_flow_ports.cpp \
     ../../src/domain/function_settings.cpp \
     ../../src/domain/prompt_runtime_library.cpp \
+    ../../src/domain/selection_context_actions.cpp \
     ../../src/file_utils.cpp \
     ../../src/input/hotkey_definitions.cpp \
     ../../src/providers/model_catalog.cpp \
@@ -44,6 +46,12 @@ SOURCES += \
     ../../src/ui/ui_style.cpp
 
 HEADERS += \
+    ../../src/config/secret_config.h \
+    ../../src/config/secret_store.h \
+    ../../src/config/selection_context_action_customization.h \
+    ../../src/domain/selection_context_actions.h \
+    ../../src/file_utils.h \
+    ../../src/providers/model_catalog.h \
     ../../src/controllers/function_flow_editor_controller.h \
     ../../src/domain/function_flow_graph.h \
     ../../src/domain/function_flow_ports.h \

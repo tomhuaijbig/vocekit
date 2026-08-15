@@ -175,10 +175,12 @@ function Invoke-CapturedCommand {
 
             $projectQpaPlatform = $env:QT_QPA_PLATFORM
             try {
-                # Native observer tests require a real HWND. The offscreen
-                # plugin returns a synthetic winId that Windows correctly
-                # rejects, so run only this target on the native platform.
-                if ($target -eq "selection_observer_tests") {
+                # Native HWND and Windows visual-metric tests cannot use the
+                # synthetic handles or font metrics of the offscreen plugin.
+                if ($target -in @(
+                    "selection_observer_tests",
+                    "selection_context_action_editor_tests"
+                )) {
                     $env:QT_QPA_PLATFORM = "windows"
                 }
                 $runResult = Invoke-CapturedCommand $executable @(

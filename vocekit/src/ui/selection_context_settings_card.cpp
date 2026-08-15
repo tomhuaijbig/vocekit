@@ -678,7 +678,10 @@ void SelectionContextSettingsCard::updateItemPresentation(
             continue;
         }
         const QString displayName = editor->customization().displayName;
-        item->setText(displayName);
+        // The row is painted by its item widget. Keeping DisplayRole text
+        // would let the list delegate paint a second label underneath the
+        // transparent editor and visibly overlap its fields.
+        item->setData(Qt::DisplayRole, QString());
         item->setData(Qt::AccessibleTextRole, displayName);
         item->setSizeHint(editor->sizeHint());
         return;

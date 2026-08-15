@@ -80,21 +80,6 @@ struct SelectionObserverDispatchState
 };
 
 #ifdef Q_OS_WIN
-SelectedTextNativeWindowHandle rootWindowAt(const QPoint &point)
-{
-    POINT nativePoint;
-    nativePoint.x = point.x();
-    nativePoint.y = point.y();
-    HWND window = WindowFromPoint(nativePoint);
-    if (window) {
-        const HWND root = GetAncestor(window, GA_ROOT);
-        if (root) {
-            window = root;
-        }
-    }
-    return reinterpret_cast<SelectedTextNativeWindowHandle>(window);
-}
-
 SelectedTextNativeWindowHandle normalizedRootWindow(
     SelectedTextNativeWindowHandle value)
 {
@@ -106,6 +91,18 @@ SelectedTextNativeWindowHandle normalizedRootWindow(
         }
     }
     return reinterpret_cast<SelectedTextNativeWindowHandle>(window);
+}
+
+SelectedTextNativeWindowHandle rootWindowAt(const QPoint &point)
+{
+    POINT nativePoint;
+    nativePoint.x = point.x();
+    nativePoint.y = point.y();
+    return normalizedRootWindow(
+        reinterpret_cast<SelectedTextNativeWindowHandle>(
+            WindowFromPoint(nativePoint)
+        )
+    );
 }
 
 QPoint currentPhysicalCursorPosition()

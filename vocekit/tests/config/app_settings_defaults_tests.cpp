@@ -26,24 +26,22 @@ private slots:
     void defaultsExposeFiveIndependentActionCustomizations()
     {
         const AppSettingsData data;
+        const SelectionContextActionCustomizationMap defaults =
+            data.selectionContext.actionCustomizations;
 
-        QCOMPARE(data.selectionContext.actionCustomizations.size(), 5);
+        QCOMPARE(defaults.size(), 5);
         for (const QString &id : defaultSelectionContextActionOrder()) {
-            QVERIFY(data.selectionContext.actionCustomizations.contains(id));
-            QVERIFY(data.selectionContext.actionCustomizations.value(id).visible);
+            QVERIFY(defaults.contains(id));
+            const SelectionContextActionCustomization value =
+                defaults.value(id);
+            QCOMPARE(value.displayName, selectionContextActionTitle(id));
+            QVERIFY(value.visible);
+            QVERIFY(value.modelId.isEmpty());
+            QVERIFY(value.promptOverride.isEmpty());
+            QVERIFY(value.targetLanguage.isEmpty());
+            QCOMPARE(value.vocabularyScopeId, QStringLiteral("__global"));
+            QCOMPARE(value.copyMode, QStringLiteral("original"));
         }
-        QCOMPARE(
-            data.selectionContext.actionCustomizations
-                .value(selectionContextActionSave())
-                .vocabularyScopeId,
-            QStringLiteral("__global")
-        );
-        QCOMPARE(
-            data.selectionContext.actionCustomizations
-                .value(selectionContextActionCopy())
-                .copyMode,
-            QStringLiteral("original")
-        );
     }
 
     void customizationNormalizationBoundsEveryUserField()

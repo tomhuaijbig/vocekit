@@ -192,7 +192,7 @@ private slots:
         observer.uninstall();
     }
 
-    void childControlWindowIsNormalizedToItsRootForegroundWindow()
+    void childForegroundWindowIsNormalizedToItsRootWindow()
     {
         QWidget host;
         host.setGeometry(140, 140, 360, 220);
@@ -207,7 +207,7 @@ private slots:
         observer.setCallback([&observations](
             const SelectionObservation &observation) {
             if (observation.reason
-                == SelectionObservationReason::MouseSelection) {
+                == SelectionObservationReason::ForegroundChanged) {
                 observations.append(observation);
             }
         });
@@ -215,8 +215,7 @@ private slots:
         QVERIFY2(observer.install(nativeHandle(&host), &error),
                  qPrintable(error));
 
-        const QPoint point = child.mapToGlobal(child.rect().center());
-        observer.processNativeMouse(leftButtonUpMessage(), point);
+        observer.processForegroundWindowChanged(nativeHandle(&child));
         QTRY_COMPARE(observations.size(), 1);
 #ifdef Q_OS_WIN
         const HWND expected = GetAncestor(
@@ -228,7 +227,7 @@ private slots:
             reinterpret_cast<SelectedTextNativeWindowHandle>(expected)
         );
 #else
-        QCOMPARE(observations.constFirst().targetWindow, nativeHandle(&host));
+        QCOMPARE(observations.constFirst().targetWindow, nativeHandle(&child));
 #endif
         observer.uninstall();
     }

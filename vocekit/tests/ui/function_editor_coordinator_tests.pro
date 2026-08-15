@@ -13,8 +13,10 @@ SOURCES += \
     ../../src/config/app_settings_defaults.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
+    ../../src/config/selection_context_action_customization.cpp \
     ../../src/domain/function_settings.cpp \
     ../../src/domain/prompt_runtime_library.cpp \
+    ../../src/domain/selection_context_actions.cpp \
     ../../src/file_utils.cpp \
     ../../src/input/hotkey_definitions.cpp \
     ../../src/providers/model_catalog.cpp \
@@ -26,6 +28,12 @@ SOURCES += \
 
 HEADERS += \
     ../../src/config/app_settings_data.h \
+    ../../src/config/secret_config.h \
+    ../../src/config/secret_store.h \
+    ../../src/config/selection_context_action_customization.h \
+    ../../src/domain/selection_context_actions.h \
+    ../../src/file_utils.h \
+    ../../src/providers/model_catalog.h \
     ../../src/domain/app_legacy_types.h \
     ../../src/domain/function_settings.h \
     ../../src/domain/prompt_runtime_library.h \

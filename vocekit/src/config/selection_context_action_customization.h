@@ -28,8 +28,33 @@ struct SelectionContextActionNormalizationContext
     QStringList writableVocabularyScopeIds;
 };
 
-SelectionContextActionCustomizationMap
-defaultSelectionContextActionCustomizations();
+inline SelectionContextActionCustomizationMap
+defaultSelectionContextActionCustomizations()
+{
+    SelectionContextActionCustomizationMap values;
+
+    SelectionContextActionCustomization aiSearch;
+    aiSearch.displayName = QString::fromUtf8("AI \xE6\x90\x9C\xE7\xB4\xA2");
+    values.insert(QStringLiteral("ai-search"), aiSearch);
+
+    SelectionContextActionCustomization translate;
+    translate.displayName = QString::fromUtf8("\xE7\xBF\xBB\xE8\xAF\x91");
+    values.insert(QStringLiteral("translate"), translate);
+
+    SelectionContextActionCustomization explain;
+    explain.displayName = QString::fromUtf8("\xE8\xA7\xA3\xE9\x87\x8A");
+    values.insert(QStringLiteral("explain"), explain);
+
+    SelectionContextActionCustomization save;
+    save.displayName = QString::fromUtf8("\xE4\xBF\x9D\xE5\xAD\x98");
+    values.insert(QStringLiteral("save"), save);
+
+    SelectionContextActionCustomization copy;
+    copy.displayName = QString::fromUtf8("\xE5\xA4\x8D\xE5\x88\xB6");
+    values.insert(QStringLiteral("copy"), copy);
+
+    return values;
+}
 SelectionContextActionCustomizationMap
 normalizeSelectionContextActionCustomizations(
     const SelectionContextActionCustomizationMap &values,

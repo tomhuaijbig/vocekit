@@ -34,18 +34,6 @@ QString normalizedVocabularyScope(
 } // namespace
 
 SelectionContextActionCustomizationMap
-defaultSelectionContextActionCustomizations()
-{
-    SelectionContextActionCustomizationMap values;
-    for (const QString &id : defaultSelectionContextActionOrder()) {
-        SelectionContextActionCustomization item;
-        item.displayName = selectionContextActionTitle(id);
-        values.insert(id, item);
-    }
-    return values;
-}
-
-SelectionContextActionCustomizationMap
 normalizeSelectionContextActionCustomizations(
     const SelectionContextActionCustomizationMap &values,
     const SelectionContextActionNormalizationContext &context

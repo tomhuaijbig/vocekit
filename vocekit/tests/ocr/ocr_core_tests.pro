@@ -17,6 +17,7 @@ SOURCES += \
     ../../src/config/baidu_sample_parser.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
+    ../../src/config/selection_context_action_customization.cpp \
     ../../src/file_utils.cpp \
     ../../src/input/hotkey_definitions.cpp \
     ../../src/domain/function_flow_graph.cpp \
@@ -46,6 +47,7 @@ HEADERS += \
     ../../src/config/baidu_sample_parser.h \
     ../../src/config/secret_config.h \
     ../../src/config/secret_store.h \
+    ../../src/config/selection_context_action_customization.h \
     ../../src/file_utils.h \
     ../../src/input/hotkey_definitions.h \
     ../../src/domain/function_flow_graph.h \

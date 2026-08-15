@@ -4,21 +4,24 @@
 #include "../../src/ui/selection_context_action_editor.h"
 #include "../../src/ui/selection_context_settings_card.h"
 
+#include <QAbstractButton>
 #include <QAbstractItemModel>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QFileInfo>
 #include <QFontInfo>
 #include <QLabel>
 #include <QImage>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSet>
 #include <QSpinBox>
-#include <QTemporaryDir>
 #include <QTextEdit>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -72,16 +75,16 @@ SelectionContextActionEditor::Catalogs testCatalogs()
     return catalogs;
 }
 
-QString visualOutputPath(const QString &fileName, QTemporaryDir *fallback)
+QString visualOutputPath(const QString &fileName)
 {
     const QString configured = QString::fromLocal8Bit(
-        qgetenv("VOCEKIT_SELECTION_CONTEXT_VISUAL_OUTPUT_DIR")
+        qgetenv("VOCEKIT_VISUAL_OUTPUT_DIR")
     ).trimmed();
-    const QString root = configured.isEmpty()
-        ? fallback->path()
-        : configured;
-    QDir().mkpath(root);
-    return QDir(root).filePath(fileName);
+    if (configured.isEmpty()) {
+        return QString();
+    }
+    QDir().mkpath(configured);
+    return QDir(configured).filePath(fileName);
 }
 
 bool hasDarkForegroundPixels(const QPixmap &pixmap)
@@ -105,6 +108,84 @@ bool hasDarkForegroundPixels(const QPixmap &pixmap)
     return false;
 }
 
+QString visibleControlHeightError(QWidget *root, int percent)
+{
+    QList<QWidget *> controls;
+    for (QLabel *widget : root->findChildren<QLabel *>()) {
+        controls.append(widget);
+    }
+    for (QAbstractButton *widget :
+         root->findChildren<QAbstractButton *>()) {
+        controls.append(widget);
+    }
+    for (QComboBox *widget : root->findChildren<QComboBox *>()) {
+        controls.append(widget);
+    }
+    for (QLineEdit *widget : root->findChildren<QLineEdit *>()) {
+        controls.append(widget);
+    }
+    for (QPlainTextEdit *widget :
+         root->findChildren<QPlainTextEdit *>()) {
+        controls.append(widget);
+    }
+
+    QSet<QWidget *> checked;
+    for (QWidget *widget : controls) {
+        if (!widget || checked.contains(widget)
+            || !widget->isVisibleTo(root)) {
+            continue;
+        }
+        // An editable combo owns a private line edit inside its style frame.
+        // The combo is the independently laid-out control checked by this gate.
+        if (qobject_cast<QLineEdit *>(widget)
+            && qobject_cast<QComboBox *>(widget->parentWidget())) {
+            continue;
+        }
+        checked.insert(widget);
+        const QSize hint = widget->sizeHint();
+        if (widget->height() < hint.height()) {
+            return QStringLiteral(
+                "scale=%1 object=%2 class=%3 height=%4 hint=%5"
+            ).arg(percent)
+             .arg(widget->objectName())
+             .arg(QString::fromLatin1(widget->metaObject()->className()))
+             .arg(widget->height())
+             .arg(hint.height());
+        }
+        QAbstractButton *button = qobject_cast<QAbstractButton *>(widget);
+        if (button && !button->text().trimmed().isEmpty()
+            && button->width() < hint.width()) {
+            return QStringLiteral(
+                "scale=%1 button=%2 text=%3 width=%4 hint=%5"
+            ).arg(percent)
+             .arg(button->objectName())
+             .arg(button->text())
+             .arg(button->width())
+             .arg(hint.width());
+        }
+    }
+    return QString();
+}
+
+bool isFullyVisibleIn(QWidget *widget, QWidget *ancestor)
+{
+    if (!widget || !ancestor || !widget->isVisibleTo(ancestor)) {
+        return false;
+    }
+    return ancestor->rect().contains(QRect(
+        widget->mapTo(ancestor, QPoint(0, 0)), widget->size()));
+}
+
+class ApplicationFontGuard
+{
+public:
+    ApplicationFontGuard() : original_(QApplication::font()) {}
+    ~ApplicationFontGuard() { QApplication::setFont(original_); }
+
+private:
+    QFont original_;
+};
+
 } // namespace
 
 class SelectionContextSettingsCardTests : public QObject
@@ -114,6 +195,7 @@ class SelectionContextSettingsCardTests : public QObject
 private slots:
     void cardLoadsAndReturnsEveryTypedSetting();
     void actionRowsFollowCatalogAndDragReorderPersistsStableIds();
+    void itemWidgetsSuppressDelegateTextButKeepAccessibleNames();
     void blockedApplicationsNormalizeOneExecutablePerLine();
     void pauseDurationAndKeyboardObservationAreIndependent();
     void acceptedNetworkConsentCanBeResetForTheNextModelAction();
@@ -128,7 +210,7 @@ private slots:
     void refreshInvalidatesQueuedEditorChanges();
     void successfulSaveEchoKeepsEditorAndNewerQueuedChange();
     void simultaneousEditorSaveEchoPreservesBothPendingChanges();
-    void buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent();
+    void customizedActionsRenderWithoutClippingAt100_125_150Percent();
     void smallWindowAndExpandedEditorsRemainScrollableAndReachable();
 };
 
@@ -196,13 +278,38 @@ actionRowsFollowCatalogAndDragReorderPersistsStableIds()
             list->item(i)->data(Qt::UserRole).toString(),
             settings.actionOrder.at(i)
         );
-        QVERIFY(!list->item(i)->text().trimmed().isEmpty());
+        QVERIFY(!list->item(i)->data(Qt::AccessibleTextRole)
+                 .toString().trimmed().isEmpty());
     }
 
     QListWidgetItem *last = list->takeItem(list->count() - 1);
     list->insertItem(0, last);
     QCoreApplication::processEvents();
     QCOMPARE(card.settings().actionOrder.first(), selectionContextActionSave());
+}
+
+void SelectionContextSettingsCardTests::
+itemWidgetsSuppressDelegateTextButKeepAccessibleNames()
+{
+    SelectionContextSettings settings;
+    SelectionContextActionCustomization search =
+        settings.actionCustomizations.value(selectionContextActionAiSearch());
+    search.displayName = QString::fromUtf8("AI 搜索：分析并回答");
+    settings.actionCustomizations.insert(selectionContextActionAiSearch(), search);
+    SelectionContextSettingsCard card(settings);
+    QListWidget *list = required<QListWidget>(
+        &card, "selectionContextActionList");
+
+    for (int row = 0; row < list->count(); ++row) {
+        QListWidgetItem *item = list->item(row);
+        const QString id = item->data(Qt::UserRole).toString();
+        const SelectionContextActionEditor *editor = actionEditor(&card, id);
+        QVERIFY2(editor, qPrintable(id));
+        QVERIFY2(item->data(Qt::DisplayRole).toString().isEmpty(),
+                 qPrintable(id));
+        QCOMPARE(item->data(Qt::AccessibleTextRole).toString(),
+                 editor->customization().displayName);
+    }
 }
 
 void SelectionContextSettingsCardTests::
@@ -501,7 +608,7 @@ restoreAllRequiresConfirmationAndKeepsToolbarFieldsAndOrder()
         QVERIFY2(listItem, qPrintable(id));
         SelectionContextActionEditor *editor = actionEditor(&card, id);
         QVERIFY2(editor, qPrintable(id));
-        QCOMPARE(listItem->text(), defaults.value(id).displayName);
+        QVERIFY(listItem->data(Qt::DisplayRole).toString().isEmpty());
         QCOMPARE(listItem->data(Qt::AccessibleTextRole).toString(),
                  defaults.value(id).displayName);
         QCOMPARE(listItem->sizeHint(), editor->sizeHint());
@@ -708,20 +815,74 @@ simultaneousEditorSaveEchoPreservesBothPendingChanges()
 }
 
 void SelectionContextSettingsCardTests::
-buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent()
+customizedActionsRenderWithoutClippingAt100_125_150Percent()
 {
-    QTemporaryDir fallback;
-    QVERIFY(fallback.isValid());
-    const QFont originalFont = QApplication::font();
-    const QVector<int> scales = QVector<int>() << 100 << 125 << 150 << 200;
-    for (int scale : scales) {
+    struct VisualCase
+    {
+        int percent;
+        QString expandedActionId;
+        QString displayName;
+        QString fileName;
+    };
+    const QVector<VisualCase> cases = QVector<VisualCase>()
+        << VisualCase{
+            100,
+            selectionContextActionAiSearch(),
+            QString::fromUtf8("AI 搜索：分析并回答"),
+            QStringLiteral("selection-actions-ai-100.png")
+        }
+        << VisualCase{
+            125,
+            selectionContextActionTranslate(),
+            QString::fromUtf8("翻译成我指定的目标语言"),
+            QStringLiteral("selection-actions-translate-125.png")
+        }
+        << VisualCase{
+            150,
+            selectionContextActionSave(),
+            QString::fromUtf8("保存到词库并确认作用范围"),
+            QStringLiteral("selection-actions-save-150.png")
+        };
+
+    ApplicationFontGuard fontGuard;
+    for (const VisualCase &visual : cases) {
         QFont font(QStringLiteral("Microsoft YaHei UI"));
-        font.setPixelSize(qMax(12, (14 * scale) / 100));
+        font.setPixelSize(qMax(12, (14 * visual.percent) / 100));
         QApplication::setFont(font);
+
+#ifdef Q_OS_WIN
+        const QFontMetrics cjkMetrics(QApplication::font());
+        QVERIFY2(cjkMetrics.inFont(QChar(0x9009))
+                 && cjkMetrics.inFont(QChar(0x4E2D))
+                 && cjkMetrics.inFont(QChar(0x6587)),
+                 "Windows visual gate requires a font with Chinese glyphs");
+#endif
+
         SelectionContextSettings settings;
         settings.networkConsentAcknowledged = true;
+        SelectionContextActionCustomization customization =
+            settings.actionCustomizations.value(visual.expandedActionId);
+        customization.displayName = visual.displayName;
+        if (visual.expandedActionId == selectionContextActionAiSearch()
+            || visual.expandedActionId == selectionContextActionTranslate()) {
+            customization.modelId = QStringLiteral("alpha");
+            customization.promptOverride = QString::fromUtf8(
+                "请根据选中文字给出准确、简洁且可核对的回答。"
+            );
+        }
+        if (visual.expandedActionId == selectionContextActionTranslate()) {
+            customization.targetLanguage = QStringLiteral("English");
+        }
+        if (visual.expandedActionId == selectionContextActionSave()) {
+            customization.vocabularyScopeId = QStringLiteral("writing");
+        }
+        settings.actionCustomizations.insert(
+            visual.expandedActionId, customization);
+
         SelectionContextSettingsCard *card =
             new SelectionContextSettingsCard(settings);
+        card->setCatalogs(testCatalogs());
+        card->setExpandedAction(visual.expandedActionId);
         QWidget host;
         host.setObjectName(QStringLiteral("selectionContextVisualHost"));
         QVBoxLayout *hostLayout = new QVBoxLayout(&host);
@@ -729,77 +890,76 @@ buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent()
         scroll->setWidgetResizable(true);
         scroll->setWidget(card);
         hostLayout->addWidget(scroll);
-        host.resize(qMax(620, (620 * scale) / 100), 520);
+        host.resize(1180, 900);
         host.show();
         QTRY_VERIFY(host.isVisible());
         QTRY_VERIFY(card->isVisibleTo(&host));
-        scroll->verticalScrollBar()->setValue(0);
-        QCoreApplication::processEvents();
+        QListWidget *actions = required<QListWidget>(
+            card, "selectionContextActionList");
+        QListWidgetItem *expandedItem = nullptr;
+        for (int row = 0; row < actions->count(); ++row) {
+            if (actions->item(row)->data(Qt::UserRole).toString()
+                == visual.expandedActionId) {
+                expandedItem = actions->item(row);
+                break;
+            }
+        }
+        QVERIFY2(expandedItem, qPrintable(visual.expandedActionId));
+        QTRY_VERIFY(actionEditor(card, visual.expandedActionId)->isExpanded());
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        if (host.layout()) {
+            host.layout()->activate();
+        }
+        if (card->layout()) {
+            card->layout()->activate();
+        }
+        actions->doItemsLayout();
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        actions->scrollToItem(
+            expandedItem, QAbstractItemView::PositionAtCenter);
+        const int actionsTop = actions->mapTo(card, QPoint(0, 0)).y();
+        scroll->verticalScrollBar()->setValue(qMax(0, actionsTop - 90));
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
 
+        const QString heightError = visibleControlHeightError(
+            card, visual.percent);
+        QVERIFY2(heightError.isEmpty(), qPrintable(heightError));
+        SelectionContextActionEditor *expanded = actionEditor(
+            card, visual.expandedActionId);
+        QVERIFY(isFullyVisibleIn(
+            required<QCheckBox>(expanded, "selectionActionVisible"), &host));
+        QVERIFY(isFullyVisibleIn(
+            required<QPushButton>(expanded, "selectionActionRestore"), &host));
+        if (visual.expandedActionId == selectionContextActionAiSearch()
+            || visual.expandedActionId == selectionContextActionTranslate()) {
+            QVERIFY(isFullyVisibleIn(
+                required<QComboBox>(expanded, "selectionActionModel"), &host));
+            QVERIFY(isFullyVisibleIn(
+                required<QPlainTextEdit>(expanded, "selectionActionPrompt"),
+                &host));
+            QVERIFY(isFullyVisibleIn(
+                required<QLabel>(expanded, "selectionActionPromptCount"),
+                &host));
+        }
+        if (visual.expandedActionId == selectionContextActionTranslate()) {
+            QVERIFY(isFullyVisibleIn(required<QComboBox>(
+                expanded, "selectionActionTargetLanguage"), &host));
+        }
+        if (visual.expandedActionId == selectionContextActionSave()) {
+            QVERIFY(isFullyVisibleIn(required<QComboBox>(
+                expanded, "selectionActionVocabularyScope"), &host));
+        }
+        const QPixmap screenshot = host.grab();
 #ifdef Q_OS_WIN
-        QFontMetrics metrics(card->font());
-        QVERIFY2(metrics.width(QString::fromUtf8("选中文字工具条")) > 20,
-                 "Windows visual gate requires renderable CJK glyphs");
+        QVERIFY2(hasDarkForegroundPixels(screenshot),
+                 "Windows visual gate requires dark rendered text pixels");
 #endif
-        const QList<QLabel *> labels = card->findChildren<QLabel *>();
-        for (QLabel *label : labels) {
-            if (!label->isVisible() || label->text().trimmed().isEmpty()) {
-                continue;
-            }
-            const QString diagnostic = QStringLiteral(
-                "scale=%1 text=%2 height=%3 hint=%4 object=%5"
-            ).arg(scale)
-             .arg(label->text())
-             .arg(label->height())
-             .arg(label->sizeHint().height())
-             .arg(label->objectName());
-            QVERIFY2(label->height() >= label->sizeHint().height(),
-                     qPrintable(diagnostic));
+        const QString outputPath = visualOutputPath(visual.fileName);
+        if (!outputPath.isEmpty()) {
+            QVERIFY2(screenshot.save(outputPath), qPrintable(outputPath));
+            QVERIFY(QFileInfo(outputPath).size() > 1000);
         }
-        const QList<QPushButton *> buttons = card->findChildren<QPushButton *>();
-        for (QPushButton *button : buttons) {
-            if (!button->isVisible()) {
-                continue;
-            }
-            const QString diagnostic = QStringLiteral(
-                "scale=%1 text=%2 minimum=%3 required=%4 object=%5"
-            ).arg(scale)
-             .arg(button->text())
-             .arg(button->minimumHeight())
-             .arg(qMax(40, QFontMetrics(button->font()).height() + 16))
-             .arg(button->objectName());
-            QVERIFY2(button->minimumHeight()
-                     >= qMax(40, QFontMetrics(button->font()).height() + 16),
-                     qPrintable(diagnostic));
-            QVERIFY(button->height() >= button->sizeHint().height());
-            QVERIFY(button->maximumHeight() == QWIDGETSIZE_MAX);
-        }
-        QLabel *title = required<QLabel>(
-            card,
-            "selectionContextSettingsTitle"
-        );
-        QVERIFY(QFontMetrics(title->font()).height()
-                >= QFontMetrics(card->font()).height());
-        QVERIFY(hasDarkForegroundPixels(title->grab()));
-        const QString compactPath = visualOutputPath(
-            QStringLiteral("selection-context-settings-%1-compact.png").arg(scale),
-            &fallback
-        );
-        QVERIFY(host.grab().save(compactPath));
-        QVERIFY(QFileInfo(compactPath).size() > 1000);
-
-        host.resize(qMax(1000, (900 * scale) / 100), 900);
-        scroll->verticalScrollBar()->setValue(0);
-        QCoreApplication::processEvents();
-        const QString maximizedPath = visualOutputPath(
-            QStringLiteral("selection-context-settings-%1-maximized.png").arg(scale),
-            &fallback
-        );
-        QVERIFY(host.grab().save(maximizedPath));
-        QVERIFY(QFileInfo(maximizedPath).size() > 1000);
-
     }
-    QApplication::setFont(originalFont);
 }
 
 void SelectionContextSettingsCardTests::

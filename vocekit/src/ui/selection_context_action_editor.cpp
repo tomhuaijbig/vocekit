@@ -9,11 +9,14 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QToolButton>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -126,6 +129,7 @@ SelectionContextActionEditor::SelectionContextActionEditor(
     displayNameEdit_ = new QLineEdit(this);
     displayNameEdit_->setObjectName(QStringLiteral("selectionActionDisplayName"));
     prepareEditor(displayNameEdit_);
+    nameLabel->setBuddy(displayNameEdit_);
     common->addWidget(displayNameEdit_, 1);
 
     visibleCheck_ = new QCheckBox(text8("显示"), this);
@@ -135,6 +139,8 @@ SelectionContextActionEditor::SelectionContextActionEditor(
 
     expandButton_ = new QToolButton(this);
     expandButton_->setObjectName(QStringLiteral("selectionActionExpand"));
+    expandButton_->setCheckable(true);
+    expandButton_->setAccessibleName(text8("展开或收起动作设置"));
     expandButton_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     prepareButton(expandButton_);
     common->addWidget(expandButton_);
@@ -233,9 +239,11 @@ SelectionContextActionEditor::SelectionContextActionEditor(
     connect(expandButton_, &QToolButton::clicked, this,
             [this]() { setExpanded(!isExpanded()); });
     connect(restoreButton, &QPushButton::clicked, this, [this]() {
-        if (callbacks_.restoreRequested) {
-            callbacks_.restoreRequested();
+        const std::function<void()> restore = callbacks_.restoreRequested;
+        if (!restore) {
+            return;
         }
+        restore();
     });
 
     if (modelCombo_) {
@@ -251,15 +259,36 @@ SelectionContextActionEditor::SelectionContextActionEditor(
             }
             const QString current = promptEdit_->toPlainText();
             if (current.size() > kPromptLimit) {
-                QSignalBlocker blocker(promptEdit_);
-                promptEdit_->setPlainText(lastValidPrompt_);
-                QTextCursor cursor = promptEdit_->textCursor();
-                cursor.movePosition(QTextCursor::End);
-                promptEdit_->setTextCursor(cursor);
-                updatePromptCount(lastValidPrompt_.size());
-                if (callbacks_.validationWarning) {
-                    callbacks_.validationWarning(
-                        text8("提示词不能超过 8000 个字符。"));
+                const std::function<void(const QString &)> warning =
+                    callbacks_.validationWarning;
+                const QString message =
+                    text8("提示词不能超过 8000 个字符。");
+                {
+                    QSignalBlocker blocker(promptEdit_);
+                    const int rejectedCursorPosition =
+                        promptEdit_->textCursor().position();
+                    if (promptEdit_->document()->isUndoAvailable()) {
+                        promptEdit_->undo();
+                    }
+                    if (promptEdit_->toPlainText() != lastValidPrompt_) {
+                        promptEdit_->setPlainText(lastValidPrompt_);
+                        QTextCursor cursor = promptEdit_->textCursor();
+                        cursor.setPosition(qMin(
+                            rejectedCursorPosition,
+                            lastValidPrompt_.size()
+                        ));
+                        promptEdit_->setTextCursor(cursor);
+                    }
+                    updatePromptCount(lastValidPrompt_.size());
+                }
+                if (warning) {
+                    const QPointer<SelectionContextActionEditor> alive(this);
+                    QTimer::singleShot(0, [alive, warning, message]() {
+                        if (!alive) {
+                            return;
+                        }
+                        warning(message);
+                    });
                 }
                 return;
             }
@@ -338,9 +367,13 @@ void SelectionContextActionEditor::setCustomization(
     updating_ = false;
     lastNotifiedValue_ = customization();
     hasLastNotifiedValue_ = true;
-    if (rejectedPrompt && callbacks_.validationWarning) {
-        callbacks_.validationWarning(
-            text8("提示词不能超过 8000 个字符。"));
+    if (rejectedPrompt) {
+        const std::function<void(const QString &)> warning =
+            callbacks_.validationWarning;
+        if (warning) {
+            warning(text8("提示词不能超过 8000 个字符。"));
+        }
+        return;
     }
 }
 
@@ -381,9 +414,13 @@ void SelectionContextActionEditor::setExpanded(bool expanded)
 {
     expanded_ = expanded;
     specificFields_->setVisible(expanded_);
+    expandButton_->setChecked(expanded_);
     expandButton_->setText(expanded_ ? text8("收起") : text8("设置"));
     expandButton_->setArrowType(
         expanded_ ? Qt::UpArrow : Qt::DownArrow);
+    expandButton_->setAccessibleDescription(
+        expanded_ ? text8("动作设置当前已展开")
+                  : text8("动作设置当前已收起"));
 }
 
 bool SelectionContextActionEditor::isExpanded() const
@@ -404,9 +441,18 @@ void SelectionContextActionEditor::notifyChanged()
     lastNotifiedValue_ = current;
     hasLastNotifiedValue_ = true;
     value_ = current;
-    if (callbacks_.changed) {
-        callbacks_.changed(current);
+    const std::function<void(const SelectionContextActionCustomization &)>
+        changed = callbacks_.changed;
+    if (!changed) {
+        return;
     }
+    const QPointer<SelectionContextActionEditor> alive(this);
+    QTimer::singleShot(0, [alive, changed, current]() {
+        if (!alive) {
+            return;
+        }
+        changed(current);
+    });
 }
 
 void SelectionContextActionEditor::updatePromptCount(int length)

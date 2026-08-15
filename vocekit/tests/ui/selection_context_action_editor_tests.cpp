@@ -4,17 +4,24 @@
 #include "../../src/ui/selection_context_action_editor.h"
 
 #include <QAbstractButton>
+#include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QFontInfo>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QPointer>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
 #include <QRawFont>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+#include <cstdlib>
 
 namespace {
 
@@ -83,6 +90,178 @@ bool hasDarkTextPixels(
     return false;
 }
 
+const quint32 kDeletionProbeAlive = 0x51ec7100u;
+
+class ChangedDeleteProbe
+{
+public:
+    ChangedDeleteProbe(SelectionContextActionEditor **editor, int *calls)
+        : editor_(editor), calls_(calls) {}
+    ChangedDeleteProbe(const ChangedDeleteProbe &other)
+        : editor_(other.editor_), calls_(other.calls_) {}
+    ~ChangedDeleteProbe() { alive_ = 0; }
+
+    void operator()(const SelectionContextActionCustomization &)
+    {
+        ++(*calls_);
+        SelectionContextActionEditor *victim = *editor_;
+        *editor_ = nullptr;
+        delete victim;
+        if (alive_ != kDeletionProbeAlive) {
+            std::abort();
+        }
+    }
+
+private:
+    SelectionContextActionEditor **editor_;
+    int *calls_;
+    volatile quint32 alive_ = kDeletionProbeAlive;
+};
+
+class RestoreDeleteProbe
+{
+public:
+    RestoreDeleteProbe(SelectionContextActionEditor **editor, int *calls)
+        : editor_(editor), calls_(calls) {}
+    RestoreDeleteProbe(const RestoreDeleteProbe &other)
+        : editor_(other.editor_), calls_(other.calls_) {}
+    ~RestoreDeleteProbe() { alive_ = 0; }
+
+    void operator()()
+    {
+        ++(*calls_);
+        SelectionContextActionEditor *victim = *editor_;
+        *editor_ = nullptr;
+        delete victim;
+        if (alive_ != kDeletionProbeAlive) {
+            std::abort();
+        }
+    }
+
+private:
+    SelectionContextActionEditor **editor_;
+    int *calls_;
+    volatile quint32 alive_ = kDeletionProbeAlive;
+};
+
+class WarningDeleteProbe
+{
+public:
+    WarningDeleteProbe(SelectionContextActionEditor **editor, int *calls)
+        : editor_(editor), calls_(calls) {}
+    WarningDeleteProbe(const WarningDeleteProbe &other)
+        : editor_(other.editor_), calls_(other.calls_) {}
+    ~WarningDeleteProbe() { alive_ = 0; }
+
+    void operator()(const QString &)
+    {
+        ++(*calls_);
+        SelectionContextActionEditor *victim = *editor_;
+        *editor_ = nullptr;
+        delete victim;
+        if (alive_ != kDeletionProbeAlive) {
+            std::abort();
+        }
+    }
+
+private:
+    SelectionContextActionEditor **editor_;
+    int *calls_;
+    volatile quint32 alive_ = kDeletionProbeAlive;
+};
+
+int runDeletionWorker(const QString &kind)
+{
+    int calls = 0;
+    SelectionContextActionEditor *editor = nullptr;
+    SelectionContextActionEditor::Callbacks callbacks;
+    if (kind == QStringLiteral("changed")) {
+        callbacks.changed = ChangedDeleteProbe(&editor, &calls);
+    } else if (kind == QStringLiteral("restore")) {
+        callbacks.restoreRequested = RestoreDeleteProbe(&editor, &calls);
+    } else if (kind == QStringLiteral("warning")
+               || kind == QStringLiteral("set-warning")) {
+        callbacks.validationWarning = WarningDeleteProbe(&editor, &calls);
+    } else {
+        return 30;
+    }
+
+    editor = new SelectionContextActionEditor(
+        selectionContextActionAiSearch(), fullCatalogs(), callbacks);
+    QPointer<SelectionContextActionEditor> guard(editor);
+    if (kind == QStringLiteral("changed")) {
+        required<QLineEdit>(editor, "selectionActionDisplayName")
+            ->setText(QString::fromUtf8("删除编辑器"));
+    } else if (kind == QStringLiteral("restore")) {
+        required<QPushButton>(editor, "selectionActionRestore")->click();
+    } else if (kind == QStringLiteral("warning")) {
+        required<QPlainTextEdit>(editor, "selectionActionPrompt")
+            ->setPlainText(QString(8001, QLatin1Char('x')));
+    } else {
+        SelectionContextActionCustomization invalid;
+        invalid.promptOverride = QString(8001, QLatin1Char('x'));
+        editor->setCustomization(invalid);
+    }
+
+    QTest::qWait(1);
+    if (editor) {
+        delete editor;
+        editor = nullptr;
+    }
+    return guard.isNull() && calls == 1 ? 0 : 31;
+}
+
+struct WorkerResult
+{
+    bool started = false;
+    bool finished = false;
+    QProcess::ExitStatus exitStatus = QProcess::NormalExit;
+    int exitCode = -1;
+    QByteArray output;
+};
+
+WorkerResult runDeletionWorkerProcess(const QString &kind)
+{
+    QProcess process;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(
+        QStringLiteral("VOCEKIT_ACTION_EDITOR_DELETE_WORKER"), kind);
+    process.setProcessEnvironment(environment);
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.start(QCoreApplication::applicationFilePath(), QStringList());
+
+    WorkerResult result;
+    result.started = process.waitForStarted(5000);
+    if (result.started) {
+        result.finished = process.waitForFinished(10000);
+    }
+    if (!result.finished && result.started) {
+        process.kill();
+        process.waitForFinished(5000);
+    }
+    result.exitStatus = process.exitStatus();
+    result.exitCode = process.exitCode();
+    result.output = process.readAll();
+    return result;
+}
+
+void flushQueuedCallbacks()
+{
+    QTest::qWait(1);
+}
+
+void verifyDeletionWorkerResult(const QString &kind)
+{
+    const WorkerResult result = runDeletionWorkerProcess(kind);
+    const QByteArray diagnostic = QByteArray("worker=")
+        + kind.toUtf8() + QByteArray(" output=") + result.output;
+    QVERIFY2(result.started, diagnostic.constData());
+    QVERIFY2(result.finished, diagnostic.constData());
+    QVERIFY2(result.exitStatus == QProcess::NormalExit,
+             diagnostic.constData());
+    QVERIFY2(result.exitCode == 0, diagnostic.constData());
+}
+
 } // namespace
 
 class SelectionContextActionEditorTests : public QObject
@@ -94,6 +273,12 @@ private slots:
     void actionSpecificControlsAreCreatedOnlyWhenApplicable();
     void promptRejectsMoreThanEightThousandWithoutRecursiveWarnings();
     void setCustomizationRejectsOverlongPromptWithoutTruncation();
+    void changedCallbackMayDeleteEditorSynchronously();
+    void restoreCallbackMayDeleteEditorSynchronously();
+    void warningCallbackMayDeleteEditorAfterRollback();
+    void setCustomizationWarningMayDeleteEditorSynchronously();
+    void rejectedPastePreservesPriorUndoAndCursor();
+    void commonControlsExposeAccessibleRelationshipsAndExpandedState();
     void unavailableAndUnicodeCatalogValuesRoundTripWithoutSilentReplacement();
     void expandedStateOnlyAffectsSpecificFields();
     void controlsDoNotClipAt100_125_150Percent();
@@ -128,10 +313,12 @@ commonFieldsRoundTripAndCallbacksAreStable()
     QCOMPARE(visible->isChecked(), false);
 
     name->setText(QString::fromUtf8("资料查找"));
+    flushQueuedCallbacks();
     QCOMPARE(changes.size(), 1);
     QCOMPARE(changes.last().displayName, QString::fromUtf8("资料查找"));
     QCOMPARE(changes.last().visible, false);
     visible->click();
+    flushQueuedCallbacks();
     QCOMPARE(changes.size(), 2);
     QCOMPARE(changes.last().visible, true);
     QCOMPARE(editor.customization().displayName, QString::fromUtf8("资料查找"));
@@ -213,12 +400,14 @@ promptRejectsMoreThanEightThousandWithoutRecursiveWarnings()
 
     const QString valid(8000, QLatin1Char('a'));
     prompt->setPlainText(valid);
+    flushQueuedCallbacks();
     QCOMPARE(editor.customization().promptOverride, valid);
     QCOMPARE(changes.size(), 1);
     QCOMPARE(warnings.size(), 0);
     QVERIFY(count->text().contains(QStringLiteral("8000")));
 
     prompt->setPlainText(valid + QLatin1Char('b'));
+    flushQueuedCallbacks();
     QCOMPARE(prompt->toPlainText(), valid);
     QCOMPARE(editor.customization().promptOverride, valid);
     QCOMPARE(changes.size(), 1);
@@ -226,6 +415,7 @@ promptRejectsMoreThanEightThousandWithoutRecursiveWarnings()
     QVERIFY(count->text().contains(QStringLiteral("8000")));
 
     prompt->setPlainText(QString::fromUtf8("新的有效提示词"));
+    flushQueuedCallbacks();
     QCOMPARE(editor.customization().promptOverride,
              QString::fromUtf8("新的有效提示词"));
     QCOMPARE(changes.size(), 2);
@@ -266,6 +456,7 @@ setCustomizationRejectsOverlongPromptWithoutTruncation()
 
     required<QLineEdit>(&editor, "selectionActionDisplayName")
         ->setText(QString::fromUtf8("随后修改名称"));
+    flushQueuedCallbacks();
     QCOMPARE(changes.size(), 1);
     QCOMPARE(changes.last().promptOverride, accepted.promptOverride);
 
@@ -281,6 +472,108 @@ setCustomizationRejectsOverlongPromptWithoutTruncation()
     first.setCustomization(firstRejected);
     QCOMPARE(first.customization().promptOverride, QString());
     QCOMPARE(firstWarnings.size(), 1);
+}
+
+void SelectionContextActionEditorTests::
+changedCallbackMayDeleteEditorSynchronously()
+{
+    verifyDeletionWorkerResult(QStringLiteral("changed"));
+}
+
+void SelectionContextActionEditorTests::
+restoreCallbackMayDeleteEditorSynchronously()
+{
+    verifyDeletionWorkerResult(QStringLiteral("restore"));
+}
+
+void SelectionContextActionEditorTests::
+warningCallbackMayDeleteEditorAfterRollback()
+{
+    verifyDeletionWorkerResult(QStringLiteral("warning"));
+}
+
+void SelectionContextActionEditorTests::
+setCustomizationWarningMayDeleteEditorSynchronously()
+{
+    verifyDeletionWorkerResult(QStringLiteral("set-warning"));
+}
+
+void SelectionContextActionEditorTests::
+rejectedPastePreservesPriorUndoAndCursor()
+{
+    QVector<SelectionContextActionCustomization> changes;
+    QStringList warnings;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        changes.append(value);
+    };
+    callbacks.validationWarning = [&](const QString &warning) {
+        warnings.append(warning);
+    };
+    SelectionContextActionEditor editor(
+        selectionContextActionExplain(), fullCatalogs(), callbacks);
+    SelectionContextActionCustomization initial;
+    initial.promptOverride = QString(7999, QLatin1Char('a'));
+    editor.setCustomization(initial);
+    QPlainTextEdit *prompt = required<QPlainTextEdit>(
+        &editor, "selectionActionPrompt");
+    QTextCursor cursor = prompt->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    prompt->setTextCursor(cursor);
+
+    QTest::keyClick(prompt, Qt::Key_B);
+    flushQueuedCallbacks();
+    QCOMPARE(prompt->toPlainText().size(), 8000);
+    QCOMPARE(changes.size(), 1);
+    cursor = prompt->textCursor();
+    cursor.movePosition(QTextCursor::Start);
+    prompt->setTextCursor(cursor);
+    cursor.movePosition(QTextCursor::End);
+    prompt->setTextCursor(cursor);
+
+    QApplication::clipboard()->setText(QStringLiteral("c"));
+    prompt->paste();
+    flushQueuedCallbacks();
+    QCOMPARE(prompt->toPlainText().size(), 8000);
+    QCOMPARE(prompt->textCursor().position(), 8000);
+    QCOMPARE(warnings.size(), 1);
+    QCOMPARE(changes.size(), 1);
+    QVERIFY(prompt->document()->isUndoAvailable());
+
+    prompt->undo();
+    flushQueuedCallbacks();
+    QCOMPARE(prompt->toPlainText().size(), 7999);
+    QCOMPARE(changes.size(), 2);
+}
+
+void SelectionContextActionEditorTests::
+commonControlsExposeAccessibleRelationshipsAndExpandedState()
+{
+    SelectionContextActionEditor editor(
+        selectionContextActionTranslate(), fullCatalogs());
+    QLabel *nameLabel = required<QLabel>(
+        &editor, "selectionActionDisplayNameLabel");
+    QLineEdit *name = required<QLineEdit>(
+        &editor, "selectionActionDisplayName");
+    QToolButton *expand = required<QToolButton>(
+        &editor, "selectionActionExpand");
+    QCOMPARE(nameLabel->buddy(), static_cast<QWidget *>(name));
+    QVERIFY(expand->isCheckable());
+    QVERIFY(!expand->accessibleName().trimmed().isEmpty());
+    QVERIFY(!expand->isChecked());
+    QVERIFY(expand->accessibleDescription().contains(
+        QString::fromUtf8("收起")));
+
+    expand->click();
+    QVERIFY(editor.isExpanded());
+    QVERIFY(expand->isChecked());
+    QVERIFY(expand->accessibleDescription().contains(
+        QString::fromUtf8("展开")));
+    editor.setExpanded(false);
+    QVERIFY(!editor.isExpanded());
+    QVERIFY(!expand->isChecked());
+    QVERIFY(expand->accessibleDescription().contains(
+        QString::fromUtf8("收起")));
 }
 
 void SelectionContextActionEditorTests::
@@ -469,6 +762,18 @@ controlsDoNotClipAt100_125_150Percent()
     QApplication::setFont(originalFont);
 }
 
-QTEST_MAIN(SelectionContextActionEditorTests)
+int main(int argc, char **argv)
+{
+    QApplication application(argc, argv);
+    const QString worker = QString::fromLocal8Bit(
+        qgetenv("VOCEKIT_ACTION_EDITOR_DELETE_WORKER"));
+    if (!worker.isEmpty()) {
+        return runDeletionWorker(worker);
+    }
+    SelectionContextActionEditorTests tests;
+    return QTest::qExec(&tests, argc, argv);
+}
 
 #include "selection_context_action_editor_tests.moc"
+#include <QApplication>
+#include <QClipboard>

@@ -132,11 +132,10 @@ SelectionContextActionCustomizationMap actionCustomizationsFromJson(
         }
         values.insert(id, item);
     }
-    return normalizeSelectionContextActionCustomizations(
-        values,
-        QStringList(),
-        actionOrder
-    );
+    SelectionContextActionNormalizationContext context;
+    context.actionOrder = actionOrder;
+    context.writableVocabularyScopeIds = QStringList();
+    return normalizeSelectionContextActionCustomizations(values, context);
 }
 
 QJsonObject actionCustomizationsToJson(
@@ -146,12 +145,11 @@ QJsonObject actionCustomizationsToJson(
 )
 {
     QJsonObject objects = retainedObjects;
+    SelectionContextActionNormalizationContext context;
+    context.actionOrder = actionOrder;
+    context.writableVocabularyScopeIds = QStringList();
     const SelectionContextActionCustomizationMap normalized =
-        normalizeSelectionContextActionCustomizations(
-            values,
-            QStringList(),
-            actionOrder
-        );
+        normalizeSelectionContextActionCustomizations(values, context);
     for (const QString &id : defaultSelectionContextActionOrder()) {
         QJsonObject object = objects.value(id).toObject();
         const SelectionContextActionCustomization item = normalized.value(id);

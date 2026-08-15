@@ -46,27 +46,13 @@ defaultSelectionContextActionCustomizations()
 SelectionContextActionCustomizationMap
 normalizeSelectionContextActionCustomizations(
     const SelectionContextActionCustomizationMap &values,
-    const QStringList &writableVocabularyScopeIds
-)
-{
-    return normalizeSelectionContextActionCustomizations(
-        values,
-        writableVocabularyScopeIds,
-        defaultSelectionContextActionOrder()
-    );
-}
-
-SelectionContextActionCustomizationMap
-normalizeSelectionContextActionCustomizations(
-    const SelectionContextActionCustomizationMap &values,
-    const QStringList &writableVocabularyScopeIds,
-    const QStringList &actionOrder
+    const SelectionContextActionNormalizationContext &context
 )
 {
     SelectionContextActionCustomizationMap normalized;
     const QStringList actionIds = defaultSelectionContextActionOrder();
     const QStringList normalizedOrder =
-        normalizeSelectionContextActionOrder(actionOrder);
+        normalizeSelectionContextActionOrder(context.actionOrder);
     for (const QString &id : actionIds) {
         SelectionContextActionCustomization item = values.contains(id)
             ? values.value(id)
@@ -77,7 +63,7 @@ normalizeSelectionContextActionCustomizations(
         item.targetLanguage = item.targetLanguage.trimmed().left(64);
         item.vocabularyScopeId = normalizedVocabularyScope(
             item.vocabularyScopeId,
-            writableVocabularyScopeIds
+            context.writableVocabularyScopeIds
         );
         item.copyMode = item.copyMode.trimmed();
         if (item.copyMode != QStringLiteral("original")
@@ -124,12 +110,10 @@ QStringList visibleSelectionContextActionOrder(
 {
     const QStringList normalizedOrder =
         normalizeSelectionContextActionOrder(order);
+    SelectionContextActionNormalizationContext context;
+    context.actionOrder = normalizedOrder;
     const SelectionContextActionCustomizationMap normalizedValues =
-        normalizeSelectionContextActionCustomizations(
-            values,
-            QStringList(),
-            normalizedOrder
-        );
+        normalizeSelectionContextActionCustomizations(values, context);
     QStringList visibleOrder;
     for (const QString &id : normalizedOrder) {
         if (normalizedValues.value(id).visible) {

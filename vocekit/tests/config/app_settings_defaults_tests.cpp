@@ -4,6 +4,20 @@
 #include "../../src/config/app_settings_defaults.h"
 #include "../../src/domain/selection_context_actions.h"
 
+#include <type_traits>
+
+typedef SelectionContextActionCustomizationMap (*SelectionActionNormalizer)(
+    const SelectionContextActionCustomizationMap &,
+    const SelectionContextActionNormalizationContext &
+);
+static_assert(
+    std::is_same<
+        decltype(&normalizeSelectionContextActionCustomizations),
+        SelectionActionNormalizer
+    >::value,
+    "Selection action normalization must expose one strong-context entry"
+);
+
 class AppSettingsDefaultsTests : public QObject
 {
     Q_OBJECT
@@ -47,13 +61,13 @@ private slots:
         copy.copyMode = QStringLiteral("invalid");
         values.insert(selectionContextActionCopy(), copy);
 
+        SelectionContextActionNormalizationContext context;
+        context.actionOrder = defaultSelectionContextActionOrder();
+        context.writableVocabularyScopeIds = QStringList()
+            << QStringLiteral("__global")
+            << QStringLiteral("translate");
         const SelectionContextActionCustomizationMap normalized =
-            normalizeSelectionContextActionCustomizations(
-                values,
-                QStringList()
-                    << QStringLiteral("__global")
-                    << QStringLiteral("translate")
-            );
+            normalizeSelectionContextActionCustomizations(values, context);
 
         QCOMPARE(
             normalized.value(selectionContextActionTranslate())
@@ -117,17 +131,25 @@ private slots:
             item.visible = false;
             allHidden.insert(id, item);
         }
+        SelectionContextActionCustomization save =
+            allHidden.value(selectionContextActionSave());
+        save.vocabularyScopeId = QStringLiteral("custom-scope");
+        allHidden.insert(selectionContextActionSave(), save);
         const QStringList requestedOrder = QStringList()
             << QStringLiteral("unknown")
             << selectionContextActionCopy()
             << selectionContextActionCopy()
             << selectionContextActionTranslate();
+        SelectionContextActionNormalizationContext context;
+        context.actionOrder = requestedOrder;
+        context.writableVocabularyScopeIds = QStringList()
+            << QStringLiteral("__global")
+            << QStringLiteral("custom-scope");
 
         const SelectionContextActionCustomizationMap ordered =
             normalizeSelectionContextActionCustomizations(
                 allHidden,
-                QStringList(),
-                requestedOrder
+                context
             );
 
         for (const QString &id : defaultSelectionContextActionOrder()) {
@@ -136,6 +158,10 @@ private slots:
                 id == selectionContextActionCopy()
             );
         }
+        QCOMPARE(
+            ordered.value(selectionContextActionSave()).vocabularyScopeId,
+            QStringLiteral("custom-scope")
+        );
     }
 
     void vocabularyScopeNormalizationDistinguishesSyntaxAndCatalogPasses()
@@ -163,11 +189,12 @@ private slots:
         copy.vocabularyScopeId = QStringLiteral("deleted-scope");
         scopes.insert(selectionContextActionCopy(), copy);
 
+        SelectionContextActionNormalizationContext syntaxContext;
+        syntaxContext.actionOrder = defaultSelectionContextActionOrder();
         const SelectionContextActionCustomizationMap syntaxOnly =
             normalizeSelectionContextActionCustomizations(
                 scopes,
-                QStringList(),
-                defaultSelectionContextActionOrder()
+                syntaxContext
             );
         QCOMPARE(
             syntaxOnly.value(selectionContextActionAiSearch())
@@ -193,13 +220,15 @@ private slots:
             QStringLiteral("deleted-scope")
         );
 
+        SelectionContextActionNormalizationContext completeContext;
+        completeContext.actionOrder = defaultSelectionContextActionOrder();
+        completeContext.writableVocabularyScopeIds = QStringList()
+            << QStringLiteral("__global")
+            << QStringLiteral("custom-scope");
         const SelectionContextActionCustomizationMap complete =
             normalizeSelectionContextActionCustomizations(
                 scopes,
-                QStringList()
-                    << QStringLiteral("__global")
-                    << QStringLiteral("custom-scope"),
-                defaultSelectionContextActionOrder()
+                completeContext
             );
         QCOMPARE(
             complete.value(selectionContextActionAiSearch()).vocabularyScopeId,

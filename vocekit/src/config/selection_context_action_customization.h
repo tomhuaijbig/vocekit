@@ -19,18 +19,18 @@ struct SelectionContextActionCustomization
 typedef QMap<QString, SelectionContextActionCustomization>
     SelectionContextActionCustomizationMap;
 
+struct SelectionContextActionNormalizationContext
+{
+    QStringList actionOrder;
+    QStringList writableVocabularyScopeIds;
+};
+
 SelectionContextActionCustomizationMap
 defaultSelectionContextActionCustomizations();
 SelectionContextActionCustomizationMap
 normalizeSelectionContextActionCustomizations(
     const SelectionContextActionCustomizationMap &values,
-    const QStringList &writableVocabularyScopeIds
-);
-SelectionContextActionCustomizationMap
-normalizeSelectionContextActionCustomizations(
-    const SelectionContextActionCustomizationMap &values,
-    const QStringList &writableVocabularyScopeIds,
-    const QStringList &actionOrder
+    const SelectionContextActionNormalizationContext &context
 );
 QString selectionContextActionDisplayName(
     const QString &actionId,

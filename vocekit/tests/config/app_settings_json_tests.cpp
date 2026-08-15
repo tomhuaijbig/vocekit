@@ -30,6 +30,87 @@ class AppSettingsJsonTests : public QObject
     Q_OBJECT
 
 private slots:
+    void legacyOrderMigratesWithoutChangingOrder()
+    {
+        QJsonObject selection;
+        selection.insert(
+            QStringLiteral("actionOrder"),
+            QJsonArray()
+                << QStringLiteral("copy")
+                << QStringLiteral("translate")
+        );
+        QJsonObject root;
+        root.insert(QStringLiteral("selectionContextToolbar"), selection);
+
+        const AppSettingsData restored = appSettingsDataFromJson(root);
+
+        QCOMPARE(
+            restored.selectionContext.actionOrder.first(),
+            selectionContextActionCopy()
+        );
+        QCOMPARE(restored.selectionContext.actionCustomizations.size(), 5);
+    }
+
+    void customizationRoundTripPreservesUnicodeAndUnknownJson()
+    {
+        AppSettingsData data;
+        SelectionContextActionCustomization explain = data.selectionContext
+            .actionCustomizations.value(selectionContextActionExplain());
+        explain.displayName = QString::fromUtf8("给我讲明白");
+        explain.modelId = QStringLiteral("openai:gpt-5.6-sol");
+        explain.promptOverride = QString::fromUtf8("用三个层次解释");
+        data.selectionContext.actionCustomizations.insert(
+            selectionContextActionExplain(),
+            explain
+        );
+        data.retainedRootValues = QJsonObject{
+            {QStringLiteral("selectionContextToolbar"), QJsonObject{
+                {QStringLiteral("futureField"), 7},
+                {QStringLiteral("actionCustomizations"), QJsonObject{
+                    {selectionContextActionExplain(), QJsonObject{
+                        {QStringLiteral("futurePerAction"), 9}
+                    }},
+                    {QStringLiteral("future-action"), QJsonObject{
+                        {QStringLiteral("futureKey"), true}
+                    }}
+                }}
+            }}
+        };
+
+        const QJsonObject json = appSettingsDataToJson(data);
+        const AppSettingsData restored = appSettingsDataFromJson(json);
+        const QJsonObject selection = json
+            .value(QStringLiteral("selectionContextToolbar")).toObject();
+        const QJsonObject actions = selection
+            .value(QStringLiteral("actionCustomizations")).toObject();
+
+        QCOMPARE(
+            restored.selectionContext.actionCustomizations
+                .value(selectionContextActionExplain()).displayName,
+            QString::fromUtf8("给我讲明白")
+        );
+        QCOMPARE(
+            restored.selectionContext.actionCustomizations
+                .value(selectionContextActionExplain()).modelId,
+            QStringLiteral("openai:gpt-5.6-sol")
+        );
+        QCOMPARE(
+            restored.selectionContext.actionCustomizations
+                .value(selectionContextActionExplain()).promptOverride,
+            QString::fromUtf8("用三个层次解释")
+        );
+        QCOMPARE(selection.value(QStringLiteral("futureField")).toInt(), 7);
+        QCOMPARE(
+            actions.value(selectionContextActionExplain()).toObject()
+                .value(QStringLiteral("futurePerAction")).toInt(),
+            9
+        );
+        QVERIFY(
+            actions.value(QStringLiteral("future-action")).toObject()
+                .value(QStringLiteral("futureKey")).toBool()
+        );
+    }
+
     void selectionContextSettingsRoundTripAndNormalize()
     {
         AppSettingsData data;

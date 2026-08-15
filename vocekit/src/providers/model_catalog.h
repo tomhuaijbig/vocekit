@@ -13,5 +13,6 @@ QVector<ModelOption> modelOptionsForSecrets(const SecretConfig &secrets);
 QString modelTitle(const QString &id);
 QString modelDisplayText(const QString &id);
 QString normalizeModelId(const QString &value, const QString &fallback = QString());
+QString normalizeExplicitModelId(const QString &value);
 
 #endif // VOCEKIT_MODEL_CATALOG_H

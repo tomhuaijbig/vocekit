@@ -16,6 +16,7 @@ SOURCES += \
     src/capture/screenshot_types.cpp \
     src/config/app_settings_json.cpp \
     src/config/app_settings_defaults.cpp \
+    src/config/selection_context_action_customization.cpp \
     src/config/app_settings_store.cpp \
     src/config/app_paths.cpp \
     src/config/baidu_sample_parser.cpp \
@@ -301,6 +302,7 @@ HEADERS += \
     src/config/app_settings_defaults.h \
     src/config/app_settings_json.h \
     src/config/app_settings_store.h \
+    src/config/selection_context_action_customization.h \
     src/config/app_paths.h \
     src/config/baidu_sample_parser.h \
     src/config/function_flow_json.h \

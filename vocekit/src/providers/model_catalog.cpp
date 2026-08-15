@@ -24,32 +24,91 @@ QVector<ModelOption> builtInModelOptions()
     return options;
 }
 
+QString canonicalCurrentOrRetiredModelId(const QString &value)
+{
+    if (value == QStringLiteral("deepseek-v4-flash")
+        || value == QStringLiteral("deepseek-v4-pro")) {
+        return value;
+    }
+    if (value == QStringLiteral("gpt-5.6-sol")
+        || value == QStringLiteral("openai:gpt-5.6-sol")) {
+        return QStringLiteral("openai:gpt-5.6-sol");
+    }
+    if (value == QStringLiteral("gpt-5.6-terra")
+        || value == QStringLiteral("openai:gpt-5.6-terra")) {
+        return QStringLiteral("openai:gpt-5.6-terra");
+    }
+    if (value == QStringLiteral("gpt-5.6-luna")
+        || value == QStringLiteral("openai:gpt-5.6-luna")) {
+        return QStringLiteral("openai:gpt-5.6-luna");
+    }
+    if (value == QStringLiteral("gpt-5.5")
+        || value == QStringLiteral("openai:gpt-5.5")) {
+        return QStringLiteral("openai:gpt-5.6-sol");
+    }
+    if (value == QStringLiteral("gpt-5.4-mini")
+        || value == QStringLiteral("openai:gpt-5.4-mini")) {
+        return QStringLiteral("openai:gpt-5.6-luna");
+    }
+    if (value == QStringLiteral("gpt-5.4")
+        || value == QStringLiteral("openai:gpt-5.4")
+        || value == QStringLiteral("gpt-4o")
+        || value == QStringLiteral("openai:gpt-4o")
+        || value == QStringLiteral("gpt-4.1")
+        || value == QStringLiteral("openai:gpt-4.1")) {
+        return QStringLiteral("openai:gpt-5.6-terra");
+    }
+    if (value == QStringLiteral("claude-fable-5")
+        || value == QStringLiteral("claude:claude-fable-5")) {
+        return QStringLiteral("claude:claude-fable-5");
+    }
+    if (value == QStringLiteral("claude-opus-5")
+        || value == QStringLiteral("claude:claude-opus-5")) {
+        return QStringLiteral("claude:claude-opus-5");
+    }
+    if (value == QStringLiteral("claude-sonnet-5")
+        || value == QStringLiteral("claude:claude-sonnet-5")) {
+        return QStringLiteral("claude:claude-sonnet-5");
+    }
+    if (value == QStringLiteral("claude-haiku-4-5")
+        || value == QStringLiteral("claude:claude-haiku-4-5")) {
+        return QStringLiteral("claude:claude-haiku-4-5");
+    }
+    if (value == QStringLiteral("opus-4-8")
+        || value == QStringLiteral("claude-opus-4-8")
+        || value == QStringLiteral("claude:opus-4-8")
+        || value == QStringLiteral("claude:claude-opus-4-8")
+        || value == QStringLiteral("opus-4-7")
+        || value == QStringLiteral("claude-opus-4-7")
+        || value == QStringLiteral("claude:opus-4-7")
+        || value == QStringLiteral("claude:claude-opus-4-7")) {
+        return QStringLiteral("claude:claude-opus-5");
+    }
+    if (value == QStringLiteral("sonnet-4-6")
+        || value == QStringLiteral("claude-sonnet-4-6")
+        || value == QStringLiteral("claude:sonnet-4-6")
+        || value == QStringLiteral("claude:claude-sonnet-4-6")
+        || value == QStringLiteral("claude-3-7-sonnet")
+        || value == QStringLiteral("claude:claude-3-7-sonnet")
+        || value == QStringLiteral("claude-3-5-haiku")
+        || value == QStringLiteral("claude:claude-3-5-haiku")) {
+        return QStringLiteral("claude:claude-sonnet-5");
+    }
+    return QString();
+}
+
 QString migratedBuiltInModelId(const QString &value)
 {
+    const QString knownId = canonicalCurrentOrRetiredModelId(value);
+    if (!knownId.isEmpty()) {
+        return knownId;
+    }
+
     QString modelId = value;
     bool isOpenAi = false;
     if (modelId.startsWith(QStringLiteral("openai:"))) {
         isOpenAi = true;
         modelId = modelId.mid(QStringLiteral("openai:").size());
-    }
-
-    if (modelId == QStringLiteral("gpt-5.6-sol")) {
-        return QStringLiteral("openai:gpt-5.6-sol");
-    }
-    if (modelId == QStringLiteral("gpt-5.6-terra")) {
-        return QStringLiteral("openai:gpt-5.6-terra");
-    }
-    if (modelId == QStringLiteral("gpt-5.6-luna")) {
-        return QStringLiteral("openai:gpt-5.6-luna");
-    }
-    if (modelId == QStringLiteral("gpt-5.5")) {
-        return QStringLiteral("openai:gpt-5.6-sol");
-    }
-    if (modelId == QStringLiteral("gpt-5.4-mini")) {
-        return QStringLiteral("openai:gpt-5.6-luna");
-    }
-    if (modelId == QStringLiteral("gpt-5.4") || modelId.startsWith(QStringLiteral("gpt-4"))) {
-        return QStringLiteral("openai:gpt-5.6-terra");
     }
     if (modelId.startsWith(QStringLiteral("gpt-")) || isOpenAi) {
         return QStringLiteral("openai:gpt-5.6-terra");
@@ -60,30 +119,10 @@ QString migratedBuiltInModelId(const QString &value)
         isClaude = true;
         modelId = modelId.mid(QStringLiteral("claude:").size());
     }
-
-    if (modelId == QStringLiteral("claude-fable-5")) {
-        return QStringLiteral("claude:claude-fable-5");
-    }
-    if (modelId == QStringLiteral("claude-opus-5")) {
-        return QStringLiteral("claude:claude-opus-5");
-    }
-    if (modelId == QStringLiteral("claude-sonnet-5")) {
-        return QStringLiteral("claude:claude-sonnet-5");
-    }
-    if (modelId == QStringLiteral("claude-haiku-4-5")) {
-        return QStringLiteral("claude:claude-haiku-4-5");
-    }
-    if (modelId == QStringLiteral("opus-4-8") || modelId == QStringLiteral("claude-opus-4-8")
-        || modelId == QStringLiteral("opus-4-7") || modelId == QStringLiteral("claude-opus-4-7")) {
-        return QStringLiteral("claude:claude-opus-5");
-    }
-    if (modelId == QStringLiteral("sonnet-4-6") || modelId == QStringLiteral("claude-sonnet-4-6")) {
-        return QStringLiteral("claude:claude-sonnet-5");
-    }
-    if (modelId.startsWith(QStringLiteral("claude-3")) || modelId.startsWith(QStringLiteral("3."))) {
-        return QStringLiteral("claude:claude-sonnet-5");
-    }
-    if (modelId.startsWith(QStringLiteral("claude-")) || isClaude) {
+    if (modelId.startsWith(QStringLiteral("claude-3"))
+        || modelId.startsWith(QStringLiteral("3."))
+        || modelId.startsWith(QStringLiteral("claude-"))
+        || isClaude) {
         return QStringLiteral("claude:claude-sonnet-5");
     }
     return QString();
@@ -223,4 +262,17 @@ QString normalizeModelId(const QString &value, const QString &fallback)
     }
 
     return fallback.trimmed().isEmpty() ? defaultModelForFunction(QString()) : fallback;
+}
+
+QString normalizeExplicitModelId(const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty()) {
+        return QString();
+    }
+    const QString knownId = canonicalCurrentOrRetiredModelId(trimmed);
+    if (!knownId.isEmpty()) {
+        return knownId;
+    }
+    return trimmed;
 }

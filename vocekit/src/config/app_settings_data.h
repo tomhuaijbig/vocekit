@@ -2,6 +2,7 @@
 #define VOCEKIT_APP_SETTINGS_DATA_H
 
 #include "../domain/function_settings.h"
+#include "selection_context_action_customization.h"
 
 #include <QJsonObject>
 #include <QMap>
@@ -40,6 +41,8 @@ struct SelectionContextSettings
         << QStringLiteral("explain")
         << QStringLiteral("save")
         << QStringLiteral("copy");
+    SelectionContextActionCustomizationMap actionCustomizations =
+        defaultSelectionContextActionCustomizations();
 };
 
 // 应用级设置。每个具体功能的设置统一放在 functions 中。

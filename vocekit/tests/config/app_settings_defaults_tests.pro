@@ -9,9 +9,11 @@ INCLUDEPATH += ../..
 SOURCES += \
     app_settings_defaults_tests.cpp \
     ../../src/config/app_settings_defaults.cpp \
+    ../../src/config/selection_context_action_customization.cpp \
     ../../src/domain/selection_context_actions.cpp
 
 HEADERS += \
     ../../src/config/app_settings_defaults.h \
     ../../src/config/app_settings_data.h \
+    ../../src/config/selection_context_action_customization.h \
     ../../src/domain/selection_context_actions.h

@@ -91,6 +91,81 @@ QJsonArray stringListToJson(const QStringList &values)
     return array;
 }
 
+SelectionContextActionCustomizationMap actionCustomizationsFromJson(
+    const QJsonObject &objects
+)
+{
+    SelectionContextActionCustomizationMap values =
+        defaultSelectionContextActionCustomizations();
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        if (!objects.contains(id) || !objects.value(id).isObject()) {
+            continue;
+        }
+        const QJsonObject object = objects.value(id).toObject();
+        SelectionContextActionCustomization item = values.value(id);
+        if (object.contains(QStringLiteral("displayName"))) {
+            item.displayName = object
+                .value(QStringLiteral("displayName")).toString();
+        }
+        if (object.contains(QStringLiteral("visible"))) {
+            item.visible = object.value(QStringLiteral("visible"))
+                .toBool(item.visible);
+        }
+        if (object.contains(QStringLiteral("modelId"))) {
+            item.modelId = object.value(QStringLiteral("modelId")).toString();
+        }
+        if (object.contains(QStringLiteral("promptOverride"))) {
+            item.promptOverride = object
+                .value(QStringLiteral("promptOverride")).toString();
+        }
+        if (object.contains(QStringLiteral("targetLanguage"))) {
+            item.targetLanguage = object
+                .value(QStringLiteral("targetLanguage")).toString();
+        }
+        if (object.contains(QStringLiteral("vocabularyScopeId"))) {
+            item.vocabularyScopeId = object
+                .value(QStringLiteral("vocabularyScopeId")).toString();
+        }
+        if (object.contains(QStringLiteral("copyMode"))) {
+            item.copyMode = object.value(QStringLiteral("copyMode")).toString();
+        }
+        values.insert(id, item);
+    }
+    return normalizeSelectionContextActionCustomizations(
+        values,
+        QStringList()
+    );
+}
+
+QJsonObject actionCustomizationsToJson(
+    const SelectionContextActionCustomizationMap &values,
+    const QJsonObject &retainedObjects
+)
+{
+    QJsonObject objects = retainedObjects;
+    const SelectionContextActionCustomizationMap normalized =
+        normalizeSelectionContextActionCustomizations(
+            values,
+            QStringList()
+        );
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        QJsonObject object = objects.value(id).toObject();
+        const SelectionContextActionCustomization item = normalized.value(id);
+        object.insert(QStringLiteral("displayName"), item.displayName);
+        object.insert(QStringLiteral("visible"), item.visible);
+        object.insert(QStringLiteral("modelId"), item.modelId);
+        object.insert(QStringLiteral("promptOverride"), item.promptOverride);
+        object.insert(QStringLiteral("targetLanguage"), item.targetLanguage);
+        object.insert(
+            QStringLiteral("vocabularyScopeId"),
+            item.vocabularyScopeId
+        );
+        object.insert(QStringLiteral("copyMode"), item.copyMode);
+        objects.insert(id, object);
+    }
+    return objects;
+}
+
 QStringList normalizeExecutableList(const QStringList &values)
 {
     QStringList normalized;
@@ -473,6 +548,9 @@ AppSettingsData appSettingsDataFromJson(
             selection.value(QStringLiteral("actionOrder")).toArray()
         )
     );
+    data.selectionContext.actionCustomizations = actionCustomizationsFromJson(
+        selection.value(QStringLiteral("actionCustomizations")).toObject()
+    );
     data.selectionContext.blockedApplications = normalizeExecutableList(
         stringListFromJson(
             selection.value(QStringLiteral("blockedApplications")).toArray()
@@ -754,6 +832,13 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
             normalizeExecutableList(
                 data.selectionContext.blockedApplications
             )
+        )
+    );
+    selection.insert(
+        QStringLiteral("actionCustomizations"),
+        actionCustomizationsToJson(
+            data.selectionContext.actionCustomizations,
+            selection.value(QStringLiteral("actionCustomizations")).toObject()
         )
     );
     root.remove(QStringLiteral("selectionContextToolbar"));

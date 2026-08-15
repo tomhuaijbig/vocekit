@@ -9,6 +9,105 @@ class AppSettingsDefaultsTests : public QObject
     Q_OBJECT
 
 private slots:
+    void defaultsExposeFiveIndependentActionCustomizations()
+    {
+        const AppSettingsData data;
+
+        QCOMPARE(data.selectionContext.actionCustomizations.size(), 5);
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            QVERIFY(data.selectionContext.actionCustomizations.contains(id));
+            QVERIFY(data.selectionContext.actionCustomizations.value(id).visible);
+        }
+        QCOMPARE(
+            data.selectionContext.actionCustomizations
+                .value(selectionContextActionSave())
+                .vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+        QCOMPARE(
+            data.selectionContext.actionCustomizations
+                .value(selectionContextActionCopy())
+                .copyMode,
+            QStringLiteral("original")
+        );
+    }
+
+    void customizationNormalizationBoundsEveryUserField()
+    {
+        SelectionContextActionCustomizationMap values =
+            defaultSelectionContextActionCustomizations();
+        SelectionContextActionCustomization translate =
+            values.value(selectionContextActionTranslate());
+        translate.displayName = QString(40, QLatin1Char('n'));
+        translate.promptOverride = QString(9000, QLatin1Char('p'));
+        translate.targetLanguage = QString(80, QLatin1Char('l'));
+        values.insert(selectionContextActionTranslate(), translate);
+        SelectionContextActionCustomization copy =
+            values.value(selectionContextActionCopy());
+        copy.copyMode = QStringLiteral("invalid");
+        values.insert(selectionContextActionCopy(), copy);
+
+        const SelectionContextActionCustomizationMap normalized =
+            normalizeSelectionContextActionCustomizations(
+                values,
+                QStringList()
+                    << QStringLiteral("__global")
+                    << QStringLiteral("translate")
+            );
+
+        QCOMPARE(
+            normalized.value(selectionContextActionTranslate())
+                .displayName.size(),
+            24
+        );
+        QCOMPARE(
+            normalized.value(selectionContextActionTranslate())
+                .promptOverride.size(),
+            8000
+        );
+        QCOMPARE(
+            normalized.value(selectionContextActionTranslate())
+                .targetLanguage.size(),
+            64
+        );
+        QCOMPARE(
+            normalized.value(selectionContextActionCopy()).copyMode,
+            QStringLiteral("original")
+        );
+    }
+
+    void displayAndVisibilityHelpersUseCustomizationAndOrderedFallback()
+    {
+        SelectionContextActionCustomizationMap values =
+            defaultSelectionContextActionCustomizations();
+        SelectionContextActionCustomization explain =
+            values.value(selectionContextActionExplain());
+        explain.displayName = QString::fromUtf8("  讲清楚  ");
+        values.insert(selectionContextActionExplain(), explain);
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            SelectionContextActionCustomization item = values.value(id);
+            item.visible = false;
+            values.insert(id, item);
+        }
+
+        QCOMPARE(
+            selectionContextActionDisplayName(
+                selectionContextActionExplain(),
+                values
+            ),
+            QString::fromUtf8("讲清楚")
+        );
+        QCOMPARE(
+            visibleSelectionContextActionOrder(
+                QStringList()
+                    << selectionContextActionCopy()
+                    << selectionContextActionExplain(),
+                values
+            ),
+            QStringList() << selectionContextActionCopy()
+        );
+    }
+
     void defaultsKeepAutomaticSelectionToolbarOptIn()
     {
         const AppSettingsData data;

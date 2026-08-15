@@ -12,6 +12,7 @@ private slots:
     void builtInOptionsExposeOnlyCurrentOpenAiAndAnthropicModels();
     void normalizeModelIdMigratesLegacyAndUnknownProviderModels();
     void normalizeModelIdAcceptsCurrentModelsWithAndWithoutProviderPrefixes();
+    void explicitModelNormalizationMigratesRetiredButPreservesUnknown();
     void displayTextHandlesEmptyBuiltInAndUnknownIds();
     void currentModelAliasesUseCurrentTitlesWithoutProviderPrefixes();
 };
@@ -113,6 +114,27 @@ void ModelCatalogTests::normalizeModelIdAcceptsCurrentModelsWithAndWithoutProvid
         normalizeModelId(QStringLiteral("GPT-5.6-SOL"), QStringLiteral("kept-fallback")),
         QStringLiteral("kept-fallback")
     );
+}
+
+void ModelCatalogTests::explicitModelNormalizationMigratesRetiredButPreservesUnknown()
+{
+    QCOMPARE(
+        normalizeExplicitModelId(QStringLiteral("gpt-5.4")),
+        QStringLiteral("openai:gpt-5.6-terra")
+    );
+    QCOMPARE(
+        normalizeExplicitModelId(QStringLiteral("gpt-5.6-sol")),
+        QStringLiteral("openai:gpt-5.6-sol")
+    );
+    QCOMPARE(
+        normalizeExplicitModelId(QStringLiteral("openai:future")),
+        QStringLiteral("openai:future")
+    );
+    QCOMPARE(
+        normalizeExplicitModelId(QStringLiteral("custom:missing")),
+        QStringLiteral("custom:missing")
+    );
+    QCOMPARE(normalizeExplicitModelId(QStringLiteral("  ")), QString());
 }
 
 void ModelCatalogTests::displayTextHandlesEmptyBuiltInAndUnknownIds()

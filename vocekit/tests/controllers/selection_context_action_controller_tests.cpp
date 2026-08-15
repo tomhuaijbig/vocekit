@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "../../src/controllers/selection_context_action_controller.h"
+#include "../../src/domain/selection_context_actions.h"
 
 #include <QAtomicInt>
 #include <QMutex>
@@ -63,11 +64,18 @@ struct LogEntry
     qint64 elapsedMs = -1;
 };
 
+struct VocabularyEditorCall
+{
+    QString text;
+    QString scopeId;
+};
+
 struct Harness
 {
     AppSettingsData settings;
     PromptRuntimeSnapshot prompts;
     QVector<ModelOption> availableModels;
+    int settingsSnapshotCalls = 0;
     int modelOptionsSnapshotCalls = 0;
     QAtomicInt providerCalls;
     QAtomicInt cancelledCalls;
@@ -82,7 +90,7 @@ struct Harness
     int consentCalls = 0;
     QStringList sequence;
     QStringList copied;
-    QStringList saved;
+    QVector<VocabularyEditorCall> vocabularyEditorCalls;
     int closeToolbarCalls = 0;
     QVector<SelectionResultCardState> renders;
     QVector<LogEntry> logs;
@@ -166,8 +174,13 @@ struct Harness
             copied.append(value);
             return true;
         };
-        access.saveVocabulary = [this](const QString &value) {
-            saved.append(value);
+        access.openVocabularyEditor = [this](
+            const QString &value,
+            const QString &scopeId) {
+            VocabularyEditorCall call;
+            call.text = value;
+            call.scopeId = scopeId;
+            vocabularyEditorCalls.append(call);
         };
         access.validateSelectionAsync = [this](
             SelectedTextNativeWindowHandle,
@@ -185,7 +198,10 @@ struct Harness
             replacedWindow = window;
             return replaceResult;
         };
-        access.settingsSnapshot = [this]() { return settings; };
+        access.settingsSnapshot = [this]() {
+            ++settingsSnapshotCalls;
+            return settings;
+        };
         access.promptSnapshot = [this]() { return prompts; };
         access.modelOptionsSnapshot = [this]() {
             ++modelOptionsSnapshotCalls;
@@ -232,8 +248,11 @@ class SelectionContextActionControllerTests : public QObject
     Q_OBJECT
 
 private slots:
-    void copyClosesTheToolbarAndShowsNoModelResult();
-    void saveUsesTheGlobalVocabularyBridgeExactlyOnce();
+    void copyTrimModeUsesLocalClipboardAndNeverRunsModel();
+    void copyOriginalModePreservesWhitespaceAndNewlinesExactly();
+    void saveOpensLocalEditorOnceWithConfiguredScope();
+    void deletedScopeIsNormalizedToGlobalBeforeOpeningEditor();
+    void missingVocabularyEditorReportsLocalFailureWithoutModelFallback();
     void saveAlwaysOpensTheLocalEditorAndNeverRequestsAiEvenWhenAiModeIsConfigured();
     void firstModelActionRequiresExplicitNetworkConsentBeforeProviderStart();
     void declinedNetworkConsentSendsNothingAndKeepsLocalActionsAvailable();
@@ -252,35 +271,111 @@ private slots:
     void longTextCancelMakesNoProviderCallAndNeverTruncates();
     void closeAndOutsideClickCancelOnlyAnUnpinnedRunningRequest();
     void logsContainActionLengthStateAndDurationButNeverText();
+    void localCallbackDestroyingControllerDoesNotUseAfterFree();
     void everyInjectedCallbackMayDestroyTheControllerSynchronously();
 };
 
 void SelectionContextActionControllerTests::
-copyClosesTheToolbarAndShowsNoModelResult()
+copyTrimModeUsesLocalClipboardAndNeverRunsModel()
 {
     Harness h;
+    h.settings.selectionContext.actionCustomizations[
+        selectionContextActionCopy()
+    ].copyMode = QStringLiteral("trim");
     SelectionContextModelRunner runner(h.runnerAccess());
     SelectionContextActionController controller(&runner, h.actionAccess());
-    controller.setSelection(snapshot(QStringLiteral("copy me")));
-    controller.triggerAction(QStringLiteral("copy"));
-    QCOMPARE(h.copied, QStringList() << QStringLiteral("copy me"));
+    controller.setSelection(snapshot(QStringLiteral("  text  ")));
+    controller.triggerAction(selectionContextActionCopy());
+    QCOMPARE(h.copied, QStringList() << QStringLiteral("text"));
     QCOMPARE(h.closeToolbarCalls, 1);
     QCOMPARE(h.renders.size(), 0);
     QCOMPARE(h.providerCalls.loadAcquire(), 0);
     QCOMPARE(h.consentCalls, 0);
+    QCOMPARE(h.settingsSnapshotCalls, 1);
 }
 
 void SelectionContextActionControllerTests::
-saveUsesTheGlobalVocabularyBridgeExactlyOnce()
+copyOriginalModePreservesWhitespaceAndNewlinesExactly()
+{
+    Harness h;
+    h.settings.selectionContext.actionCustomizations[
+        selectionContextActionCopy()
+    ].copyMode = QStringLiteral("original");
+    const QString original = QStringLiteral("  first line\r\nsecond line  \n");
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionController controller(&runner, h.actionAccess());
+    controller.setSelection(snapshot(original));
+    controller.triggerAction(selectionContextActionCopy());
+    QCOMPARE(h.copied, QStringList() << original);
+    QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.consentCalls, 0);
+    QCOMPARE(h.settingsSnapshotCalls, 1);
+}
+
+void SelectionContextActionControllerTests::
+saveOpensLocalEditorOnceWithConfiguredScope()
+{
+    Harness h;
+    h.settings.selectionContext.actionCustomizations[
+        selectionContextActionSave()
+    ].vocabularyScopeId = QStringLiteral("translate");
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionController controller(&runner, h.actionAccess());
+    controller.setSelection(snapshot(text8("术语")));
+    controller.triggerAction(selectionContextActionSave());
+    QCOMPARE(h.vocabularyEditorCalls.size(), 1);
+    QCOMPARE(h.vocabularyEditorCalls.first().text, text8("术语"));
+    QCOMPARE(
+        h.vocabularyEditorCalls.first().scopeId,
+        QStringLiteral("translate")
+    );
+    QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.consentCalls, 0);
+    QCOMPARE(h.settingsSnapshotCalls, 1);
+}
+
+void SelectionContextActionControllerTests::
+deletedScopeIsNormalizedToGlobalBeforeOpeningEditor()
+{
+    Harness h;
+    h.settings.selectionContext.actionCustomizations[
+        selectionContextActionSave()
+    ].vocabularyScopeId = QStringLiteral("deleted-custom-function");
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionController controller(&runner, h.actionAccess());
+    controller.setSelection(snapshot(QStringLiteral("term")));
+    controller.triggerAction(selectionContextActionSave());
+    QCOMPARE(h.vocabularyEditorCalls.size(), 1);
+    QCOMPARE(
+        h.vocabularyEditorCalls.first().scopeId,
+        QStringLiteral("__global")
+    );
+    QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.consentCalls, 0);
+    QCOMPARE(h.settingsSnapshotCalls, 1);
+}
+
+void SelectionContextActionControllerTests::
+missingVocabularyEditorReportsLocalFailureWithoutModelFallback()
 {
     Harness h;
     SelectionContextModelRunner runner(h.runnerAccess());
-    SelectionContextActionController controller(&runner, h.actionAccess());
-    controller.setSelection(snapshot(QStringLiteral("save me")));
-    controller.triggerAction(QStringLiteral("save"));
-    QCOMPARE(h.saved, QStringList() << QStringLiteral("save me"));
+    SelectionContextActionAccess access = h.actionAccess();
+    access.openVocabularyEditor =
+        std::function<void(const QString &, const QString &)>();
+    SelectionContextActionController controller(&runner, access);
+    controller.setSelection(snapshot(QStringLiteral("term")));
+    controller.triggerAction(selectionContextActionSave());
+    QCOMPARE(h.vocabularyEditorCalls.size(), 0);
     QCOMPARE(h.providerCalls.loadAcquire(), 0);
     QCOMPARE(h.consentCalls, 0);
+    QCOMPARE(h.settingsSnapshotCalls, 1);
+    QVERIFY(!h.renders.isEmpty());
+    QCOMPARE(h.renders.constLast().actionId, selectionContextActionSave());
+    QCOMPARE(
+        h.renders.constLast().statusText,
+        text8("保存失败：词库编辑器不可用。")
+    );
 }
 
 void SelectionContextActionControllerTests::
@@ -292,9 +387,10 @@ saveAlwaysOpensTheLocalEditorAndNeverRequestsAiEvenWhenAiModeIsConfigured()
     SelectionContextActionController controller(&runner, h.actionAccess());
     controller.setSelection(snapshot(QStringLiteral("local only")));
     controller.triggerAction(QStringLiteral("save"));
-    QCOMPARE(h.saved.size(), 1);
+    QCOMPARE(h.vocabularyEditorCalls.size(), 1);
     QCOMPARE(h.consentCalls, 0);
     QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.settingsSnapshotCalls, 1);
 }
 
 void SelectionContextActionControllerTests::
@@ -634,7 +730,7 @@ logsContainActionLengthStateAndDurationButNeverText()
 }
 
 void SelectionContextActionControllerTests::
-everyInjectedCallbackMayDestroyTheControllerSynchronously()
+localCallbackDestroyingControllerDoesNotUseAfterFree()
 {
     {
         Harness h;
@@ -652,6 +748,7 @@ everyInjectedCallbackMayDestroyTheControllerSynchronously()
         controller->setSelection(snapshot(QStringLiteral("delete")));
         controller->triggerAction(QStringLiteral("copy"));
         QVERIFY(guard.isNull());
+        QCOMPARE(h.settingsSnapshotCalls, 1);
     }
 
     {
@@ -659,7 +756,9 @@ everyInjectedCallbackMayDestroyTheControllerSynchronously()
         SelectionContextModelRunner runner(h.runnerAccess());
         SelectionContextActionController *controller = nullptr;
         SelectionContextActionAccess access = h.actionAccess();
-        access.saveVocabulary = [&controller](const QString &) {
+        access.openVocabularyEditor = [&controller](
+            const QString &,
+            const QString &) {
             SelectionContextActionController *doomed = controller;
             controller = nullptr;
             delete doomed;
@@ -669,8 +768,13 @@ everyInjectedCallbackMayDestroyTheControllerSynchronously()
         controller->setSelection(snapshot(QStringLiteral("delete")));
         controller->triggerAction(QStringLiteral("save"));
         QVERIFY(guard.isNull());
+        QCOMPARE(h.settingsSnapshotCalls, 1);
     }
+}
 
+void SelectionContextActionControllerTests::
+everyInjectedCallbackMayDestroyTheControllerSynchronously()
+{
     {
         Harness h;
         SelectionContextModelRunner runner(h.runnerAccess());

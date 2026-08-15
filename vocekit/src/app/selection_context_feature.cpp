@@ -693,13 +693,17 @@ public:
                 ? dependencies.copyText(text)
                 : ClipboardWriter::copyText(text);
         };
-        actionAccess.saveVocabulary = [this](const QString &text) {
-            runSuppressed([this, text]() {
-                if (access.saveVocabulary) {
-                    access.saveVocabulary(text);
-                }
-            });
-        };
+        if (access.openVocabularyEditor) {
+            actionAccess.openVocabularyEditor = [this](
+                const QString &text,
+                const QString &scopeId) {
+                runSuppressed([this, text, scopeId]() {
+                    if (access.openVocabularyEditor) {
+                        access.openVocabularyEditor(text, scopeId);
+                    }
+                });
+            };
+        }
         actionAccess.validateSelectionAsync = [this](
             SelectedTextNativeWindowHandle window,
             quint64 generation,
@@ -956,9 +960,14 @@ public:
         if (!session || !session->action) {
             return;
         }
+        const bool localAction = actionId == selectionContextActionCopy()
+            || actionId == selectionContextActionSave();
+        const QPointer<SelectionContextFeature> guard(q);
         session->action->triggerAction(actionId);
-        if (actionId == selectionContextActionCopy()
-            || actionId == selectionContextActionSave()) {
+        if (!guard) {
+            return;
+        }
+        if (localAction && !toolbar->isVisible()) {
             closeUnpinnedSurfaces();
         }
     }

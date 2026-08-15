@@ -78,9 +78,27 @@ void SelectionContextActionController::triggerAction(
         if (m_snapshot.text.isEmpty() || !m_access.copyText) {
             return;
         }
-        const std::function<bool(const QString &)> copy = m_access.copyText;
+        AppSettingsData settings;
         QPointer<SelectionContextActionController> guard(this);
-        copy(m_snapshot.text);
+        if (m_access.settingsSnapshot) {
+            const std::function<AppSettingsData()> settingsSnapshot =
+                m_access.settingsSnapshot;
+            settings = settingsSnapshot();
+            if (!guard) {
+                return;
+            }
+        }
+        settings.selectionContext = normalizeSelectionContextSettings(
+            settings.selectionContext,
+            settings
+        );
+        QString text = m_snapshot.text;
+        if (settings.selectionContext.actionCustomizations
+                .value(id).copyMode == QStringLiteral("trim")) {
+            text = text.trimmed();
+        }
+        const std::function<bool(const QString &)> copy = m_access.copyText;
+        copy(text);
         if (!guard) {
             return;
         }
@@ -94,13 +112,34 @@ void SelectionContextActionController::triggerAction(
     if (id == selectionContextActionSave()) {
         cancelActiveWithoutRendering();
         m_actionId = id;
-        if (m_snapshot.text.isEmpty() || !m_access.saveVocabulary) {
+        if (m_snapshot.text.isEmpty()) {
             return;
         }
-        const std::function<void(const QString &)> save =
-            m_access.saveVocabulary;
+        AppSettingsData settings;
         QPointer<SelectionContextActionController> guard(this);
-        save(m_snapshot.text);
+        if (m_access.settingsSnapshot) {
+            const std::function<AppSettingsData()> settingsSnapshot =
+                m_access.settingsSnapshot;
+            settings = settingsSnapshot();
+            if (!guard) {
+                return;
+            }
+        }
+        settings.selectionContext = normalizeSelectionContextSettings(
+            settings.selectionContext,
+            settings
+        );
+        if (!m_access.openVocabularyEditor) {
+            m_title = actionTitle(id, settings);
+            m_statusText = text8("保存失败：词库编辑器不可用。");
+            renderCurrent();
+            return;
+        }
+        const QString scopeId = settings.selectionContext
+            .actionCustomizations.value(id).vocabularyScopeId;
+        const std::function<void(const QString &, const QString &)> open =
+            m_access.openVocabularyEditor;
+        open(m_snapshot.text, scopeId);
         if (!guard) {
             return;
         }

@@ -1130,10 +1130,12 @@ int runVocekitApplication(int argc, char *argv[])
         snapshot.libraryItems = promptLibraryStore.items();
         return snapshot;
     };
-    selectionFeatureAccess.saveVocabulary = [&voice](const QString &text) {
+    selectionFeatureAccess.openVocabularyEditor = [&voice](
+        const QString &text,
+        const QString &scopeId) {
         voice.addVocabularyLocallyForFlow(
             text,
-            QStringLiteral("__global"),
+            scopeId,
             QString()
         );
     };

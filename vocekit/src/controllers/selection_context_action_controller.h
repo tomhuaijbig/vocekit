@@ -18,7 +18,8 @@
 struct SelectionContextActionAccess
 {
     std::function<bool(const QString &)> copyText;
-    std::function<void(const QString &)> saveVocabulary;
+    std::function<void(const QString &, const QString &)>
+        openVocabularyEditor;
     std::function<void(
         SelectedTextNativeWindowHandle window,
         quint64 generation,

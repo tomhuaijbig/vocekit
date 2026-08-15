@@ -17,7 +17,8 @@ struct SelectionContextFeatureAccess
 {
     std::function<AppSettingsData()> settingsSnapshot;
     std::function<PromptRuntimeSnapshot()> promptSnapshot;
-    std::function<void(const QString &)> saveVocabulary;
+    std::function<void(const QString &, const QString &)>
+        openVocabularyEditor;
     std::function<bool(const QString &executable)> blockApplication;
     std::function<void()> openSettings;
     std::function<bool(

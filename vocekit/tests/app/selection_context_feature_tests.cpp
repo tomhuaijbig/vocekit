@@ -68,8 +68,11 @@ public:
 
         access.settingsSnapshot = [this]() { return settings; };
         access.promptSnapshot = []() { return PromptRuntimeSnapshot(); };
-        access.saveVocabulary = [this](const QString &text) {
+        access.openVocabularyEditor = [this](
+            const QString &text,
+            const QString &scopeId) {
             vocabulary.append(text);
+            vocabularyScopes.append(scopeId);
             vocabularySawPausedObserver = observerPaused;
         };
         access.blockApplication = [this](const QString &executable) {
@@ -242,6 +245,7 @@ public:
     SelectionContextFeatureDependencies dependencies;
     std::function<void(const SelectionObservation &)> observation;
     QStringList vocabulary;
+    QStringList vocabularyScopes;
     QStringList copied;
     QStringList replaced;
     QStringList blockedAttempts;
@@ -282,6 +286,7 @@ private slots:
     void builtInAndCanvasFunctionsDoNotAppearInMoreMenu();
     void blockCurrentApplicationPersistsAndFailedPersistenceLeavesSurface();
     void openSettingsAndVocabularyInteractionsSuppressNativeCandidates();
+    void missingVocabularyEditorShowsLocalFailureWithoutModelFallback();
     void consentPromptSuppressesObserverAndDeclineSendsNothing();
     void replaceRevalidatesTheOriginalWindowSelection();
     void runtimeCompositionRoutesOnlyToolbarHotkeyAndUsesLocalVocabulary();
@@ -618,6 +623,9 @@ void SelectionContextFeatureTests::
 openSettingsAndVocabularyInteractionsSuppressNativeCandidates()
 {
     Harness h;
+    h.settings.selectionContext.actionCustomizations[
+        selectionContextActionSave()
+    ].vocabularyScopeId = QStringLiteral("translate");
     QScopedPointer<SelectionContextFeature> feature(h.create());
     feature->start();
     h.showSelection(feature.data());
@@ -638,7 +646,34 @@ openSettingsAndVocabularyInteractionsSuppressNativeCandidates()
     QVERIFY(save);
     save->click();
     QCOMPARE(h.vocabulary, QStringList() << QStringLiteral("selected text"));
+    QCOMPARE(h.vocabularyScopes, QStringList() << QStringLiteral("translate"));
+    QCOMPARE(h.modelRuns, 0);
+    QCOMPARE(h.consentCount, 0);
     QVERIFY(h.vocabularySawPausedObserver);
+}
+
+void SelectionContextFeatureTests::
+missingVocabularyEditorShowsLocalFailureWithoutModelFallback()
+{
+    Harness h;
+    h.access.openVocabularyEditor =
+        std::function<void(const QString &, const QString &)>();
+    QScopedPointer<SelectionContextFeature> feature(h.create());
+    feature->start();
+    h.showSelection(feature.data());
+    QToolButton *save = h.toolbar(feature.data())->findChild<QToolButton *>(
+        QStringLiteral("selectionActionSaveButton")
+    );
+    QVERIFY(save);
+    save->click();
+    SelectionResultCard *card = h.visibleCard(feature.data());
+    QVERIFY(card);
+    QCOMPARE(
+        card->state().statusText,
+        QString::fromUtf8("保存失败：词库编辑器不可用。")
+    );
+    QCOMPARE(h.modelRuns, 0);
+    QCOMPARE(h.consentCount, 0);
 }
 
 void SelectionContextFeatureTests::
@@ -712,8 +747,23 @@ runtimeCompositionRoutesOnlyToolbarHotkeyAndUsesLocalVocabulary()
     QVERIFY(dispatch > selectionBranch);
     QVERIFY(contents.mid(selectionBranch, dispatch - selectionBranch)
         .contains("selectionContextFeature.triggerFallbackShortcut"));
-    QVERIFY(contents.contains("voice.addVocabularyLocallyForFlow"));
-    QVERIFY(contents.contains("QStringLiteral(\"__global\")"));
+    const int featureAccess = contents.indexOf(
+        "SelectionContextFeatureAccess selectionFeatureAccess;"
+    );
+    const int featureConstruction = contents.indexOf(
+        "SelectionContextFeature selectionContextFeature(",
+        featureAccess
+    );
+    QVERIFY(featureAccess >= 0);
+    QVERIFY(featureConstruction > featureAccess);
+    const QByteArray bridge = contents.mid(
+        featureAccess,
+        featureConstruction - featureAccess
+    );
+    QVERIFY(bridge.contains("openVocabularyEditor"));
+    QVERIFY(bridge.contains("voice.addVocabularyLocallyForFlow"));
+    QVERIFY(bridge.contains("scopeId"));
+    QVERIFY(!bridge.contains("voice.addVocabularyForFlow("));
 }
 
 void SelectionContextFeatureTests::

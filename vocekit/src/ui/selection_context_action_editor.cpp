@@ -8,11 +8,11 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QTextCursor>
-#include <QTextEdit>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -52,6 +52,19 @@ void prepareEditor(QWidget *widget)
 {
     widget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     widget->setMinimumHeight(widget->sizeHint().height());
+}
+
+void prepareCombo(QComboBox *combo)
+{
+    combo->setSizeAdjustPolicy(
+        QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setMinimumContentsLength(24);
+    prepareEditor(combo);
+    QObject::connect(combo, &QComboBox::currentTextChanged, combo,
+                     [combo](const QString &text) {
+        combo->setToolTip(text);
+    });
+    combo->setToolTip(combo->currentText());
 }
 
 void prepareButton(QAbstractButton *button)
@@ -106,6 +119,8 @@ SelectionContextActionEditor::SelectionContextActionEditor(
     QHBoxLayout *common = new QHBoxLayout;
     common->setSpacing(8);
     QLabel *nameLabel = fieldLabel(text8("显示名称"), this);
+    nameLabel->setObjectName(
+        QStringLiteral("selectionActionDisplayNameLabel"));
     common->addWidget(nameLabel);
 
     displayNameEdit_ = new QLineEdit(this);
@@ -147,12 +162,11 @@ SelectionContextActionEditor::SelectionContextActionEditor(
         modelCombo_->setObjectName(QStringLiteral("selectionActionModel"));
         modelCombo_->addItem(text8("跟随对应内置功能"), QString());
         addCatalogItems(modelCombo_, catalogs.models);
-        prepareEditor(modelCombo_);
+        prepareCombo(modelCombo_);
         specific->addRow(fieldLabel(text8("模型"), specificFields_), modelCombo_);
 
-        promptEdit_ = new QTextEdit(specificFields_);
+        promptEdit_ = new QPlainTextEdit(specificFields_);
         promptEdit_->setObjectName(QStringLiteral("selectionActionPrompt"));
-        promptEdit_->setAcceptRichText(false);
         promptEdit_->setPlaceholderText(text8("留空时使用内置默认提示词"));
         prepareEditor(promptEdit_);
         promptCountLabel_ = new QLabel(specificFields_);
@@ -181,7 +195,7 @@ SelectionContextActionEditor::SelectionContextActionEditor(
                 text8("跟随全局目标语言"), QString());
         }
         addCatalogItems(targetLanguageCombo_, catalogs.targetLanguages);
-        prepareEditor(targetLanguageCombo_);
+        prepareCombo(targetLanguageCombo_);
         specific->addRow(fieldLabel(text8("目标语言"), specificFields_),
                          targetLanguageCombo_);
     }
@@ -195,7 +209,7 @@ SelectionContextActionEditor::SelectionContextActionEditor(
             vocabularyScopeCombo_->insertItem(
                 0, text8("全局词库"), QStringLiteral("__global"));
         }
-        prepareEditor(vocabularyScopeCombo_);
+        prepareCombo(vocabularyScopeCombo_);
         specific->addRow(fieldLabel(text8("默认作用范围"), specificFields_),
                          vocabularyScopeCombo_);
     }
@@ -205,7 +219,7 @@ SelectionContextActionEditor::SelectionContextActionEditor(
         copyModeCombo_->setObjectName(QStringLiteral("selectionActionCopyMode"));
         copyModeCombo_->addItem(text8("保留原文"), QStringLiteral("original"));
         copyModeCombo_->addItem(text8("去除首尾空白"), QStringLiteral("trim"));
-        prepareEditor(copyModeCombo_);
+        prepareCombo(copyModeCombo_);
         specific->addRow(fieldLabel(text8("复制文本"), specificFields_),
                          copyModeCombo_);
     }
@@ -231,7 +245,7 @@ SelectionContextActionEditor::SelectionContextActionEditor(
                 this, [this](int) { notifyChanged(); });
     }
     if (promptEdit_) {
-        connect(promptEdit_, &QTextEdit::textChanged, this, [this]() {
+        connect(promptEdit_, &QPlainTextEdit::textChanged, this, [this]() {
             if (updating_) {
                 return;
             }
@@ -285,30 +299,37 @@ void SelectionContextActionEditor::setCustomization(
 )
 {
     updating_ = true;
-    value_ = value;
-    displayNameEdit_->setText(value.displayName);
-    visibleCheck_->setChecked(value.visible);
+    SelectionContextActionCustomization accepted = value;
+    const bool rejectedPrompt = promptEdit_
+        && value.promptOverride.size() > kPromptLimit;
+    if (rejectedPrompt) {
+        accepted.promptOverride = lastValidPrompt_;
+    } else if (promptEdit_) {
+        lastValidPrompt_ = value.promptOverride;
+    }
+    value_ = accepted;
+    displayNameEdit_->setText(accepted.displayName);
+    visibleCheck_->setChecked(accepted.visible);
 
     if (modelCombo_) {
         selectCatalogValue(
-            modelCombo_, value.modelId, text8("不可用"), false);
+            modelCombo_, accepted.modelId, text8("不可用"), false);
     }
     if (promptEdit_) {
-        lastValidPrompt_ = value.promptOverride.left(kPromptLimit);
         promptEdit_->setPlainText(lastValidPrompt_);
         updatePromptCount(lastValidPrompt_.size());
     }
     if (targetLanguageCombo_) {
         selectCatalogValue(
-            targetLanguageCombo_, value.targetLanguage, QString(), true);
+            targetLanguageCombo_, accepted.targetLanguage, QString(), true);
     }
     if (vocabularyScopeCombo_) {
         selectCatalogValue(
-            vocabularyScopeCombo_, value.vocabularyScopeId,
+            vocabularyScopeCombo_, accepted.vocabularyScopeId,
             text8("不可用"), false);
     }
     if (copyModeCombo_) {
-        int index = copyModeCombo_->findData(value.copyMode);
+        int index = copyModeCombo_->findData(accepted.copyMode);
         if (index < 0) {
             index = copyModeCombo_->findData(QStringLiteral("original"));
         }
@@ -317,6 +338,10 @@ void SelectionContextActionEditor::setCustomization(
     updating_ = false;
     lastNotifiedValue_ = customization();
     hasLastNotifiedValue_ = true;
+    if (rejectedPrompt && callbacks_.validationWarning) {
+        callbacks_.validationWarning(
+            text8("提示词不能超过 8000 个字符。"));
+    }
 }
 
 SelectionContextActionCustomization

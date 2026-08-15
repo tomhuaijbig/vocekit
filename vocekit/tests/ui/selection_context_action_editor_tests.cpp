@@ -7,10 +7,12 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFontInfo>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
-#include <QTextEdit>
+#include <QRawFont>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -51,6 +53,36 @@ void verifyOnly(QWidget *root, const char *present,
     }
 }
 
+bool hasDarkTextPixels(
+    const QPixmap &pixmap,
+    int leftInset,
+    int topInset,
+    int rightInset,
+    int bottomInset
+)
+{
+    const QImage image = pixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+    const int left = qBound(0, leftInset, image.width());
+    const int top = qBound(0, topInset, image.height());
+    const int right = qBound(left, image.width() - rightInset, image.width());
+    const int bottom = qBound(top, image.height() - bottomInset, image.height());
+    int dark = 0;
+    for (int y = top; y < bottom; ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = left; x < right; ++x) {
+            const QRgb pixel = line[x];
+            if (qAlpha(pixel) > 100
+                && qRed(pixel) < 120
+                && qGreen(pixel) < 130
+                && qBlue(pixel) < 150
+                && ++dark >= 16) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 class SelectionContextActionEditorTests : public QObject
@@ -61,6 +93,7 @@ private slots:
     void commonFieldsRoundTripAndCallbacksAreStable();
     void actionSpecificControlsAreCreatedOnlyWhenApplicable();
     void promptRejectsMoreThanEightThousandWithoutRecursiveWarnings();
+    void setCustomizationRejectsOverlongPromptWithoutTruncation();
     void unavailableAndUnicodeCatalogValuesRoundTripWithoutSilentReplacement();
     void expandedStateOnlyAffectsSpecificFields();
     void controlsDoNotClipAt100_125_150Percent();
@@ -123,12 +156,14 @@ actionSpecificControlsAreCreatedOnlyWhenApplicable()
     SelectionContextActionEditor search(
         selectionContextActionAiSearch(), fullCatalogs());
     verifyOnly(&search, "selectionActionModel", noTarget);
-    QVERIFY(search.findChild<QTextEdit *>(QStringLiteral("selectionActionPrompt")));
+    QVERIFY(search.findChild<QPlainTextEdit *>(
+        QStringLiteral("selectionActionPrompt")));
 
     SelectionContextActionEditor explain(
         selectionContextActionExplain(), fullCatalogs());
     verifyOnly(&explain, "selectionActionModel", noTarget);
-    QVERIFY(explain.findChild<QTextEdit *>(QStringLiteral("selectionActionPrompt")));
+    QVERIFY(explain.findChild<QPlainTextEdit *>(
+        QStringLiteral("selectionActionPrompt")));
 
     SelectionContextActionEditor translate(
         selectionContextActionTranslate(), fullCatalogs());
@@ -136,7 +171,8 @@ actionSpecificControlsAreCreatedOnlyWhenApplicable()
                QList<const char *>() << "selectionActionVocabularyScope"
                                      << "selectionActionCopyMode");
     QVERIFY(translate.findChild<QComboBox *>(QStringLiteral("selectionActionModel")));
-    QVERIFY(translate.findChild<QTextEdit *>(QStringLiteral("selectionActionPrompt")));
+    QVERIFY(translate.findChild<QPlainTextEdit *>(
+        QStringLiteral("selectionActionPrompt")));
 
     SelectionContextActionEditor save(
         selectionContextActionSave(), fullCatalogs());
@@ -171,7 +207,8 @@ promptRejectsMoreThanEightThousandWithoutRecursiveWarnings()
     };
     SelectionContextActionEditor editor(
         selectionContextActionExplain(), fullCatalogs(), callbacks);
-    QTextEdit *prompt = required<QTextEdit>(&editor, "selectionActionPrompt");
+    QPlainTextEdit *prompt = required<QPlainTextEdit>(
+        &editor, "selectionActionPrompt");
     QLabel *count = required<QLabel>(&editor, "selectionActionPromptCount");
 
     const QString valid(8000, QLatin1Char('a'));
@@ -192,6 +229,58 @@ promptRejectsMoreThanEightThousandWithoutRecursiveWarnings()
     QCOMPARE(editor.customization().promptOverride,
              QString::fromUtf8("新的有效提示词"));
     QCOMPARE(changes.size(), 2);
+}
+
+void SelectionContextActionEditorTests::
+setCustomizationRejectsOverlongPromptWithoutTruncation()
+{
+    QVector<SelectionContextActionCustomization> changes;
+    QStringList warnings;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        changes.append(value);
+    };
+    callbacks.validationWarning = [&](const QString &warning) {
+        warnings.append(warning);
+    };
+    SelectionContextActionEditor editor(
+        selectionContextActionExplain(), fullCatalogs(), callbacks);
+    SelectionContextActionCustomization accepted;
+    accepted.displayName = QString::fromUtf8("解释");
+    accepted.promptOverride = QString::fromUtf8("已接受提示词");
+    editor.setCustomization(accepted);
+
+    SelectionContextActionCustomization rejected = accepted;
+    rejected.displayName = QString::fromUtf8("新的解释名称");
+    rejected.promptOverride = QString(8001, QLatin1Char('x'));
+    editor.setCustomization(rejected);
+    QPlainTextEdit *prompt = required<QPlainTextEdit>(
+        &editor, "selectionActionPrompt");
+    QLabel *count = required<QLabel>(&editor, "selectionActionPromptCount");
+    QCOMPARE(prompt->toPlainText(), accepted.promptOverride);
+    QCOMPARE(editor.customization().promptOverride, accepted.promptOverride);
+    QCOMPARE(count->text(), QStringLiteral("%1 / 8000")
+        .arg(accepted.promptOverride.size()));
+    QCOMPARE(changes.size(), 0);
+    QCOMPARE(warnings.size(), 1);
+
+    required<QLineEdit>(&editor, "selectionActionDisplayName")
+        ->setText(QString::fromUtf8("随后修改名称"));
+    QCOMPARE(changes.size(), 1);
+    QCOMPARE(changes.last().promptOverride, accepted.promptOverride);
+
+    QStringList firstWarnings;
+    SelectionContextActionEditor::Callbacks firstCallbacks;
+    firstCallbacks.validationWarning = [&](const QString &warning) {
+        firstWarnings.append(warning);
+    };
+    SelectionContextActionEditor first(
+        selectionContextActionAiSearch(), fullCatalogs(), firstCallbacks);
+    SelectionContextActionCustomization firstRejected;
+    firstRejected.promptOverride = QString(8001, QLatin1Char('y'));
+    first.setCustomization(firstRejected);
+    QCOMPARE(first.customization().promptOverride, QString());
+    QCOMPARE(firstWarnings.size(), 1);
 }
 
 void SelectionContextActionEditorTests::
@@ -269,6 +358,8 @@ controlsDoNotClipAt100_125_150Percent()
 {
 #ifdef Q_OS_WIN
     QCOMPARE(QGuiApplication::platformName(), QStringLiteral("windows"));
+#else
+    QSKIP("The strengthened CJK rendering gate runs on Windows native only");
 #endif
     const QFont originalFont = QApplication::font();
     const QVector<int> scales = QVector<int>() << 100 << 125 << 150;
@@ -281,8 +372,10 @@ controlsDoNotClipAt100_125_150Percent()
             new SelectionContextActionEditor(
                 selectionContextActionTranslate(), fullCatalogs());
         SelectionContextActionCustomization value;
-        value.displayName = QString::fromUtf8("这是二十四字符以内的超长中文自定义动作名称");
-        value.modelId = QStringLiteral("provider:unavailable-extra-long-model-name");
+        value.displayName = QString::fromUtf8(
+            "中文动作名称中文动作名称中文动作名称中文动作名称");
+        value.modelId = QStringLiteral("provider:")
+            + QString(80, QLatin1Char('x'));
         value.promptOverride = QString::fromUtf8("请保留术语并给出准确自然的中文翻译。");
         value.targetLanguage = QString::fromUtf8("超长的自定义目标语言名称");
         editor->setCustomization(value);
@@ -291,23 +384,50 @@ controlsDoNotClipAt100_125_150Percent()
         QWidget host;
         QVBoxLayout layout(&host);
         layout.addWidget(editor);
-        host.resize(qMax(760, (760 * scale) / 100),
-                    qMax(520, (520 * scale) / 100));
+        host.setFixedWidth(760);
+        host.resize(760, 900);
         host.show();
         QTest::qWait(20);
-        host.adjustSize();
         QCoreApplication::processEvents();
+        QCOMPARE(host.width(), 760);
 
 #ifdef Q_OS_WIN
-        const QFontMetrics metrics(editor->font());
-        QVERIFY2(metrics.width(QString::fromUtf8("中文控件文字")) > 40,
-                 "Windows native visual gate requires renderable CJK glyphs");
+        const QRawFont rawFont = QRawFont::fromFont(editor->font());
+        QVERIFY2(rawFont.isValid(),
+                 "Windows native visual gate requires a valid raw font");
+        const QString requiredCjk = QString::fromUtf8("中文不可用显示名称");
+        for (const QChar character : requiredCjk) {
+            QVERIFY2(rawFont.supportsCharacter(character),
+                     qPrintable(QStringLiteral("missing CJK glyph U+%1")
+                         .arg(character.unicode(), 4, 16, QLatin1Char('0'))));
+        }
         QVERIFY2(QFontInfo(editor->font()).family().contains(
                      QString::fromUtf8("雅黑"), Qt::CaseInsensitive)
                      || QFontInfo(editor->font()).family().contains(
                          QStringLiteral("YaHei"), Qt::CaseInsensitive),
                  "Windows native visual gate requires Microsoft YaHei UI");
 #endif
+        QLabel *displayTitle = required<QLabel>(
+            editor, "selectionActionDisplayNameLabel");
+        QLineEdit *displayName = required<QLineEdit>(
+            editor, "selectionActionDisplayName");
+        QComboBox *model = required<QComboBox>(
+            editor, "selectionActionModel");
+        displayName->clearFocus();
+        model->clearFocus();
+        QCoreApplication::processEvents();
+        const QPixmap screenshot = host.grab();
+        QVERIFY(!screenshot.isNull());
+        QVERIFY(hasDarkTextPixels(screenshot, 8, 8, 8, 8));
+        QVERIFY2(hasDarkTextPixels(displayTitle->grab(), 0, 0, 0, 0),
+                 "display-name title did not render visible dark pixels");
+        QVERIFY2(hasDarkTextPixels(displayName->grab(), 6, 4, 12, 4),
+                 "long Chinese display name did not render visible dark pixels");
+        QVERIFY(model->currentText().contains(QString::fromUtf8("不可用")));
+        QVERIFY2(hasDarkTextPixels(model->grab(), 8, 4,
+                                   qMax(28, model->width() / 8), 4),
+                 "unavailable-model text did not render visible dark pixels");
+        QCOMPARE(model->toolTip(), model->currentText());
         const QList<QLabel *> labels = editor->findChildren<QLabel *>();
         for (QLabel *label : labels) {
             if (!label->isVisible() || label->text().trimmed().isEmpty()) {
@@ -342,7 +462,8 @@ controlsDoNotClipAt100_125_150Percent()
                 QVERIFY(combo->height() >= combo->sizeHint().height());
             }
         }
-        QTextEdit *prompt = required<QTextEdit>(editor, "selectionActionPrompt");
+        QPlainTextEdit *prompt = required<QPlainTextEdit>(
+            editor, "selectionActionPrompt");
         QVERIFY(prompt->height() >= prompt->sizeHint().height());
     }
     QApplication::setFont(originalFont);

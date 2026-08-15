@@ -13,7 +13,7 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
-class QTextEdit;
+class QPlainTextEdit;
 class QToolButton;
 class QWidget;
 
@@ -68,7 +68,7 @@ private:
     QToolButton *expandButton_ = nullptr;
     QWidget *specificFields_ = nullptr;
     QComboBox *modelCombo_ = nullptr;
-    QTextEdit *promptEdit_ = nullptr;
+    QPlainTextEdit *promptEdit_ = nullptr;
     QLabel *promptCountLabel_ = nullptr;
     QComboBox *targetLanguageCombo_ = nullptr;
     QComboBox *vocabularyScopeCombo_ = nullptr;

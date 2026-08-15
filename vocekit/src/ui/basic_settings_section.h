@@ -52,6 +52,10 @@ public:
         std::function<void()> saveAndRefresh;
         std::function<void(const QString &, const QString &)> showDetail;
         std::function<void(const QString &)> previewFloatingBarStyle;
+        std::function<QVector<QPair<QString, QString>>()> modelCatalogProvider;
+        std::function<QVector<QPair<QString, QString>>()> vocabularyScopeCatalogProvider;
+        std::function<bool()> confirmRestoreAllSelectionActions;
+        std::function<void(const QString &)> selectionActionValidationWarning;
     };
 
     explicit BasicSettingsSection(

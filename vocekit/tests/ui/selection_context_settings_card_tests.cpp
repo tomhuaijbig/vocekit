@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "../../src/domain/selection_context_actions.h"
+#include "../../src/ui/selection_context_action_editor.h"
 #include "../../src/ui/selection_context_settings_card.h"
 
 #include <QAbstractItemModel>
@@ -10,13 +11,16 @@
 #include <QFontInfo>
 #include <QLabel>
 #include <QImage>
+#include <QLineEdit>
 #include <QListWidget>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QTextEdit>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace {
@@ -31,16 +35,41 @@ T *required(QWidget *root, const char *name)
     return widget;
 }
 
-QVector<QPair<QString, QString>> denseCatalog()
+SelectionContextActionEditor *actionEditor(
+    QWidget *root,
+    const QString &actionId)
 {
-    QVector<QPair<QString, QString>> catalog;
-    for (int i = 0; i < 24; ++i) {
-        catalog.append(qMakePair(
-            QString::fromUtf8("自定义功能 %1").arg(i + 1),
-            QStringLiteral("function:custom_%1").arg(i + 1)
-        ));
-    }
-    return catalog;
+    return root->findChild<SelectionContextActionEditor *>(
+        QStringLiteral("selectionActionEditor_") + actionId
+    );
+}
+
+bool sameCustomization(
+    const SelectionContextActionCustomization &left,
+    const SelectionContextActionCustomization &right)
+{
+    return left.displayName == right.displayName
+        && left.visible == right.visible
+        && left.modelId == right.modelId
+        && left.promptOverride == right.promptOverride
+        && left.targetLanguage == right.targetLanguage
+        && left.vocabularyScopeId == right.vocabularyScopeId
+        && left.copyMode == right.copyMode;
+}
+
+SelectionContextActionEditor::Catalogs testCatalogs()
+{
+    SelectionContextActionEditor::Catalogs catalogs;
+    catalogs.models
+        << qMakePair(QStringLiteral("Model Alpha"), QStringLiteral("alpha"))
+        << qMakePair(QStringLiteral("Model Beta"), QStringLiteral("beta"));
+    catalogs.vocabularyScopes
+        << qMakePair(QString::fromUtf8("全局词库"), QStringLiteral("__global"))
+        << qMakePair(QString::fromUtf8("写作功能"), QStringLiteral("writing"));
+    catalogs.targetLanguages
+        << qMakePair(QString::fromUtf8("跟随全局目标语言"), QString())
+        << qMakePair(QStringLiteral("English"), QStringLiteral("English"));
+    return catalogs;
 }
 
 QString visualOutputPath(const QString &fileName, QTemporaryDir *fallback)
@@ -89,8 +118,17 @@ private slots:
     void pauseDurationAndKeyboardObservationAreIndependent();
     void acceptedNetworkConsentCanBeResetForTheNextModelAction();
     void strongSelectionRemainsAnExplanationInsteadOfADuplicateToggle();
+    void buildsFiveEditorsFromStableOrderAndNamesNeverChangeIdentity();
+    void onlyOneActionEditorIsExpandedAtATime();
+    void refusesToHideLastVisibleActionImmediatelyAndAfterQueuedDelivery();
+    void restoreOneDoesNotChangeOtherActionsOrToolbarFields();
+    void restoreAllRequiresConfirmationAndKeepsToolbarFieldsAndOrder();
+    void catalogsReachApplicableEditorsAndUnknownCurrentModelStaysVisible();
+    void dragOrderStillContainsEveryBuiltInIdExactlyOnceWithDuplicateNames();
+    void refreshInvalidatesQueuedEditorChanges();
+    void successfulSaveEchoKeepsEditorAndNewerQueuedChange();
     void buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent();
-    void smallWindowAndManyCustomFunctionsRemainScrollableAndReachable();
+    void smallWindowAndExpandedEditorsRemainScrollableAndReachable();
 };
 
 void SelectionContextSettingsCardTests::cardLoadsAndReturnsEveryTypedSetting()
@@ -252,6 +290,352 @@ strongSelectionRemainsAnExplanationInsteadOfADuplicateToggle()
 }
 
 void SelectionContextSettingsCardTests::
+buildsFiveEditorsFromStableOrderAndNamesNeverChangeIdentity()
+{
+    SelectionContextSettings settings;
+    settings.actionOrder = QStringList()
+        << selectionContextActionCopy()
+        << selectionContextActionSave()
+        << selectionContextActionTranslate()
+        << selectionContextActionAiSearch()
+        << selectionContextActionExplain();
+    SelectionContextSettingsCard card(settings);
+    QListWidget *list = required<QListWidget>(
+        &card, "selectionContextActionList");
+    QCOMPARE(list->count(), 5);
+    for (int row = 0; row < list->count(); ++row) {
+        const QString id = list->item(row)->data(Qt::UserRole).toString();
+        QCOMPARE(id, settings.actionOrder.at(row));
+        SelectionContextActionEditor *editor = actionEditor(&card, id);
+        QVERIFY2(editor, qPrintable(id));
+        QCOMPARE(list->itemWidget(list->item(row)), editor);
+    }
+
+    SelectionContextActionEditor *copy = actionEditor(
+        &card, selectionContextActionCopy());
+    required<QLineEdit>(copy, "selectionActionDisplayName")
+        ->setText(QString::fromUtf8("同名动作"));
+    QCOMPARE(list->item(0)->data(Qt::UserRole).toString(),
+             selectionContextActionCopy());
+    QCOMPARE(card.settings().actionOrder, settings.actionOrder);
+}
+
+void SelectionContextSettingsCardTests::
+onlyOneActionEditorIsExpandedAtATime()
+{
+    SelectionContextSettingsCard card((SelectionContextSettings()));
+    SelectionContextActionEditor *search = actionEditor(
+        &card, selectionContextActionAiSearch());
+    SelectionContextActionEditor *copy = actionEditor(
+        &card, selectionContextActionCopy());
+    QVERIFY(search);
+    QVERIFY(copy);
+    required<QToolButton>(search, "selectionActionExpand")->click();
+    QVERIFY(search->isExpanded());
+    QVERIFY(!copy->isExpanded());
+    QVERIFY(required<QLineEdit>(search, "selectionActionDisplayName")
+            ->isVisibleTo(search));
+    required<QToolButton>(copy, "selectionActionExpand")->click();
+    QVERIFY(!search->isExpanded());
+    QVERIFY(copy->isExpanded());
+    QVERIFY(required<QLineEdit>(search, "selectionActionDisplayName")
+            ->isVisibleTo(search));
+}
+
+void SelectionContextSettingsCardTests::
+refusesToHideLastVisibleActionImmediatelyAndAfterQueuedDelivery()
+{
+    SelectionContextSettings settings;
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionCustomization item =
+            settings.actionCustomizations.value(id);
+        item.visible = id == selectionContextActionCopy();
+        settings.actionCustomizations.insert(id, item);
+    }
+    QStringList warnings;
+    QVector<SelectionContextSettings> changes;
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.validationWarning = [&](const QString &text) {
+        warnings.append(text);
+    };
+    callbacks.settingsChanged = [&](const SelectionContextSettings &value) {
+        changes.append(value);
+    };
+    SelectionContextSettingsCard card(settings, callbacks);
+    SelectionContextActionEditor *copy = actionEditor(
+        &card, selectionContextActionCopy());
+    QCheckBox *visible = required<QCheckBox>(copy, "selectionActionVisible");
+    visible->setChecked(false);
+
+    QVERIFY(card.settings().actionCustomizations
+            .value(selectionContextActionCopy()).visible);
+    QVERIFY(visible->isChecked());
+    QVERIFY(!warnings.isEmpty());
+    QVERIFY(warnings.last().contains(QString::fromUtf8("至少保留一个")));
+    QVERIFY(changes.isEmpty());
+    QCoreApplication::processEvents();
+    QVERIFY(card.settings().actionCustomizations
+            .value(selectionContextActionCopy()).visible);
+    QVERIFY(changes.isEmpty());
+}
+
+void SelectionContextSettingsCardTests::
+restoreOneDoesNotChangeOtherActionsOrToolbarFields()
+{
+    SelectionContextSettings settings;
+    settings.enabled = true;
+    settings.pauseMinutes = 91;
+    settings.actionOrder = QStringList()
+        << selectionContextActionCopy()
+        << selectionContextActionAiSearch()
+        << selectionContextActionTranslate()
+        << selectionContextActionExplain()
+        << selectionContextActionSave();
+    SelectionContextActionCustomization search =
+        settings.actionCustomizations.value(selectionContextActionAiSearch());
+    search.displayName = QString::fromUtf8("我的搜索");
+    search.modelId = QStringLiteral("alpha");
+    search.promptOverride = QStringLiteral("custom prompt");
+    settings.actionCustomizations.insert(selectionContextActionAiSearch(), search);
+    SelectionContextActionCustomization copy =
+        settings.actionCustomizations.value(selectionContextActionCopy());
+    copy.displayName = QString::fromUtf8("另一个复制");
+    settings.actionCustomizations.insert(selectionContextActionCopy(), copy);
+    QVector<SelectionContextSettings> changes;
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.settingsChanged = [&](const SelectionContextSettings &value) {
+        changes.append(value);
+    };
+    SelectionContextSettingsCard card(settings, callbacks);
+    required<QPushButton>(
+        actionEditor(&card, selectionContextActionAiSearch()),
+        "selectionActionRestore")->click();
+
+    QCOMPARE(changes.size(), 1);
+    const SelectionContextSettings restored = changes.last();
+    const SelectionContextActionCustomization defaults =
+        defaultSelectionContextActionCustomizations()
+            .value(selectionContextActionAiSearch());
+    QVERIFY(sameCustomization(
+        restored.actionCustomizations.value(selectionContextActionAiSearch()),
+        defaults));
+    QVERIFY(sameCustomization(
+        restored.actionCustomizations.value(selectionContextActionCopy()), copy));
+    QCOMPARE(restored.enabled, true);
+    QCOMPARE(restored.pauseMinutes, 91);
+    QCOMPARE(restored.actionOrder, settings.actionOrder);
+}
+
+void SelectionContextSettingsCardTests::
+restoreAllRequiresConfirmationAndKeepsToolbarFieldsAndOrder()
+{
+    SelectionContextSettings settings;
+    settings.enabled = true;
+    settings.keyboardSelectionEnabled = false;
+    settings.closeOnOutsideClick = false;
+    settings.pinEnabled = false;
+    settings.networkConsentAcknowledged = true;
+    settings.minimumTextLength = 31;
+    settings.pauseMinutes = 72;
+    settings.blockedApplications << QStringLiteral("secret.exe");
+    settings.actionOrder = QStringList()
+        << selectionContextActionCopy()
+        << selectionContextActionSave()
+        << selectionContextActionExplain()
+        << selectionContextActionTranslate()
+        << selectionContextActionAiSearch();
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionCustomization item =
+            settings.actionCustomizations.value(id);
+        item.displayName = QStringLiteral("custom-") + id;
+        item.visible = id != selectionContextActionExplain();
+        item.modelId = QStringLiteral("alpha");
+        item.promptOverride = QStringLiteral("prompt");
+        item.targetLanguage = QStringLiteral("English");
+        item.vocabularyScopeId = QStringLiteral("writing");
+        item.copyMode = QStringLiteral("trim");
+        settings.actionCustomizations.insert(id, item);
+    }
+    bool confirm = false;
+    int confirmations = 0;
+    QVector<SelectionContextSettings> changes;
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.confirmRestoreAllSelectionActions = [&]() {
+        ++confirmations;
+        return confirm;
+    };
+    callbacks.settingsChanged = [&](const SelectionContextSettings &value) {
+        changes.append(value);
+    };
+    SelectionContextSettingsCard card(settings, callbacks);
+    QPushButton *restoreAll = required<QPushButton>(
+        &card, "selectionContextRestoreAllButton");
+    restoreAll->click();
+    QCOMPARE(confirmations, 1);
+    QVERIFY(changes.isEmpty());
+    QVERIFY(sameCustomization(
+        card.settings().actionCustomizations.value(selectionContextActionCopy()),
+        settings.actionCustomizations.value(selectionContextActionCopy())));
+
+    confirm = true;
+    restoreAll->click();
+    QCOMPARE(confirmations, 2);
+    QCOMPARE(changes.size(), 1);
+    const SelectionContextSettings restored = changes.last();
+    const SelectionContextActionCustomizationMap defaults =
+        defaultSelectionContextActionCustomizations();
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        QVERIFY2(sameCustomization(
+            restored.actionCustomizations.value(id), defaults.value(id)),
+            qPrintable(id));
+    }
+    QCOMPARE(restored.enabled, settings.enabled);
+    QCOMPARE(restored.keyboardSelectionEnabled,
+             settings.keyboardSelectionEnabled);
+    QCOMPARE(restored.closeOnOutsideClick, settings.closeOnOutsideClick);
+    QCOMPARE(restored.pinEnabled, settings.pinEnabled);
+    QCOMPARE(restored.networkConsentAcknowledged,
+             settings.networkConsentAcknowledged);
+    QCOMPARE(restored.minimumTextLength, settings.minimumTextLength);
+    QCOMPARE(restored.pauseMinutes, settings.pauseMinutes);
+    QCOMPARE(restored.blockedApplications, settings.blockedApplications);
+    QCOMPARE(restored.actionOrder, settings.actionOrder);
+}
+
+void SelectionContextSettingsCardTests::
+catalogsReachApplicableEditorsAndUnknownCurrentModelStaysVisible()
+{
+    SelectionContextSettings settings;
+    SelectionContextActionCustomization search =
+        settings.actionCustomizations.value(selectionContextActionAiSearch());
+    search.modelId = QStringLiteral("retired-model-that-must-remain");
+    settings.actionCustomizations.insert(selectionContextActionAiSearch(), search);
+    SelectionContextSettingsCard card(settings);
+    card.setCatalogs(testCatalogs());
+
+    SelectionContextActionEditor *searchEditor = actionEditor(
+        &card, selectionContextActionAiSearch());
+    QComboBox *model = required<QComboBox>(searchEditor, "selectionActionModel");
+    QCOMPARE(model->currentData().toString(), search.modelId);
+    QVERIFY(model->currentText().contains(QString::fromUtf8("不可用")));
+    QVERIFY(model->findData(QStringLiteral("alpha")) >= 0);
+    QCOMPARE(model->itemText(model->findData(QStringLiteral("alpha"))),
+             QStringLiteral("Model Alpha"));
+    QComboBox *scope = required<QComboBox>(
+        actionEditor(&card, selectionContextActionSave()),
+        "selectionActionVocabularyScope");
+    QVERIFY(scope->findData(QStringLiteral("writing")) >= 0);
+    QVERIFY(scope->findData(QStringLiteral("__all")) < 0);
+    QComboBox *language = required<QComboBox>(
+        actionEditor(&card, selectionContextActionTranslate()),
+        "selectionActionTargetLanguage");
+    QVERIFY(language->findData(QStringLiteral("English")) >= 0);
+}
+
+void SelectionContextSettingsCardTests::
+dragOrderStillContainsEveryBuiltInIdExactlyOnceWithDuplicateNames()
+{
+    SelectionContextSettings settings;
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionCustomization item =
+            settings.actionCustomizations.value(id);
+        item.displayName = QString::fromUtf8("完全相同");
+        settings.actionCustomizations.insert(id, item);
+    }
+    QVector<SelectionContextSettings> changes;
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.settingsChanged = [&](const SelectionContextSettings &value) {
+        changes.append(value);
+    };
+    SelectionContextSettingsCard card(settings, callbacks);
+    QListWidget *list = required<QListWidget>(
+        &card, "selectionContextActionList");
+    QListWidgetItem *last = list->takeItem(list->count() - 1);
+    list->insertItem(0, last);
+    QCoreApplication::processEvents();
+    QVERIFY(!changes.isEmpty());
+    const QStringList order = changes.last().actionOrder;
+    QCOMPARE(order.size(), 5);
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        QCOMPARE(order.count(id), 1);
+    }
+    QCOMPARE(order.first(), selectionContextActionCopy());
+}
+
+void SelectionContextSettingsCardTests::
+refreshInvalidatesQueuedEditorChanges()
+{
+    SelectionContextSettings first;
+    QVector<SelectionContextSettings> changes;
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.settingsChanged = [&](const SelectionContextSettings &value) {
+        changes.append(value);
+    };
+    SelectionContextSettingsCard card(first, callbacks);
+    SelectionContextActionEditor *search = actionEditor(
+        &card, selectionContextActionAiSearch());
+    required<QLineEdit>(search, "selectionActionDisplayName")
+        ->setText(QString::fromUtf8("排队中的旧名称"));
+
+    SelectionContextSettings persisted = first;
+    SelectionContextActionCustomization persistedSearch =
+        persisted.actionCustomizations.value(selectionContextActionAiSearch());
+    persistedSearch.displayName = QString::fromUtf8("持久化名称");
+    persisted.actionCustomizations.insert(
+        selectionContextActionAiSearch(), persistedSearch);
+    card.setSettings(persisted);
+    QCoreApplication::processEvents();
+    QVERIFY(changes.isEmpty());
+    QCOMPARE(card.settings().actionCustomizations
+             .value(selectionContextActionAiSearch()).displayName,
+             persistedSearch.displayName);
+}
+
+void SelectionContextSettingsCardTests::
+successfulSaveEchoKeepsEditorAndNewerQueuedChange()
+{
+    QStringList deliveredNames;
+    SelectionContextSettingsCard *cardPointer = nullptr;
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.settingsChanged = [&](const SelectionContextSettings &value) {
+        deliveredNames.append(value.actionCustomizations
+            .value(selectionContextActionAiSearch()).displayName);
+        cardPointer->setSettings(value);
+    };
+    SelectionContextSettingsCard card(
+        SelectionContextSettings(), callbacks);
+    cardPointer = &card;
+    SelectionContextActionEditor *search = actionEditor(
+        &card, selectionContextActionAiSearch());
+    QPointer<SelectionContextActionEditor> original(search);
+    QLineEdit *name = required<QLineEdit>(
+        search, "selectionActionDisplayName");
+    card.show();
+    QTest::qWait(1);
+    name->setFocus();
+    QVERIFY(name->hasFocus());
+    name->setText(QStringLiteral("A"));
+    name->setText(QStringLiteral("B"));
+
+    QTest::qWait(20);
+    const QString diagnostic = QStringLiteral("delivered=%1 originalAlive=%2")
+        .arg(deliveredNames.join(QStringLiteral(",")))
+        .arg(original ? QStringLiteral("true") : QStringLiteral("false"));
+    QVERIFY2(original, qPrintable(diagnostic));
+    QVERIFY2(actionEditor(&card, selectionContextActionAiSearch())
+                 == original.data(),
+             qPrintable(diagnostic));
+    QVERIFY2(deliveredNames
+                 == (QStringList() << QStringLiteral("A")
+                                   << QStringLiteral("B")),
+             qPrintable(diagnostic));
+    QCOMPARE(card.settings().actionCustomizations
+             .value(selectionContextActionAiSearch()).displayName,
+             QStringLiteral("B"));
+    QVERIFY(name->hasFocus());
+}
+
+void SelectionContextSettingsCardTests::
 buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent()
 {
     QTemporaryDir fallback;
@@ -304,8 +688,16 @@ buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent()
             if (!button->isVisible()) {
                 continue;
             }
-            QVERIFY(button->minimumHeight()
-                    >= qMax(40, QFontMetrics(button->font()).height() + 16));
+            const QString diagnostic = QStringLiteral(
+                "scale=%1 text=%2 minimum=%3 required=%4 object=%5"
+            ).arg(scale)
+             .arg(button->text())
+             .arg(button->minimumHeight())
+             .arg(qMax(40, QFontMetrics(button->font()).height() + 16))
+             .arg(button->objectName());
+            QVERIFY2(button->minimumHeight()
+                     >= qMax(40, QFontMetrics(button->font()).height() + 16),
+                     qPrintable(diagnostic));
             QVERIFY(button->height() >= button->sizeHint().height());
             QVERIFY(button->maximumHeight() == QWIDGETSIZE_MAX);
         }
@@ -333,44 +725,17 @@ buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent()
         QVERIFY(host.grab().save(maximizedPath));
         QVERIFY(QFileInfo(maximizedPath).size() > 1000);
 
-        SelectionContextSettingsCard *dense =
-            new SelectionContextSettingsCard(settings);
-        dense->setActionCatalog(denseCatalog());
-        QWidget denseHost;
-        QVBoxLayout *denseLayout = new QVBoxLayout(&denseHost);
-        QScrollArea *denseScroll = new QScrollArea;
-        denseScroll->setWidgetResizable(true);
-        denseScroll->setWidget(dense);
-        denseLayout->addWidget(denseScroll);
-        denseHost.resize(qMax(620, (620 * scale) / 100), 520);
-        denseHost.show();
-        QTest::qWait(20);
-        QCOMPARE(required<QListWidget>(
-            dense,
-            "selectionContextActionList"
-        )->count(), 24);
-        QVERIFY(denseScroll->verticalScrollBar()->maximum() > 0);
-        denseScroll->verticalScrollBar()->setValue(
-            denseScroll->verticalScrollBar()->maximum()
-        );
-        QCoreApplication::processEvents();
-        const QString densePath = visualOutputPath(
-            QStringLiteral("selection-context-settings-%1-dense.png").arg(scale),
-            &fallback
-        );
-        QVERIFY(denseHost.grab().save(densePath));
-        QVERIFY(QFileInfo(densePath).size() > 1000);
     }
     QApplication::setFont(originalFont);
 }
 
 void SelectionContextSettingsCardTests::
-smallWindowAndManyCustomFunctionsRemainScrollableAndReachable()
+smallWindowAndExpandedEditorsRemainScrollableAndReachable()
 {
     SelectionContextSettingsCard *card = new SelectionContextSettingsCard(
         SelectionContextSettings()
     );
-    card->setActionCatalog(denseCatalog());
+    card->setExpandedAction(selectionContextActionTranslate());
     QWidget host;
     QVBoxLayout *layout = new QVBoxLayout(&host);
     QScrollArea *scroll = new QScrollArea;
@@ -385,7 +750,7 @@ smallWindowAndManyCustomFunctionsRemainScrollableAndReachable()
         card,
         "selectionContextActionList"
     );
-    QCOMPARE(actions->count(), 24);
+    QCOMPARE(actions->count(), 5);
     QVERIFY(scroll->verticalScrollBar()->maximum() > 0);
     scroll->verticalScrollBar()->setValue(
         scroll->verticalScrollBar()->maximum()

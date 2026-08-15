@@ -12,6 +12,7 @@
 #include "../config/app_paths.h"
 #include "../config/app_settings_defaults.h"
 #include "../input/hotkey_definitions.h"
+#include "../providers/model_catalog.h"
 
 #include <QtWidgets>
 
@@ -141,6 +142,28 @@ QString normalizedRecordDirectorySetting(const QString &path)
     return cleanPath == QDir::cleanPath(defaultRecordDirectory())
         ? QString()
         : cleanPath;
+}
+
+QString selectionVocabularyScopeTitle(
+    const AppSettingsData &settings,
+    const QString &scopeId)
+{
+    if (scopeId == QStringLiteral("__global")) {
+        return settingsPanelTr8("全局词库");
+    }
+    if (scopeId == QStringLiteral("dictate")) {
+        return settingsPanelTr8("听写");
+    }
+    if (scopeId == QStringLiteral("translate")) {
+        return settingsPanelTr8("翻译");
+    }
+    if (scopeId == QStringLiteral("ask")) {
+        return settingsPanelTr8("问答");
+    }
+    const FunctionSettings function = settings.function(scopeId);
+    return function.name.trimmed().isEmpty()
+        ? scopeId
+        : function.name.trimmed();
 }
 
 } // namespace
@@ -453,6 +476,53 @@ QString normalizedRecordDirectorySetting(const QString &path)
         };
         callbacks.previewFloatingBarStyle =
             m_access.previewFloatingBarStyle;
+        callbacks.modelCatalogProvider = []() {
+            QVector<QPair<QString, QString>> catalog;
+            for (const ModelOption &option : modelOptions()) {
+                const QString id = option.id.trimmed();
+                if (id.isEmpty()) {
+                    continue;
+                }
+                const QString title = option.title.trimmed();
+                catalog.append(qMakePair(
+                    title.isEmpty() ? id : title,
+                    id
+                ));
+            }
+            return catalog;
+        };
+        callbacks.vocabularyScopeCatalogProvider = [this]() {
+            const AppSettingsData settings = settingsSnapshot();
+            QVector<QPair<QString, QString>> catalog;
+            for (const QString &scopeId :
+                 writableSelectionContextVocabularyScopeIds(settings)) {
+                if (scopeId == QStringLiteral("__all")) {
+                    continue;
+                }
+                catalog.append(qMakePair(
+                    selectionVocabularyScopeTitle(settings, scopeId),
+                    scopeId
+                ));
+            }
+            return catalog;
+        };
+        callbacks.confirmRestoreAllSelectionActions = [this]() {
+            return QMessageBox::question(
+                this,
+                settingsPanelTr8("恢复全部默认设置"),
+                settingsPanelTr8("确定恢复五个工具条功能的默认设置吗？工具条总开关和顺序会保留。"),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No
+            ) == QMessageBox::Yes;
+        };
+        callbacks.selectionActionValidationWarning =
+            [this](const QString &warning) {
+            showAttentionWarning(
+                this,
+                settingsPanelTr8("设置未更改"),
+                warning
+            );
+        };
         return new BasicSettingsSection(kind, callbacks, this);
     }
 

@@ -2,8 +2,10 @@
 #define VOCEKIT_SELECTION_CONTEXT_SETTINGS_CARD_H
 
 #include "../config/app_settings_data.h"
+#include "selection_context_action_editor.h"
 
 #include <QFrame>
+#include <QMap>
 #include <QPair>
 #include <QVector>
 
@@ -22,6 +24,8 @@ public:
     {
         std::function<void(const SelectionContextSettings &)> settingsChanged;
         std::function<void()> showStrongSelectionDetails;
+        std::function<bool()> confirmRestoreAllSelectionActions;
+        std::function<void(const QString &)> validationWarning;
     };
 
     explicit SelectionContextSettingsCard(
@@ -32,8 +36,14 @@ public:
 
     SelectionContextSettings settings() const;
     void setSettings(const SelectionContextSettings &settings);
-    void setActionCatalog(
-        const QVector<QPair<QString, QString>> &catalog
+    void setCatalogs(const SelectionContextActionEditor::Catalogs &catalogs);
+    void rebuildActionEditors();
+    void setExpandedAction(const QString &actionId);
+    void restoreActionDefaults(const QString &actionId);
+    void restoreAllActionDefaults();
+    bool applyCustomization(
+        const QString &actionId,
+        const SelectionContextActionCustomization &value
     );
 
 protected:
@@ -41,16 +51,24 @@ protected:
 
 private:
     void buildUi();
-    void rebuildActionList();
     void updateButtonMetrics();
+    void updateActionListMetrics();
     void updateConsentResetVisibility();
     void readWidgets();
+    SelectionContextSettings snapshotFromWidgets() const;
+    bool wouldHideLastVisibleAction(
+        const QString &actionId,
+        const SelectionContextActionCustomization &value
+    ) const;
+    void warnLastVisibleAction();
     void notifyChanged();
     void queueActionOrderChanged();
 
     SelectionContextSettings m_settings;
     Callbacks m_callbacks;
-    QVector<QPair<QString, QString>> m_actionCatalog;
+    SelectionContextActionEditor::Catalogs m_catalogs;
+    QMap<QString, SelectionContextActionEditor *> m_actionEditors;
+    QString m_expandedActionId;
     bool m_updating = false;
     bool m_actionChangeQueued = false;
     QCheckBox *m_enabled = nullptr;
@@ -61,6 +79,7 @@ private:
     QSpinBox *m_pauseMinutes = nullptr;
     QListWidget *m_actions = nullptr;
     QTextEdit *m_blockedApplications = nullptr;
+    QPushButton *m_restoreAllActions = nullptr;
     QPushButton *m_resetConsent = nullptr;
     QPushButton *m_strongSelectionLink = nullptr;
 };

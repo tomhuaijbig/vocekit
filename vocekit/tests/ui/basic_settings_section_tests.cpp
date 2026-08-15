@@ -1,11 +1,15 @@
 #include <QtTest>
 
+#include "../../src/domain/selection_context_actions.h"
 #include "../../src/ui/basic_settings_section.h"
 #include "../../src/ui/floating_bar_style_selector.h"
+#include "../../src/ui/selection_context_action_editor.h"
 #include "../../src/ui/selection_context_settings_card.h"
 
 #include <QCheckBox>
+#include <QLineEdit>
 #include <QPushButton>
+#include <QToolButton>
 
 class BasicSettingsSectionTests : public QObject
 {
@@ -14,6 +18,8 @@ class BasicSettingsSectionTests : public QObject
 private slots:
     void settingsPanelSavePassesTheWholeSelectionContextValue();
     void failedSaveRestoresPersistedValuesAndVisibleWidgets();
+    void failedSaveRestoresAllExpandedAndCollapsedActionEditors();
+    void forwardsCatalogConfirmationAndWarningCallbacks();
     void strongSelectionRemainsTheExistingGlobalCompatibilitySetting();
     void voiceSectionPersistsStreamingRecognitionToggle()
     {
@@ -201,6 +207,140 @@ failedSaveRestoresPersistedValuesAndVisibleWidgets()
     QVERIFY(!persisted.selectionContext.enabled);
     QVERIFY(!enabled->isChecked());
     QVERIFY(!card->settings().enabled);
+}
+
+void BasicSettingsSectionTests::
+failedSaveRestoresAllExpandedAndCollapsedActionEditors()
+{
+    BasicSettingsSnapshot persisted;
+    SelectionContextActionCustomization persistedSearch =
+        persisted.selectionContext.actionCustomizations.value(
+            selectionContextActionAiSearch());
+    persistedSearch.displayName = QString::fromUtf8("持久化搜索");
+    persisted.selectionContext.actionCustomizations.insert(
+        selectionContextActionAiSearch(), persistedSearch);
+    SelectionContextActionCustomization persistedCopy =
+        persisted.selectionContext.actionCustomizations.value(
+            selectionContextActionCopy());
+    persistedCopy.displayName = QString::fromUtf8("持久化复制");
+    persisted.selectionContext.actionCustomizations.insert(
+        selectionContextActionCopy(), persistedCopy);
+    BasicSettingsSnapshot pending;
+    bool hasPending = false;
+    BasicSettingsSection *sectionPointer = nullptr;
+    int saves = 0;
+
+    BasicSettingsSection::Callbacks callbacks;
+    callbacks.snapshotProvider = [&]() {
+        return hasPending ? pending : persisted;
+    };
+    callbacks.applySnapshot = [&](const BasicSettingsSnapshot &next) {
+        pending = next;
+        hasPending = true;
+    };
+    callbacks.saveAndRefresh = [&]() {
+        ++saves;
+        hasPending = false;
+        sectionPointer->refreshFromSettings();
+    };
+    BasicSettingsSection section(BasicSettingsSection::General, callbacks);
+    sectionPointer = &section;
+    SelectionContextSettingsCard *card =
+        section.findChild<SelectionContextSettingsCard *>(
+            QStringLiteral("selectionContextSettingsCard"));
+    QVERIFY(card);
+    SelectionContextActionEditor *search =
+        card->findChild<SelectionContextActionEditor *>(
+            QStringLiteral("selectionActionEditor_ai-search"));
+    SelectionContextActionEditor *copy =
+        card->findChild<SelectionContextActionEditor *>(
+            QStringLiteral("selectionActionEditor_copy"));
+    QVERIFY(search);
+    QVERIFY(copy);
+    search->findChild<QToolButton *>(QStringLiteral("selectionActionExpand"))
+        ->click();
+    QVERIFY(search->isExpanded());
+    QVERIFY(!copy->isExpanded());
+    search->findChild<QLineEdit *>(QStringLiteral("selectionActionDisplayName"))
+        ->setText(QString::fromUtf8("未保存搜索"));
+    QCoreApplication::processEvents();
+    QCOMPARE(saves, 1);
+    QCOMPARE(card->settings().actionCustomizations
+             .value(selectionContextActionAiSearch()).displayName,
+             persistedSearch.displayName);
+    QCOMPARE(card->settings().actionCustomizations
+             .value(selectionContextActionCopy()).displayName,
+             persistedCopy.displayName);
+    SelectionContextActionEditor *refreshedSearch =
+        card->findChild<SelectionContextActionEditor *>(
+            QStringLiteral("selectionActionEditor_ai-search"));
+    SelectionContextActionEditor *refreshedCopy =
+        card->findChild<SelectionContextActionEditor *>(
+            QStringLiteral("selectionActionEditor_copy"));
+    QVERIFY(refreshedSearch);
+    QVERIFY(refreshedCopy);
+    QCOMPARE(refreshedSearch->customization().displayName,
+             persistedSearch.displayName);
+    QCOMPARE(refreshedCopy->customization().displayName,
+             persistedCopy.displayName);
+}
+
+void BasicSettingsSectionTests::
+forwardsCatalogConfirmationAndWarningCallbacks()
+{
+    BasicSettingsSnapshot current;
+    int confirms = 0;
+    QStringList warnings;
+    BasicSettingsSection::Callbacks callbacks;
+    callbacks.snapshotProvider = [&]() { return current; };
+    callbacks.modelCatalogProvider = []() {
+        return QVector<QPair<QString, QString>>()
+            << qMakePair(QStringLiteral("Model A"), QStringLiteral("model-a"));
+    };
+    callbacks.vocabularyScopeCatalogProvider = []() {
+        return QVector<QPair<QString, QString>>()
+            << qMakePair(QString::fromUtf8("全局词库"), QStringLiteral("__global"));
+    };
+    callbacks.confirmRestoreAllSelectionActions = [&]() {
+        ++confirms;
+        return false;
+    };
+    callbacks.selectionActionValidationWarning = [&](const QString &text) {
+        warnings.append(text);
+    };
+    BasicSettingsSection section(BasicSettingsSection::General, callbacks);
+    SelectionContextSettingsCard *card =
+        section.findChild<SelectionContextSettingsCard *>(
+            QStringLiteral("selectionContextSettingsCard"));
+    QVERIFY(card);
+    SelectionContextActionEditor *search =
+        card->findChild<SelectionContextActionEditor *>(
+            QStringLiteral("selectionActionEditor_ai-search"));
+    QVERIFY(search);
+    QComboBox *model = search->findChild<QComboBox *>(
+        QStringLiteral("selectionActionModel"));
+    QVERIFY(model);
+    QVERIFY(model->findData(QStringLiteral("model-a")) >= 0);
+    card->findChild<QPushButton *>(
+        QStringLiteral("selectionContextRestoreAllButton"))->click();
+    QCOMPARE(confirms, 1);
+
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionEditor *editor =
+            card->findChild<SelectionContextActionEditor *>(
+                QStringLiteral("selectionActionEditor_") + id);
+        QVERIFY(editor);
+        editor->findChild<QCheckBox *>(QStringLiteral("selectionActionVisible"))
+            ->setChecked(id == selectionContextActionCopy());
+        QCoreApplication::processEvents();
+    }
+    SelectionContextActionEditor *copy =
+        card->findChild<SelectionContextActionEditor *>(
+            QStringLiteral("selectionActionEditor_copy"));
+    copy->findChild<QCheckBox *>(QStringLiteral("selectionActionVisible"))
+        ->setChecked(false);
+    QVERIFY(!warnings.isEmpty());
+    QVERIFY(warnings.last().contains(QString::fromUtf8("至少保留一个")));
 }
 
 void BasicSettingsSectionTests::

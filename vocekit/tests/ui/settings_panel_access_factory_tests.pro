@@ -16,6 +16,7 @@ SOURCES += \
     ../../src/config/baidu_sample_parser.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
+    ../../src/config/selection_context_action_customization.cpp \
     ../../src/domain/function_settings.cpp \
     ../../src/domain/selection_context_actions.cpp \
     ../../src/file_utils.cpp \
@@ -23,6 +24,7 @@ SOURCES += \
     ../../src/platform/windows_autostart.cpp \
     ../../src/providers/network_error_messages.cpp \
     ../../src/providers/network_request_executor.cpp \
+    ../../src/providers/model_catalog.cpp \
     ../../src/providers/openai_compatible_model_provider.cpp \
     ../../src/providers/provider_network_transport.cpp \
     ../../src/providers/windows_speech_helper_client.cpp \
@@ -42,6 +44,7 @@ SOURCES += \
     ../../src/ui/history_directory_menu.cpp \
     ../../src/ui/history_settings_section.cpp \
     ../../src/ui/hub_settings_state.cpp \
+    ../../src/ui/selection_context_action_editor.cpp \
     ../../src/ui/selection_context_settings_card.cpp \
     ../../src/ui/settings_panel.cpp \
     ../../src/ui/settings_panel_access_factory.cpp \
@@ -53,11 +56,14 @@ SOURCES += \
 HEADERS += \
     ../../src/capture/screenshot_types.h \
     ../../src/config/app_settings_data.h \
+    ../../src/config/selection_context_action_customization.h \
     ../../src/domain/app_legacy_types.h \
     ../../src/domain/function_settings.h \
     ../../src/domain/selection_context_actions.h \
     ../../src/domain/prompt_runtime_library.h \
+    ../../src/providers/model_catalog.h \
     ../../src/ui/hub_settings_state.h \
+    ../../src/ui/selection_context_action_editor.h \
     ../../src/ui/selection_context_settings_card.h \
     ../../src/ui/settings_panel.h \
     ../../src/ui/settings_panel_access_factory.h

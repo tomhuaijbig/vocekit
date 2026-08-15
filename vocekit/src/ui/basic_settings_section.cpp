@@ -17,6 +17,17 @@ QString bssTr8(const char *text)
     return QString::fromUtf8(text);
 }
 
+QVector<QPair<QString, QString>> selectionTargetLanguages()
+{
+    return QVector<QPair<QString, QString>>()
+        << qMakePair(bssTr8("跟随全局目标语言"), QString())
+        << qMakePair(bssTr8("简体中文"), bssTr8("简体中文"))
+        << qMakePair(bssTr8("繁體中文"), bssTr8("繁體中文"))
+        << qMakePair(QStringLiteral("English"), QStringLiteral("English"))
+        << qMakePair(bssTr8("日本語"), bssTr8("日本語"))
+        << qMakePair(bssTr8("한국어"), bssTr8("한국어"));
+}
+
 } // namespace
 
 BasicSettingsSection::BasicSettingsSection(
@@ -145,11 +156,25 @@ void BasicSettingsSection::addGeneralRows(QVBoxLayout *layout)
             );
         }
     };
+    callbacks.confirmRestoreAllSelectionActions =
+        m_callbacks.confirmRestoreAllSelectionActions;
+    callbacks.validationWarning =
+        m_callbacks.selectionActionValidationWarning;
     m_selectionContextCard = new SelectionContextSettingsCard(
         current.selectionContext,
         callbacks,
         this
     );
+    SelectionContextActionEditor::Catalogs catalogs;
+    if (m_callbacks.modelCatalogProvider) {
+        catalogs.models = m_callbacks.modelCatalogProvider();
+    }
+    if (m_callbacks.vocabularyScopeCatalogProvider) {
+        catalogs.vocabularyScopes =
+            m_callbacks.vocabularyScopeCatalogProvider();
+    }
+    catalogs.targetLanguages = selectionTargetLanguages();
+    m_selectionContextCard->setCatalogs(catalogs);
     layout->addWidget(m_selectionContextCard);
 }
 

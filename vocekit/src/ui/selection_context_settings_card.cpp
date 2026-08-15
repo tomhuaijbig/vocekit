@@ -27,13 +27,38 @@ QStringList normalizeExecutables(const QStringList &values)
     return normalized;
 }
 
-QVector<QPair<QString, QString>> defaultCatalog()
+QVector<QPair<QString, QString>> normalizedCatalog(
+    const QVector<QPair<QString, QString>> &source,
+    bool allowEmptyId,
+    bool rejectAllScope)
 {
     QVector<QPair<QString, QString>> result;
-    for (const QString &id : defaultSelectionContextActionOrder()) {
-        result.append(qMakePair(selectionContextActionTitle(id), id));
+    QStringList ids;
+    for (const QPair<QString, QString> &option : source) {
+        const QString id = option.second.trimmed();
+        if ((!allowEmptyId && id.isEmpty())
+            || (rejectAllScope && id == QStringLiteral("__all"))
+            || ids.contains(id)) {
+            continue;
+        }
+        ids.append(id);
+        const QString title = option.first.trimmed();
+        result.append(qMakePair(title.isEmpty() ? id : title, id));
     }
     return result;
+}
+
+bool sameCustomization(
+    const SelectionContextActionCustomization &left,
+    const SelectionContextActionCustomization &right)
+{
+    return left.displayName == right.displayName
+        && left.visible == right.visible
+        && left.modelId == right.modelId
+        && left.promptOverride == right.promptOverride
+        && left.targetLanguage == right.targetLanguage
+        && left.vocabularyScopeId == right.vocabularyScopeId
+        && left.copyMode == right.copyMode;
 }
 
 QLabel *descriptionLabel(const QString &text, QWidget *parent)
@@ -83,8 +108,7 @@ SelectionContextSettingsCard::SelectionContextSettingsCard(
     QWidget *parent)
     : QFrame(parent),
       m_settings(settings),
-      m_callbacks(callbacks),
-      m_actionCatalog(defaultCatalog())
+      m_callbacks(callbacks)
 {
     setObjectName(QStringLiteral("selectionContextSettingsCard"));
     setFrameShape(QFrame::NoFrame);
@@ -103,7 +127,7 @@ SelectionContextSettingsCard::SelectionContextSettingsCard(
 
 SelectionContextSettings SelectionContextSettingsCard::settings() const
 {
-    return m_settings;
+    return snapshotFromWidgets();
 }
 
 void SelectionContextSettingsCard::setSettings(
@@ -111,6 +135,15 @@ void SelectionContextSettingsCard::setSettings(
 {
     m_updating = true;
     m_settings = settings;
+    m_settings.actionOrder = normalizeSelectionContextActionOrder(
+        m_settings.actionOrder);
+    SelectionContextActionNormalizationContext context;
+    context.actionOrder = m_settings.actionOrder;
+    m_settings.actionCustomizations =
+        normalizeSelectionContextActionCustomizations(
+            m_settings.actionCustomizations,
+            context
+        );
     m_settings.minimumTextLength = qBound(
         1,
         m_settings.minimumTextLength,
@@ -130,33 +163,50 @@ void SelectionContextSettingsCard::setSettings(
         m_blockedApplications->setPlainText(
             m_settings.blockedApplications.join(QStringLiteral("\n"))
         );
-        rebuildActionList();
+        bool canRefreshEditors = m_actions
+            && m_actions->count() == m_settings.actionOrder.size();
+        for (int row = 0; canRefreshEditors
+             && row < m_actions->count(); ++row) {
+            const QString id = m_settings.actionOrder.at(row);
+            SelectionContextActionEditor *editor =
+                m_actionEditors.value(id, nullptr);
+            canRefreshEditors = editor
+                && m_actions->item(row)->data(Qt::UserRole).toString() == id
+                && m_actions->itemWidget(m_actions->item(row)) == editor;
+        }
+        if (!canRefreshEditors) {
+            rebuildActionEditors();
+        } else {
+            for (int row = 0; row < m_actions->count(); ++row) {
+                QListWidgetItem *item = m_actions->item(row);
+                const QString id = item->data(Qt::UserRole).toString();
+                SelectionContextActionEditor *editor =
+                    m_actionEditors.value(id, nullptr);
+                editor->setCustomization(
+                    m_settings.actionCustomizations.value(id));
+                item->setText(editor->customization().displayName);
+            }
+            setExpandedAction(m_expandedActionId);
+            updateButtonMetrics();
+            updateActionListMetrics();
+        }
         updateConsentResetVisibility();
     }
     m_updating = false;
 }
 
-void SelectionContextSettingsCard::setActionCatalog(
-    const QVector<QPair<QString, QString>> &catalog)
+void SelectionContextSettingsCard::setCatalogs(
+    const SelectionContextActionEditor::Catalogs &catalogs)
 {
-    QVector<QPair<QString, QString>> normalized;
-    QStringList ids;
-    for (const QPair<QString, QString> &option : catalog) {
-        const QString id = option.second.trimmed();
-        if (id.isEmpty() || ids.contains(id)) {
-            continue;
-        }
-        ids.append(id);
-        normalized.append(qMakePair(
-            option.first.trimmed().isEmpty() ? id : option.first.trimmed(),
-            id
-        ));
+    if (m_actions) {
+        m_settings = snapshotFromWidgets();
     }
-    if (normalized.isEmpty()) {
-        normalized = defaultCatalog();
-    }
-    m_actionCatalog = normalized;
-    rebuildActionList();
+    m_catalogs.models = normalizedCatalog(catalogs.models, false, false);
+    m_catalogs.vocabularyScopes = normalizedCatalog(
+        catalogs.vocabularyScopes, false, true);
+    m_catalogs.targetLanguages = normalizedCatalog(
+        catalogs.targetLanguages, true, false);
+    rebuildActionEditors();
 }
 
 void SelectionContextSettingsCard::changeEvent(QEvent *event)
@@ -164,6 +214,7 @@ void SelectionContextSettingsCard::changeEvent(QEvent *event)
     QFrame::changeEvent(event);
     if (event && event->type() == QEvent::FontChange) {
         updateButtonMetrics();
+        updateActionListMetrics();
     }
 }
 
@@ -251,7 +302,7 @@ void SelectionContextSettingsCard::buildUi()
     pauseLayout->addWidget(m_pauseMinutes);
     layout->addWidget(pauseRow);
 
-    QLabel *actionTitle = new QLabel(sccTr8("工具条按钮顺序"), this);
+    QLabel *actionTitle = new QLabel(sccTr8("工具条功能"), this);
     QFont sectionFont = actionTitle->font();
     sectionFont.setWeight(QFont::DemiBold);
     actionTitle->setFont(sectionFont);
@@ -259,7 +310,7 @@ void SelectionContextSettingsCard::buildUi()
     actionTitle->setMinimumHeight(actionTitle->sizeHint().height());
     layout->addWidget(actionTitle);
     layout->addWidget(descriptionLabel(
-        sccTr8("拖动调整顺序。自定义功能会继续显示在“更多”菜单中。"),
+        sccTr8("拖动调整顺序；每项都可修改名称、显示状态和专属设置。自定义功能会继续显示在“更多”菜单中。"),
         this
     ));
     m_actions = new QListWidget(this);
@@ -267,9 +318,15 @@ void SelectionContextSettingsCard::buildUi()
     m_actions->setDragDropMode(QAbstractItemView::InternalMove);
     m_actions->setDefaultDropAction(Qt::MoveAction);
     m_actions->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_actions->setMinimumHeight(178);
-    m_actions->setMaximumHeight(286);
+    m_actions->setSpacing(6);
+    m_actions->setMinimumHeight(340);
+    m_actions->setMaximumHeight(QWIDGETSIZE_MAX);
     layout->addWidget(m_actions);
+    m_restoreAllActions = new QPushButton(
+        sccTr8("恢复全部默认设置"), this);
+    m_restoreAllActions->setObjectName(
+        QStringLiteral("selectionContextRestoreAllButton"));
+    layout->addWidget(m_restoreAllActions, 0, Qt::AlignLeft);
 
     QLabel *blockedTitle = new QLabel(sccTr8("不显示工具条的应用"), this);
     blockedTitle->setFont(sectionFont);
@@ -341,6 +398,9 @@ void SelectionContextSettingsCard::buildUi()
             this, [this]() { queueActionOrderChanged(); });
     connect(m_actions->model(), &QAbstractItemModel::rowsRemoved,
             this, [this]() { queueActionOrderChanged(); });
+    connect(m_restoreAllActions, &QPushButton::clicked, this, [this]() {
+        restoreAllActionDefaults();
+    });
     connect(m_resetConsent, &QPushButton::clicked, this, [this]() {
         if (m_updating) {
             return;
@@ -361,39 +421,209 @@ void SelectionContextSettingsCard::buildUi()
     updateButtonMetrics();
 }
 
-void SelectionContextSettingsCard::rebuildActionList()
+void SelectionContextSettingsCard::rebuildActionEditors()
 {
     if (!m_actions) {
         return;
     }
     const bool previousUpdating = m_updating;
     m_updating = true;
-    QStringList catalogIds;
-    QMap<QString, QString> titles;
-    for (const QPair<QString, QString> &option : m_actionCatalog) {
-        catalogIds.append(option.second);
-        titles.insert(option.second, option.first);
-    }
-    QStringList order;
-    for (const QString &rawId : m_settings.actionOrder) {
-        const QString id = rawId.trimmed();
-        if (catalogIds.contains(id) && !order.contains(id)) {
-            order.append(id);
+    const QStringList order = normalizeSelectionContextActionOrder(
+        m_settings.actionOrder);
+    m_settings.actionOrder = order;
+    while (m_actions->count() > 0) {
+        QListWidgetItem *item = m_actions->item(0);
+        QWidget *widget = m_actions->itemWidget(item);
+        if (widget) {
+            m_actions->removeItemWidget(item);
+            delete widget;
         }
+        item = m_actions->takeItem(0);
+        delete item;
     }
-    for (const QString &id : catalogIds) {
-        if (!order.contains(id)) {
-            order.append(id);
-        }
-    }
-    m_actions->clear();
+    m_actionEditors.clear();
     for (const QString &id : order) {
-        QListWidgetItem *item = new QListWidgetItem(titles.value(id), m_actions);
+        QListWidgetItem *item = new QListWidgetItem(m_actions);
         item->setData(Qt::UserRole, id);
         item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+        SelectionContextActionEditor::Callbacks callbacks;
+        callbacks.changed = [this, id](
+            const SelectionContextActionCustomization &value) {
+            applyCustomization(id, value);
+        };
+        callbacks.restoreRequested = [this, id]() {
+            restoreActionDefaults(id);
+        };
+        callbacks.validationWarning = [this](const QString &warning) {
+            const std::function<void(const QString &)> callback =
+                m_callbacks.validationWarning;
+            if (callback) {
+                callback(warning);
+            }
+        };
+        SelectionContextActionEditor *editor =
+            new SelectionContextActionEditor(
+                id, m_catalogs, callbacks, m_actions);
+        editor->setObjectName(
+            QStringLiteral("selectionActionEditor_") + id);
+        editor->setCustomization(
+            m_settings.actionCustomizations.value(id));
+        m_actionEditors.insert(id, editor);
+        item->setText(editor->customization().displayName);
+        m_actions->setItemWidget(item, editor);
+        QToolButton *expand = editor->findChild<QToolButton *>(
+            QStringLiteral("selectionActionExpand"));
+        if (expand) {
+            connect(expand, &QToolButton::clicked, this, [this, id]() {
+                SelectionContextActionEditor *current =
+                    m_actionEditors.value(id, nullptr);
+                setExpandedAction(
+                    current && current->isExpanded() ? id : QString());
+            });
+        }
+        QCheckBox *visible = editor->findChild<QCheckBox *>(
+            QStringLiteral("selectionActionVisible"));
+        if (visible) {
+            connect(visible, &QCheckBox::toggled, this,
+                    [this, id, editor](bool checked) {
+                if (m_updating || checked) {
+                    return;
+                }
+                const SelectionContextActionCustomization candidate =
+                    editor->customization();
+                if (!wouldHideLastVisibleAction(id, candidate)) {
+                    return;
+                }
+                SelectionContextActionCustomization restored = candidate;
+                restored.visible = true;
+                editor->setCustomization(restored);
+                warnLastVisibleAction();
+            });
+        }
     }
-    m_settings.actionOrder = order;
+    setExpandedAction(m_expandedActionId);
+    updateButtonMetrics();
+    updateActionListMetrics();
     m_updating = previousUpdating;
+}
+
+void SelectionContextSettingsCard::setExpandedAction(const QString &actionId)
+{
+    const QString acceptedId = m_actionEditors.contains(actionId)
+        ? actionId
+        : QString();
+    m_expandedActionId = acceptedId;
+    for (auto it = m_actionEditors.begin();
+         it != m_actionEditors.end(); ++it) {
+        if (it.value()) {
+            it.value()->setExpanded(it.key() == acceptedId);
+        }
+    }
+    updateActionListMetrics();
+}
+
+void SelectionContextSettingsCard::restoreActionDefaults(
+    const QString &actionId)
+{
+    if (!m_actionEditors.contains(actionId)) {
+        return;
+    }
+    SelectionContextSettings next = snapshotFromWidgets();
+    const SelectionContextActionCustomization value =
+        defaultSelectionContextActionCustomizations().value(actionId);
+    next.actionCustomizations.insert(actionId, value);
+    m_settings = next;
+    m_actionEditors.value(actionId)->setCustomization(value);
+    for (int row = 0; row < m_actions->count(); ++row) {
+        QListWidgetItem *item = m_actions->item(row);
+        if (item->data(Qt::UserRole).toString() == actionId) {
+            item->setText(value.displayName);
+            item->setSizeHint(m_actionEditors.value(actionId)->sizeHint());
+            break;
+        }
+    }
+    const std::function<void(const SelectionContextSettings &)> callback =
+        m_callbacks.settingsChanged;
+    if (callback) {
+        callback(m_settings);
+    }
+}
+
+void SelectionContextSettingsCard::restoreAllActionDefaults()
+{
+    const std::function<bool()> confirm =
+        m_callbacks.confirmRestoreAllSelectionActions;
+    const QPointer<SelectionContextSettingsCard> alive(this);
+    if (!confirm || !confirm() || !alive) {
+        return;
+    }
+    m_settings = snapshotFromWidgets();
+    m_settings.actionCustomizations =
+        defaultSelectionContextActionCustomizations();
+    const bool previousUpdating = m_updating;
+    m_updating = true;
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionEditor *editor =
+            m_actionEditors.value(id, nullptr);
+        if (editor) {
+            editor->setCustomization(
+                m_settings.actionCustomizations.value(id));
+        }
+    }
+    m_updating = previousUpdating;
+    const std::function<void(const SelectionContextSettings &)> callback =
+        m_callbacks.settingsChanged;
+    if (callback) {
+        callback(m_settings);
+    }
+}
+
+bool SelectionContextSettingsCard::applyCustomization(
+    const QString &actionId,
+    const SelectionContextActionCustomization &value)
+{
+    if (!m_actionEditors.contains(actionId)) {
+        return false;
+    }
+    if (wouldHideLastVisibleAction(actionId, value)) {
+        SelectionContextActionCustomization restored = value;
+        restored.visible = true;
+        m_actionEditors.value(actionId)->setCustomization(restored);
+        warnLastVisibleAction();
+        return false;
+    }
+
+    SelectionContextActionCustomizationMap values =
+        m_settings.actionCustomizations;
+    values.insert(actionId, value);
+    SelectionContextActionNormalizationContext context;
+    context.actionOrder = snapshotFromWidgets().actionOrder;
+    for (const QPair<QString, QString> &scope : m_catalogs.vocabularyScopes) {
+        context.writableVocabularyScopeIds.append(scope.second);
+    }
+    const SelectionContextActionCustomizationMap normalized =
+        normalizeSelectionContextActionCustomizations(values, context);
+    const SelectionContextActionCustomization accepted =
+        normalized.value(actionId);
+    m_settings.actionOrder = context.actionOrder;
+    m_settings.actionCustomizations = normalized;
+    SelectionContextActionEditor *editor = m_actionEditors.value(actionId);
+    if (editor && !sameCustomization(value, accepted)) {
+        editor->setCustomization(accepted);
+    }
+    for (int row = 0; row < m_actions->count(); ++row) {
+        QListWidgetItem *item = m_actions->item(row);
+        if (item->data(Qt::UserRole).toString() == actionId) {
+            item->setText(accepted.displayName);
+            break;
+        }
+    }
+    const std::function<void(const SelectionContextSettings &)> callback =
+        m_callbacks.settingsChanged;
+    if (callback) {
+        callback(m_settings);
+    }
+    return true;
 }
 
 void SelectionContextSettingsCard::updateButtonMetrics()
@@ -408,6 +638,29 @@ void SelectionContextSettingsCard::updateButtonMetrics()
     }
 }
 
+void SelectionContextSettingsCard::updateActionListMetrics()
+{
+    if (!m_actions) {
+        return;
+    }
+    int totalHeight = 2 * m_actions->frameWidth();
+    for (int row = 0; row < m_actions->count(); ++row) {
+        QListWidgetItem *item = m_actions->item(row);
+        SelectionContextActionEditor *editor =
+            m_actionEditors.value(
+                item->data(Qt::UserRole).toString(), nullptr);
+        if (!editor) {
+            continue;
+        }
+        const QSize size = editor->sizeHint();
+        item->setSizeHint(size);
+        totalHeight += size.height() + m_actions->spacing();
+    }
+    m_actions->setMinimumHeight(qMin(totalHeight + 8, 720));
+    m_actions->doItemsLayout();
+    m_actions->updateGeometry();
+}
+
 void SelectionContextSettingsCard::updateConsentResetVisibility()
 {
     if (m_resetConsent) {
@@ -419,12 +672,22 @@ void SelectionContextSettingsCard::updateConsentResetVisibility()
 
 void SelectionContextSettingsCard::readWidgets()
 {
-    m_settings.enabled = m_enabled->isChecked();
-    m_settings.keyboardSelectionEnabled = m_keyboard->isChecked();
-    m_settings.minimumTextLength = m_minimumLength->value();
-    m_settings.closeOnOutsideClick = m_closeOutside->isChecked();
-    m_settings.pinEnabled = m_pin->isChecked();
-    m_settings.pauseMinutes = m_pauseMinutes->value();
+    m_settings = snapshotFromWidgets();
+}
+
+SelectionContextSettings
+SelectionContextSettingsCard::snapshotFromWidgets() const
+{
+    SelectionContextSettings result = m_settings;
+    if (!m_enabled) {
+        return result;
+    }
+    result.enabled = m_enabled->isChecked();
+    result.keyboardSelectionEnabled = m_keyboard->isChecked();
+    result.minimumTextLength = m_minimumLength->value();
+    result.closeOnOutsideClick = m_closeOutside->isChecked();
+    result.pinEnabled = m_pin->isChecked();
+    result.pauseMinutes = m_pauseMinutes->value();
     QStringList actionOrder;
     for (int i = 0; i < m_actions->count(); ++i) {
         const QString id = m_actions->item(i)
@@ -435,13 +698,53 @@ void SelectionContextSettingsCard::readWidgets()
             actionOrder.append(id);
         }
     }
-    m_settings.actionOrder = actionOrder;
-    m_settings.blockedApplications = normalizeExecutables(
+    result.actionOrder = normalizeSelectionContextActionOrder(actionOrder);
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionEditor *editor =
+            m_actionEditors.value(id, nullptr);
+        if (editor) {
+            result.actionCustomizations.insert(id, editor->customization());
+        }
+    }
+    result.blockedApplications = normalizeExecutables(
         m_blockedApplications->toPlainText().split(
             QRegExp(QStringLiteral("[\\r\\n]+")),
             QString::SkipEmptyParts
         )
     );
+    return result;
+}
+
+bool SelectionContextSettingsCard::wouldHideLastVisibleAction(
+    const QString &actionId,
+    const SelectionContextActionCustomization &value) const
+{
+    if (value.visible) {
+        return false;
+    }
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        if (id == actionId) {
+            continue;
+        }
+        SelectionContextActionEditor *editor =
+            m_actionEditors.value(id, nullptr);
+        const SelectionContextActionCustomization other = editor
+            ? editor->customization()
+            : m_settings.actionCustomizations.value(id);
+        if (other.visible) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void SelectionContextSettingsCard::warnLastVisibleAction()
+{
+    const std::function<void(const QString &)> warning =
+        m_callbacks.validationWarning;
+    if (warning) {
+        warning(sccTr8("请至少保留一个工具条功能；如不需要工具条，请关闭上方总开关。"));
+    }
 }
 
 void SelectionContextSettingsCard::notifyChanged()
@@ -463,6 +766,15 @@ void SelectionContextSettingsCard::queueActionOrderChanged()
     m_actionChangeQueued = true;
     QTimer::singleShot(0, this, [this]() {
         m_actionChangeQueued = false;
-        notifyChanged();
+        if (m_updating) {
+            return;
+        }
+        readWidgets();
+        rebuildActionEditors();
+        const std::function<void(const SelectionContextSettings &)> callback =
+            m_callbacks.settingsChanged;
+        if (callback) {
+            callback(m_settings);
+        }
     });
 }

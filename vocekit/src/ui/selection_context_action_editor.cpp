@@ -134,6 +134,64 @@ bool sameCustomization(
         && left.copyMode == right.copyMode;
 }
 
+struct ChangeDeliveryFrame
+{
+    ChangeDeliveryFrame(
+        SelectionContextActionEditor *owner,
+        const SelectionContextActionCustomization &deliveredValue
+    );
+    ~ChangeDeliveryFrame();
+
+    QPointer<SelectionContextActionEditor> owner;
+    const SelectionContextActionCustomization deliveredValue;
+    const ChangeDeliveryFrame *previous;
+};
+
+thread_local const ChangeDeliveryFrame *activeChangeDelivery = nullptr;
+
+ChangeDeliveryFrame::ChangeDeliveryFrame(
+    SelectionContextActionEditor *frameOwner,
+    const SelectionContextActionCustomization &frameValue
+)
+    : owner(frameOwner),
+      deliveredValue(frameValue),
+      previous(activeChangeDelivery)
+{
+    activeChangeDelivery = this;
+}
+
+ChangeDeliveryFrame::~ChangeDeliveryFrame()
+{
+    activeChangeDelivery = previous;
+}
+
+bool isSaveEchoForActiveDelivery(
+    SelectionContextActionEditor *owner,
+    const SelectionContextActionCustomization &value
+)
+{
+    for (const ChangeDeliveryFrame *frame = activeChangeDelivery;
+         frame;
+         frame = frame->previous) {
+        if (frame->owner.data() == owner
+            && sameCustomization(frame->deliveredValue, value)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void deliverChangedCallback(
+    SelectionContextActionEditor *owner,
+    const SelectionContextActionCustomization &value,
+    const std::function<void(
+        const SelectionContextActionCustomization &)> &callback
+)
+{
+    ChangeDeliveryFrame delivery(owner, value);
+    callback(value);
+}
+
 } // namespace
 
 SelectionContextActionEditor::SelectionContextActionEditor(
@@ -370,6 +428,9 @@ void SelectionContextActionEditor::setCustomization(
     const SelectionContextActionCustomization &value
 )
 {
+    if (isSaveEchoForActiveDelivery(this, value)) {
+        return;
+    }
     ++changeDeliveryGeneration_;
     pendingChanges_.clear();
     changeDrainScheduled_ = false;
@@ -534,7 +595,7 @@ void SelectionContextActionEditor::drainOnePendingChange(quint64 generation)
     if (!changed) {
         return;
     }
-    changed(current);
+    deliverChangedCallback(this, current, changed);
 }
 
 void SelectionContextActionEditor::updatePromptCount(int length)

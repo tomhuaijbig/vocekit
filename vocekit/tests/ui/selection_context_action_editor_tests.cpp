@@ -6,7 +6,6 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
-#include <QClipboard>
 #include <QComboBox>
 #include <QFontInfo>
 #include <QImage>
@@ -89,33 +88,6 @@ bool hasDarkTextPixels(
     }
     return false;
 }
-
-class ClipboardTextGuard
-{
-public:
-    explicit ClipboardTextGuard(QClipboard *clipboard)
-        : clipboard_(clipboard), originalText_(clipboard->text()) {}
-
-    ~ClipboardTextGuard()
-    {
-        restore();
-    }
-
-    void restore()
-    {
-        if (!active_) {
-            return;
-        }
-        QTest::qWait(20);
-        clipboard_->setText(originalText_);
-        active_ = false;
-    }
-
-private:
-    QClipboard *clipboard_;
-    QString originalText_;
-    bool active_ = true;
-};
 
 const quint32 kDeletionProbeAlive = 0x51ec7100u;
 
@@ -310,11 +282,13 @@ private slots:
     void setCustomizationInvalidatesOlderQueuedSnapshots();
     void rapidUserChangesDeliverEverySnapshotInOrder();
     void firstQueuedSnapshotDeletionCancelsRemainingSnapshots();
+    void saveEchoKeepsNewerQueuedEditsAndCurrentUiState();
+    void differentCallbackRefreshOverridesAndClearsPendingEdits();
     void changedCallbackMayDeleteEditorSynchronously();
     void restoreCallbackMayDeleteEditorSynchronously();
     void warningCallbackMayDeleteEditorAfterRollback();
     void setCustomizationWarningMayDeleteEditorSynchronously();
-    void rejectedPastePreservesPriorUndoAndCursor();
+    void rejectedInsertionPreservesPriorUndoAndCursor();
     void continuousTypingAtEightThousandAndOnePreservesMergedUndo();
     void commonControlsExposeAccessibleRelationshipsAndExpandedState();
     void unavailableAndUnicodeCatalogValuesRoundTripWithoutSilentReplacement();
@@ -583,6 +557,70 @@ firstQueuedSnapshotDeletionCancelsRemainingSnapshots()
 }
 
 void SelectionContextActionEditorTests::
+saveEchoKeepsNewerQueuedEditsAndCurrentUiState()
+{
+    QStringList deliveredNames;
+    SelectionContextActionEditor *editor = nullptr;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        deliveredNames.append(value.displayName);
+        editor->setCustomization(value);
+    };
+    SelectionContextActionEditor owned(
+        selectionContextActionAiSearch(), fullCatalogs(), callbacks);
+    editor = &owned;
+    QLineEdit *name = required<QLineEdit>(
+        editor, "selectionActionDisplayName");
+    name->setText(QStringLiteral("A"));
+    name->setText(QStringLiteral("B"));
+    QCOMPARE(editor->customization().displayName, QStringLiteral("B"));
+
+    flushQueuedCallbacks();
+    const QString finalName = editor->customization().displayName;
+    const QStringList expectedNames = QStringList() << QStringLiteral("A")
+                                                    << QStringLiteral("B");
+    const QString failure = QStringLiteral("delivered=[%1], final=%2")
+                                .arg(deliveredNames.join(QStringLiteral(",")),
+                                     finalName);
+    QVERIFY2(deliveredNames == expectedNames
+                 && finalName == QStringLiteral("B"),
+             qPrintable(failure));
+}
+
+void SelectionContextActionEditorTests::
+differentCallbackRefreshOverridesAndClearsPendingEdits()
+{
+    QVector<SelectionContextActionCustomization> delivered;
+    SelectionContextActionEditor *editor = nullptr;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        delivered.append(value);
+        SelectionContextActionCustomization rollback = value;
+        rollback.visible = false;
+        rollback.modelId = QStringLiteral("model:backup");
+        rollback.promptOverride = QString::fromUtf8("保存失败回滚");
+        editor->setCustomization(rollback);
+    };
+    SelectionContextActionEditor owned(
+        selectionContextActionAiSearch(), fullCatalogs(), callbacks);
+    editor = &owned;
+    QLineEdit *name = required<QLineEdit>(
+        editor, "selectionActionDisplayName");
+    name->setText(QStringLiteral("A"));
+    name->setText(QStringLiteral("B"));
+
+    flushQueuedCallbacks();
+    QCOMPARE(delivered.size(), 1);
+    QCOMPARE(delivered.first().displayName, QStringLiteral("A"));
+    const SelectionContextActionCustomization finalValue =
+        editor->customization();
+    QCOMPARE(finalValue.displayName, QStringLiteral("A"));
+    QCOMPARE(finalValue.visible, false);
+    QCOMPARE(finalValue.modelId, QStringLiteral("model:backup"));
+    QCOMPARE(finalValue.promptOverride, QString::fromUtf8("保存失败回滚"));
+}
+
+void SelectionContextActionEditorTests::
 changedCallbackMayDeleteEditorSynchronously()
 {
     verifyDeletionWorkerResult(QStringLiteral("changed"));
@@ -607,7 +645,7 @@ setCustomizationWarningMayDeleteEditorSynchronously()
 }
 
 void SelectionContextActionEditorTests::
-rejectedPastePreservesPriorUndoAndCursor()
+rejectedInsertionPreservesPriorUndoAndCursor()
 {
     QVector<SelectionContextActionCustomization> changes;
     QStringList warnings;
@@ -639,11 +677,8 @@ rejectedPastePreservesPriorUndoAndCursor()
     cursor.movePosition(QTextCursor::End);
     prompt->setTextCursor(cursor);
 
-    ClipboardTextGuard clipboardGuard(QApplication::clipboard());
-    QApplication::clipboard()->setText(QStringLiteral("c"));
-    prompt->paste();
+    prompt->insertPlainText(QStringLiteral("c"));
     flushQueuedCallbacks();
-    clipboardGuard.restore();
     QCOMPARE(prompt->toPlainText().size(), 8000);
     QCOMPARE(prompt->textCursor().position(), 8000);
     QCOMPARE(warnings.size(), 1);

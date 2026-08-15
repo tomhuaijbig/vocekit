@@ -8,6 +8,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPointer>
@@ -481,6 +482,126 @@ private slots:
         QVERIFY(button);
         button->click();
         QVERIFY(!guard);
+    }
+
+    void retiredButtonsRemainOwnedAndBecomeInertUntilDeferredDelete()
+    {
+        SelectionContextToolbar *toolbar = new SelectionContextToolbar;
+        int actionCount = 0;
+        int closeCount = 0;
+        SelectionContextToolbarCallbacks callbacks;
+        callbacks.actionRequested = [&actionCount](const QString &) {
+            ++actionCount;
+        };
+        callbacks.closeRequested = [&closeCount]() { ++closeCount; };
+        toolbar->setCallbacks(callbacks);
+
+        QPointer<QToolButton> retired = toolbar->findChild<QToolButton *>(
+            QStringLiteral("selectionActionAiSearchButton")
+        );
+        QVERIFY(retired);
+        QMenu *menu = toolbar->findChild<QMenu *>(
+            QStringLiteral("selectionContextMoreMenu")
+        );
+        QVERIFY(menu);
+        QPointer<QAction> retiredMenuAction;
+        for (QAction *action : menu->actions()) {
+            if (action->data().toString()
+                == selectionContextMenuOpenSettings()) {
+                retiredMenuAction = action;
+                break;
+            }
+        }
+        QVERIFY(retiredMenuAction);
+
+        SelectionContextActionCustomizationMap customizations =
+            defaultSelectionContextActionCustomizations();
+        SelectionContextActionCustomization search = customizations.value(
+            selectionContextActionAiSearch()
+        );
+        search.displayName = QString::fromUtf8("重建后的搜索");
+        customizations.insert(selectionContextActionAiSearch(), search);
+        toolbar->setActionPresentation(
+            defaultSelectionContextActionOrder(),
+            customizations
+        );
+
+        QVERIFY(retired);
+        retired->click();
+        QKeyEvent escape(
+            QEvent::KeyPress,
+            Qt::Key_Escape,
+            Qt::NoModifier
+        );
+        QApplication::sendEvent(retired.data(), &escape);
+        QCOMPARE(actionCount, 0);
+        QCOMPARE(closeCount, 0);
+
+        delete toolbar;
+        QVERIFY(!retired);
+        QVERIFY(!retiredMenuAction);
+    }
+
+    void visiblePresentationRefreshImmediatelyRecomputesLongNameLayout()
+    {
+        SelectionContextToolbar toolbar;
+        SelectionContextActionCustomizationMap compact =
+            defaultSelectionContextActionCustomizations();
+        for (const QString &id : QStringList()
+             << selectionContextActionExplain()
+             << selectionContextActionSave()
+             << selectionContextActionCopy()) {
+            SelectionContextActionCustomization hidden = compact.value(id);
+            hidden.visible = false;
+            compact.insert(id, hidden);
+        }
+        toolbar.setActionPresentation(
+            defaultSelectionContextActionOrder(),
+            compact
+        );
+        SelectionSnapshot snapshot;
+        snapshot.anchorRect = QRect(600, 120, 120, 24);
+        snapshot.cursorPosition = QPoint(660, 132);
+        const QRect screen(0, 0, 1600, 900);
+        toolbar.showForSnapshot(snapshot, screen);
+        const int compactWidth = toolbar.width();
+
+        SelectionContextActionCustomizationMap expanded =
+            defaultSelectionContextActionCustomizations();
+        SelectionContextActionCustomization search = expanded.value(
+            selectionContextActionAiSearch()
+        );
+        const QString title = QString::fromUtf8(
+            "这是二十四个汉字长度的自定义工具条动作标题测试文本"
+        ).left(24);
+        QCOMPARE(title.size(), 24);
+        search.displayName = title;
+        expanded.insert(selectionContextActionAiSearch(), search);
+        toolbar.setActionPresentation(
+            defaultSelectionContextActionOrder(),
+            expanded
+        );
+
+        QToolButton *searchButton = toolbar.findChild<QToolButton *>(
+            QStringLiteral("selectionActionAiSearchButton")
+        );
+        QVERIFY(searchButton);
+        QVERIFY(searchButton->isVisible());
+        QCOMPARE(searchButton->text(), title);
+        QCOMPARE(searchButton->toolTip(), title);
+        QVERIFY(toolbar.width() > compactWidth);
+        QVERIFY(searchButton->width() >= searchButton->sizeHint().width());
+        QVERIFY(searchButton->height() >= searchButton->sizeHint().height());
+        QVERIFY(toolbar.width() >= toolbar.minimumSizeHint().width());
+        QVERIFY(screen.contains(toolbar.geometry()));
+
+        const int expandedWidth = toolbar.width();
+        toolbar.setActionPresentation(
+            defaultSelectionContextActionOrder(),
+            compact
+        );
+        QVERIFY(toolbar.width() <= expandedWidth);
+        QVERIFY(screen.contains(toolbar.geometry()));
     }
 
     void fiveDefaultActionsExistExactlyOnceAndHaveFlexibleHeight()

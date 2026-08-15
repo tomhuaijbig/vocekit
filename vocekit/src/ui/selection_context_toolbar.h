@@ -68,6 +68,8 @@ private:
     void rebuildActionLayout();
     void rebuildMoreMenu();
     void updateMoreMenuEnabledState();
+    void resizeForAvailableGeometry(const QRect &availableGeometry);
+    void keepInsideAvailableGeometry(const QRect &availableGeometry);
     void configureForAvailableWidth(int width);
     int visibleRowWidth() const;
     QToolButton *firstVisibleActionButton() const;
@@ -81,6 +83,7 @@ private:
     QStringList m_overflowActionIds;
     QMap<QString, bool> m_actionEnabled;
     QString m_busyActionId;
+    QRect m_availableGeometry;
     QHBoxLayout *m_layout = nullptr;
     QWidget *m_dragHandle = nullptr;
     QLabel *m_identity = nullptr;

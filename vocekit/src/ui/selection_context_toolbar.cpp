@@ -18,6 +18,7 @@
 #include <QStyle>
 #include <QStyleOption>
 #include <QToolButton>
+#include <QVariant>
 #include <QKeyEvent>
 
 #ifdef Q_OS_WIN
@@ -35,6 +36,11 @@ public:
         : QToolButton(parent),
           m_escapeRequested(escapeRequested)
     {
+    }
+
+    void setEscapeRequested(const std::function<void()> &callback)
+    {
+        m_escapeRequested = callback;
     }
 
 protected:
@@ -214,7 +220,12 @@ void SelectionContextToolbar::setActionPresentation(
     }
     m_overflowActionIds.clear();
     rebuildActionButtons();
-    rebuildMoreMenu();
+    if (isVisible() && m_availableGeometry.isValid()) {
+        resizeForAvailableGeometry(m_availableGeometry);
+        keepInsideAvailableGeometry(m_availableGeometry);
+    } else {
+        rebuildMoreMenu();
+    }
 }
 
 void SelectionContextToolbar::setActionOrder(const QStringList &actionIds)
@@ -264,15 +275,9 @@ void SelectionContextToolbar::showForSnapshot(
     const QRect &availableGeometry,
     bool keyboardNavigationMode)
 {
+    m_availableGeometry = availableGeometry;
     applyWindowMode(keyboardNavigationMode);
-    applyButtonMetrics();
-    configureForAvailableWidth(qMax(1, availableGeometry.width() - 16));
-    const int width = qMin(
-        visibleRowWidth(),
-        qMax(1, availableGeometry.width() - 16)
-    );
-    const int height = qMax(sizeHint().height(), minimumSizeHint().height());
-    resize(width, height);
+    resizeForAvailableGeometry(availableGeometry);
     const SelectionSurfacePlacement placement = placeSelectionSurfaces(
         snapshot.anchorRect,
         snapshot.cursorPosition,
@@ -408,7 +413,13 @@ void SelectionContextToolbar::rebuildActionButtons()
     for (QToolButton *button : m_actionButtons) {
         m_layout->removeWidget(button);
         button->hide();
-        button->setParent(nullptr);
+        button->setEnabled(false);
+        button->setObjectName(QString());
+        button->setProperty("selectionActionId", QVariant());
+        SelectionContextToolButton *retired =
+            static_cast<SelectionContextToolButton *>(button);
+        retired->setEscapeRequested(std::function<void()>());
+        QObject::disconnect(button, nullptr, this, nullptr);
         button->deleteLater();
     }
     m_actionButtons.clear();
@@ -544,6 +555,40 @@ void SelectionContextToolbar::updateMoreMenuEnabledState()
         }
         action->setEnabled(m_busyActionId.isEmpty() && enabled);
     }
+}
+
+void SelectionContextToolbar::resizeForAvailableGeometry(
+    const QRect &availableGeometry)
+{
+    applyButtonMetrics();
+    configureForAvailableWidth(qMax(1, availableGeometry.width() - 16));
+    const int width = qMin(
+        visibleRowWidth(),
+        qMax(1, availableGeometry.width() - 16)
+    );
+    const int height = qMax(sizeHint().height(), minimumSizeHint().height());
+    resize(width, height);
+    updateGeometry();
+}
+
+void SelectionContextToolbar::keepInsideAvailableGeometry(
+    const QRect &availableGeometry)
+{
+    if (!availableGeometry.isValid()) {
+        return;
+    }
+    const int maximumX = qMax(
+        availableGeometry.left(),
+        availableGeometry.right() - width() + 1
+    );
+    const int maximumY = qMax(
+        availableGeometry.top(),
+        availableGeometry.bottom() - height() + 1
+    );
+    move(
+        qBound(availableGeometry.left(), x(), maximumX),
+        qBound(availableGeometry.top(), y(), maximumY)
+    );
 }
 
 void SelectionContextToolbar::configureForAvailableWidth(int width)

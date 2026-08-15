@@ -259,13 +259,18 @@ SelectionContextActionEditor::SelectionContextActionEditor(
     if (isAiAction) {
         modelCombo_ = new QComboBox(specificFields_);
         modelCombo_->setObjectName(QStringLiteral("selectionActionModel"));
+        modelCombo_->setAccessibleName(text8("模型"));
         modelCombo_->addItem(text8("跟随对应内置功能"), QString());
         addCatalogItems(modelCombo_, catalogs.models);
         prepareCombo(modelCombo_);
-        specific->addRow(fieldLabel(text8("模型"), specificFields_), modelCombo_);
+        QLabel *modelLabel = fieldLabel(text8("模型"), specificFields_);
+        modelLabel->setObjectName(QStringLiteral("selectionActionModelLabel"));
+        modelLabel->setBuddy(modelCombo_);
+        specific->addRow(modelLabel, modelCombo_);
 
         promptEdit_ = new QPlainTextEdit(specificFields_);
         promptEdit_->setObjectName(QStringLiteral("selectionActionPrompt"));
+        promptEdit_->setAccessibleName(text8("提示词"));
         promptEdit_->setPlaceholderText(text8("留空时使用内置默认提示词"));
         prepareEditor(promptEdit_);
         promptCountLabel_ = new QLabel(specificFields_);
@@ -278,14 +283,17 @@ SelectionContextActionEditor::SelectionContextActionEditor(
         promptLayout->setSpacing(4);
         promptLayout->addWidget(promptEdit_);
         promptLayout->addWidget(promptCountLabel_);
-        specific->addRow(fieldLabel(text8("提示词"), specificFields_),
-                         promptContainer);
+        QLabel *promptLabel = fieldLabel(text8("提示词"), specificFields_);
+        promptLabel->setObjectName(QStringLiteral("selectionActionPromptLabel"));
+        promptLabel->setBuddy(promptEdit_);
+        specific->addRow(promptLabel, promptContainer);
     }
 
     if (actionId_ == selectionContextActionTranslate()) {
         targetLanguageCombo_ = new QComboBox(specificFields_);
         targetLanguageCombo_->setObjectName(
             QStringLiteral("selectionActionTargetLanguage"));
+        targetLanguageCombo_->setAccessibleName(text8("目标语言"));
         targetLanguageCombo_->setEditable(true);
         targetLanguageCombo_->setInsertPolicy(QComboBox::NoInsert);
         if (catalogs.targetLanguages.isEmpty()
@@ -295,32 +303,45 @@ SelectionContextActionEditor::SelectionContextActionEditor(
         }
         addCatalogItems(targetLanguageCombo_, catalogs.targetLanguages);
         prepareCombo(targetLanguageCombo_);
-        specific->addRow(fieldLabel(text8("目标语言"), specificFields_),
-                         targetLanguageCombo_);
+        QLabel *targetLanguageLabel = fieldLabel(
+            text8("目标语言"), specificFields_);
+        targetLanguageLabel->setObjectName(
+            QStringLiteral("selectionActionTargetLanguageLabel"));
+        targetLanguageLabel->setBuddy(targetLanguageCombo_);
+        specific->addRow(targetLanguageLabel, targetLanguageCombo_);
     }
 
     if (actionId_ == selectionContextActionSave()) {
         vocabularyScopeCombo_ = new QComboBox(specificFields_);
         vocabularyScopeCombo_->setObjectName(
             QStringLiteral("selectionActionVocabularyScope"));
+        vocabularyScopeCombo_->setAccessibleName(text8("默认作用范围"));
         addCatalogItems(vocabularyScopeCombo_, catalogs.vocabularyScopes);
         if (vocabularyScopeCombo_->findData(QStringLiteral("__global")) < 0) {
             vocabularyScopeCombo_->insertItem(
-                0, text8("全局词库"), QStringLiteral("__global"));
+            0, text8("全局词库"), QStringLiteral("__global"));
         }
         prepareCombo(vocabularyScopeCombo_);
-        specific->addRow(fieldLabel(text8("默认作用范围"), specificFields_),
-                         vocabularyScopeCombo_);
+        QLabel *vocabularyScopeLabel = fieldLabel(
+            text8("默认作用范围"), specificFields_);
+        vocabularyScopeLabel->setObjectName(
+            QStringLiteral("selectionActionVocabularyScopeLabel"));
+        vocabularyScopeLabel->setBuddy(vocabularyScopeCombo_);
+        specific->addRow(vocabularyScopeLabel, vocabularyScopeCombo_);
     }
 
     if (actionId_ == selectionContextActionCopy()) {
         copyModeCombo_ = new QComboBox(specificFields_);
         copyModeCombo_->setObjectName(QStringLiteral("selectionActionCopyMode"));
+        copyModeCombo_->setAccessibleName(text8("复制文本"));
         copyModeCombo_->addItem(text8("保留原文"), QStringLiteral("original"));
         copyModeCombo_->addItem(text8("去除首尾空白"), QStringLiteral("trim"));
         prepareCombo(copyModeCombo_);
-        specific->addRow(fieldLabel(text8("复制文本"), specificFields_),
-                         copyModeCombo_);
+        QLabel *copyModeLabel = fieldLabel(text8("复制文本"), specificFields_);
+        copyModeLabel->setObjectName(
+            QStringLiteral("selectionActionCopyModeLabel"));
+        copyModeLabel->setBuddy(copyModeCombo_);
+        specific->addRow(copyModeLabel, copyModeCombo_);
     }
 
     root->addWidget(specificFields_);

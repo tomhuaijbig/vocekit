@@ -276,6 +276,7 @@ class SelectionContextActionEditorTests : public QObject
 private slots:
     void commonFieldsRoundTripAndCallbacksAreStable();
     void actionSpecificControlsAreCreatedOnlyWhenApplicable();
+    void actionSpecificLabelsNameAndDescribeTheirBuddyControls();
     void promptRejectsMoreThanEightThousandWithoutRecursiveWarnings();
     void setCustomizationRejectsOverlongPromptWithoutTruncation();
     void customizationUpdatesBeforeQueuedCallbackDelivery();
@@ -390,6 +391,72 @@ actionSpecificControlsAreCreatedOnlyWhenApplicable()
                                      << "selectionActionTargetLanguage");
 
     Q_UNUSED(none);
+}
+
+void SelectionContextActionEditorTests::
+actionSpecificLabelsNameAndDescribeTheirBuddyControls()
+{
+    struct FieldSpec {
+        const char *key;
+        const char *labelObjectName;
+        const char *controlObjectName;
+        const char *accessibleName;
+    };
+    const FieldSpec fields[] = {
+        {"model", "selectionActionModelLabel", "selectionActionModel",
+         "模型"},
+        {"prompt", "selectionActionPromptLabel", "selectionActionPrompt",
+         "提示词"},
+        {"target", "selectionActionTargetLanguageLabel",
+         "selectionActionTargetLanguage", "目标语言"},
+        {"scope", "selectionActionVocabularyScopeLabel",
+         "selectionActionVocabularyScope", "默认作用范围"},
+        {"copy", "selectionActionCopyModeLabel", "selectionActionCopyMode",
+         "复制文本"}
+    };
+    struct ActionSpec {
+        QString actionId;
+        QStringList applicableFields;
+    };
+    QList<ActionSpec> actions;
+    actions << ActionSpec{selectionContextActionAiSearch(),
+                          QStringList() << QStringLiteral("model")
+                                        << QStringLiteral("prompt")}
+            << ActionSpec{selectionContextActionExplain(),
+                          QStringList() << QStringLiteral("model")
+                                        << QStringLiteral("prompt")}
+            << ActionSpec{selectionContextActionTranslate(),
+                          QStringList() << QStringLiteral("model")
+                                        << QStringLiteral("prompt")
+                                        << QStringLiteral("target")}
+            << ActionSpec{selectionContextActionSave(),
+                          QStringList() << QStringLiteral("scope")}
+            << ActionSpec{selectionContextActionCopy(),
+                          QStringList() << QStringLiteral("copy")};
+
+    for (const ActionSpec &action : actions) {
+        SelectionContextActionEditor editor(action.actionId, fullCatalogs());
+        for (const FieldSpec &field : fields) {
+            const bool applies = action.applicableFields.contains(
+                QString::fromLatin1(field.key));
+            QLabel *label = editor.findChild<QLabel *>(
+                QString::fromLatin1(field.labelObjectName));
+            QWidget *control = editor.findChild<QWidget *>(
+                QString::fromLatin1(field.controlObjectName));
+            const QByteArray context = action.actionId.toUtf8()
+                + ':' + field.key;
+            if (!applies) {
+                QVERIFY2(!label, context.constData());
+                QVERIFY2(!control, context.constData());
+                continue;
+            }
+            QVERIFY2(label, context.constData());
+            QVERIFY2(control, context.constData());
+            QCOMPARE(label->buddy(), control);
+            QCOMPARE(control->accessibleName(),
+                     QString::fromUtf8(field.accessibleName));
+        }
+    }
 }
 
 void SelectionContextActionEditorTests::

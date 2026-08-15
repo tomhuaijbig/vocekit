@@ -207,6 +207,10 @@ void SelectionContextToolbar::setActionPresentation(
     const QStringList &actionIds,
     const SelectionContextActionCustomizationMap &customizations)
 {
+    const bool refreshVisibleToolbar = isVisible()
+        && m_availableGeometry.isValid();
+    const QPoint previousCenter = geometry().center();
+    QPointer<QWidget> previousFocus = focusWidget();
     m_actionOrder = visibleSelectionContextActionOrder(
         actionIds,
         customizations
@@ -220,11 +224,24 @@ void SelectionContextToolbar::setActionPresentation(
     }
     m_overflowActionIds.clear();
     rebuildActionButtons();
-    if (isVisible() && m_availableGeometry.isValid()) {
+    if (refreshVisibleToolbar) {
         resizeForAvailableGeometry(m_availableGeometry);
+        move(
+            previousCenter.x() - width() / 2,
+            previousCenter.y() - height() / 2
+        );
         keepInsideAvailableGeometry(m_availableGeometry);
     } else {
         rebuildMoreMenu();
+    }
+    if (previousFocus) {
+        QWidget *focusTarget = previousFocus.data();
+        if (!focusTarget->isVisible() || !focusTarget->isEnabled()) {
+            focusTarget = firstVisibleActionButton();
+        }
+        if (focusTarget) {
+            focusTarget->setFocus(Qt::OtherFocusReason);
+        }
     }
 }
 
@@ -250,7 +267,10 @@ void SelectionContextToolbar::setBusyAction(const QString &actionId)
          it != m_actionButtons.end();
          ++it) {
         const bool baseEnabled = m_actionEnabled.value(it.key(), true);
-        it.value()->setEnabled(m_busyActionId.isEmpty() && baseEnabled);
+        const bool presented = m_actionOrder.contains(it.key());
+        it.value()->setEnabled(
+            presented && m_busyActionId.isEmpty() && baseEnabled
+        );
     }
     m_moreButton->setEnabled(m_busyActionId.isEmpty());
     updateMoreMenuEnabledState();
@@ -265,7 +285,9 @@ void SelectionContextToolbar::setActionEnabled(
     }
     m_actionEnabled.insert(actionId, enabled);
     m_actionButtons.value(actionId)->setEnabled(
-        m_busyActionId.isEmpty() && enabled
+        m_actionOrder.contains(actionId)
+            && m_busyActionId.isEmpty()
+            && enabled
     );
     updateMoreMenuEnabledState();
 }
@@ -410,47 +432,22 @@ void SelectionContextToolbar::rebuildActionButtons()
     if (!m_layout || !m_moreButton) {
         return;
     }
-    for (QToolButton *button : m_actionButtons) {
-        m_layout->removeWidget(button);
-        button->hide();
-        button->setEnabled(false);
-        button->setObjectName(QString());
-        button->setProperty("selectionActionId", QVariant());
-        SelectionContextToolButton *retired =
-            static_cast<SelectionContextToolButton *>(button);
-        retired->setEscapeRequested(std::function<void()>());
-        QObject::disconnect(button, nullptr, this, nullptr);
-        button->deleteLater();
-    }
-    m_actionButtons.clear();
-
-    int insertion = m_layout->indexOf(m_moreButton);
-    for (const QString &id : m_actionOrder) {
-        const QString title = m_actionTitles.value(
-            id,
-            selectionContextActionTitle(id)
-        );
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        if (m_actionButtons.contains(id)) {
+            continue;
+        }
         QToolButton *button = new SelectionContextToolButton(
-            [this]() { requestClose(); },
+            std::function<void()>(),
             this
         );
-        button->setObjectName(actionButtonObjectName(id));
-        button->setProperty("selectionActionId", id);
-        button->setText(title);
-        button->setToolTip(title);
-        button->setAccessibleName(title);
         button->setFocusPolicy(Qt::StrongFocus);
-        button->setEnabled(
-            m_busyActionId.isEmpty() && m_actionEnabled.value(id, true)
-        );
         connect(button, &QToolButton::clicked, this, [this, id]() {
             requestAction(id);
         });
         m_actionButtons.insert(id, button);
-        m_layout->insertWidget(insertion++, button);
     }
     applyButtonMetrics();
-    m_layout->invalidate();
+    rebuildActionLayout();
 }
 
 void SelectionContextToolbar::rebuildActionLayout()
@@ -461,6 +458,16 @@ void SelectionContextToolbar::rebuildActionLayout()
     for (QToolButton *button : m_actionButtons) {
         m_layout->removeWidget(button);
         button->hide();
+        button->setEnabled(false);
+        button->setObjectName(QString());
+        button->setProperty("selectionActionId", QVariant());
+        button->setText(QString());
+        button->setIcon(QIcon());
+        button->setToolTip(QString());
+        button->setAccessibleName(QString());
+        SelectionContextToolButton *inactive =
+            static_cast<SelectionContextToolButton *>(button);
+        inactive->setEscapeRequested(std::function<void()>());
     }
     int insertion = m_layout->indexOf(m_moreButton);
     for (const QString &id : m_actionOrder) {
@@ -472,11 +479,19 @@ void SelectionContextToolbar::rebuildActionLayout()
             id,
             selectionContextActionTitle(id)
         );
+        button->setObjectName(actionButtonObjectName(id));
+        button->setProperty("selectionActionId", id);
         button->setText(title);
         button->setIcon(QIcon());
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
         button->setToolTip(title);
         button->setAccessibleName(title);
+        SelectionContextToolButton *active =
+            static_cast<SelectionContextToolButton *>(button);
+        active->setEscapeRequested([this]() { requestClose(); });
+        button->setEnabled(
+            m_busyActionId.isEmpty() && m_actionEnabled.value(id, true)
+        );
         button->show();
         m_layout->insertWidget(insertion++, button);
     }

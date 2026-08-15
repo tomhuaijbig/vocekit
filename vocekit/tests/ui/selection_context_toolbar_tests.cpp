@@ -336,9 +336,10 @@ private slots:
         );
         translate.displayName = QString::fromUtf8("同名操作");
         customizations.insert(selectionContextActionTranslate(), translate);
-        for (const QString &id : QStringList()
-             << selectionContextActionExplain()
-             << selectionContextActionSave()) {
+        const QStringList hiddenActionIds = QStringList()
+            << selectionContextActionExplain()
+            << selectionContextActionSave();
+        for (const QString &id : hiddenActionIds) {
             SelectionContextActionCustomization hidden =
                 customizations.value(id);
             hidden.visible = false;
@@ -381,9 +382,7 @@ private slots:
         for (const QString &id : expected) {
             QCOMPARE(counts.value(id), 1);
         }
-        for (const QString &id : QStringList()
-             << selectionContextActionExplain()
-             << selectionContextActionSave()) {
+        for (const QString &id : hiddenActionIds) {
             QCOMPARE(counts.value(id), 0);
             for (QToolButton *button :
                  toolbar.findChildren<QToolButton *>()) {
@@ -401,20 +400,32 @@ private slots:
             clicked.append(id);
         };
         toolbar.setCallbacks(callbacks);
-        for (const QString &id : QStringList()
-             << selectionContextActionTranslate()
-             << selectionContextActionAiSearch()) {
+        const QStringList clickableActionIds = QStringList()
+            << selectionContextActionTranslate()
+            << selectionContextActionAiSearch();
+        for (const QString &id : clickableActionIds) {
             QToolButton *button = nullptr;
             for (QToolButton *candidate :
                  toolbar.findChildren<QToolButton *>()) {
                 if (candidate->property("selectionActionId").toString()
-                    == id) {
+                    == id && candidate->isVisible()) {
                     button = candidate;
                     break;
                 }
             }
-            QVERIFY2(button, qPrintable(id));
-            button->click();
+            if (button) {
+                button->click();
+                continue;
+            }
+            QAction *overflowAction = nullptr;
+            for (QAction *action : menu->actions()) {
+                if (action->data().toString() == id) {
+                    overflowAction = action;
+                    break;
+                }
+            }
+            QVERIFY2(overflowAction, qPrintable(id));
+            overflowAction->trigger();
         }
         QCOMPARE(
             clicked,
@@ -484,22 +495,25 @@ private slots:
         QVERIFY(!guard);
     }
 
-    void retiredButtonsRemainOwnedAndBecomeInertUntilDeferredDelete()
+    void hiddenButtonsStayOwnedAndReusableAcrossPresentationRefresh()
     {
         SelectionContextToolbar *toolbar = new SelectionContextToolbar;
         int actionCount = 0;
         int closeCount = 0;
+        QString lastActionId;
         SelectionContextToolbarCallbacks callbacks;
-        callbacks.actionRequested = [&actionCount](const QString &) {
+        callbacks.actionRequested = [&actionCount, &lastActionId](
+            const QString &id) {
             ++actionCount;
+            lastActionId = id;
         };
         callbacks.closeRequested = [&closeCount]() { ++closeCount; };
         toolbar->setCallbacks(callbacks);
 
-        QPointer<QToolButton> retired = toolbar->findChild<QToolButton *>(
-            QStringLiteral("selectionActionAiSearchButton")
+        QPointer<QToolButton> savedButton = toolbar->findChild<QToolButton *>(
+            QStringLiteral("selectionActionSaveButton")
         );
-        QVERIFY(retired);
+        QVERIFY(savedButton);
         QMenu *menu = toolbar->findChild<QMenu *>(
             QStringLiteral("selectionContextMoreMenu")
         );
@@ -516,29 +530,53 @@ private slots:
 
         SelectionContextActionCustomizationMap customizations =
             defaultSelectionContextActionCustomizations();
-        SelectionContextActionCustomization search = customizations.value(
-            selectionContextActionAiSearch()
+        SelectionContextActionCustomization save = customizations.value(
+            selectionContextActionSave()
         );
-        search.displayName = QString::fromUtf8("重建后的搜索");
-        customizations.insert(selectionContextActionAiSearch(), search);
+        save.visible = false;
+        customizations.insert(selectionContextActionSave(), save);
         toolbar->setActionPresentation(
             defaultSelectionContextActionOrder(),
             customizations
         );
 
-        QVERIFY(retired);
-        retired->click();
+        QVERIFY(!toolbar->findChild<QToolButton *>(
+            QStringLiteral("selectionActionSaveButton")
+        ));
+        QVERIFY(!savedButton->isVisible());
+        QVERIFY(!savedButton->isEnabled());
+        QVERIFY(savedButton->text().isEmpty());
+        QVERIFY(savedButton->toolTip().isEmpty());
+        QVERIFY(savedButton->accessibleName().isEmpty());
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(savedButton);
+        savedButton->click();
         QKeyEvent escape(
             QEvent::KeyPress,
             Qt::Key_Escape,
             Qt::NoModifier
         );
-        QApplication::sendEvent(retired.data(), &escape);
+        QApplication::sendEvent(savedButton.data(), &escape);
         QCOMPARE(actionCount, 0);
         QCOMPARE(closeCount, 0);
 
+        save.visible = true;
+        save.displayName = QString::fromUtf8("重新显示的保存");
+        customizations.insert(selectionContextActionSave(), save);
+        toolbar->setActionPresentation(
+            defaultSelectionContextActionOrder(),
+            customizations
+        );
+        QToolButton *shownAgain = toolbar->findChild<QToolButton *>(
+            QStringLiteral("selectionActionSaveButton")
+        );
+        QCOMPARE(shownAgain, savedButton.data());
+        shownAgain->click();
+        QCOMPARE(actionCount, 1);
+        QCOMPARE(lastActionId, selectionContextActionSave());
+
         delete toolbar;
-        QVERIFY(!retired);
+        QVERIFY(!savedButton);
         QVERIFY(!retiredMenuAction);
     }
 
@@ -547,10 +585,11 @@ private slots:
         SelectionContextToolbar toolbar;
         SelectionContextActionCustomizationMap compact =
             defaultSelectionContextActionCustomizations();
-        for (const QString &id : QStringList()
-             << selectionContextActionExplain()
-             << selectionContextActionSave()
-             << selectionContextActionCopy()) {
+        const QStringList compactHiddenActionIds = QStringList()
+            << selectionContextActionExplain()
+            << selectionContextActionSave()
+            << selectionContextActionCopy();
+        for (const QString &id : compactHiddenActionIds) {
             SelectionContextActionCustomization hidden = compact.value(id);
             hidden.visible = false;
             compact.insert(id, hidden);
@@ -563,8 +602,15 @@ private slots:
         snapshot.anchorRect = QRect(600, 120, 120, 24);
         snapshot.cursorPosition = QPoint(660, 132);
         const QRect screen(0, 0, 1600, 900);
-        toolbar.showForSnapshot(snapshot, screen);
+        toolbar.showForSnapshot(snapshot, screen, true);
+        QToolButton *translateButton = toolbar.findChild<QToolButton *>(
+            QStringLiteral("selectionActionTranslateButton")
+        );
+        QVERIFY(translateButton);
+        translateButton->setFocus(Qt::OtherFocusReason);
+        QTRY_COMPARE(toolbar.focusWidget(), translateButton);
         const int compactWidth = toolbar.width();
+        const QPoint compactCenter = toolbar.geometry().center();
 
         SelectionContextActionCustomizationMap expanded =
             defaultSelectionContextActionCustomizations();
@@ -594,6 +640,9 @@ private slots:
         QVERIFY(searchButton->height() >= searchButton->sizeHint().height());
         QVERIFY(toolbar.width() >= toolbar.minimumSizeHint().width());
         QVERIFY(screen.contains(toolbar.geometry()));
+        QVERIFY((toolbar.geometry().center() - compactCenter).manhattanLength()
+            <= 2);
+        QCOMPARE(toolbar.focusWidget(), translateButton);
 
         const int expandedWidth = toolbar.width();
         toolbar.setActionPresentation(

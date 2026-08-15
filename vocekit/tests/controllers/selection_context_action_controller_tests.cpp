@@ -67,6 +67,8 @@ struct Harness
 {
     AppSettingsData settings;
     PromptRuntimeSnapshot prompts;
+    QVector<ModelOption> availableModels;
+    int modelOptionsSnapshotCalls = 0;
     QAtomicInt providerCalls;
     QAtomicInt cancelledCalls;
     QAtomicInt releaseFirst;
@@ -185,6 +187,10 @@ struct Harness
         };
         access.settingsSnapshot = [this]() { return settings; };
         access.promptSnapshot = [this]() { return prompts; };
+        access.modelOptionsSnapshot = [this]() {
+            ++modelOptionsSnapshotCalls;
+            return availableModels;
+        };
         access.ensureNetworkConsent = [this](
             const QString &,
             const QString &) {
@@ -233,6 +239,8 @@ private slots:
     void declinedNetworkConsentSendsNothingAndKeepsLocalActionsAvailable();
     void acknowledgedConsentDoesNotPromptAgain();
     void modelActionShowsDegradedBannerBeforeOfflineAiSearchDeltas();
+    void modelOptionsAreSnapshottedExactlyOncePerRequest();
+    void unavailableExplicitModelNeverStartsRunnerOrConsent();
     void aNewActionCancelsTheOldRunnerAndIgnoresLateCallbacks();
     void replaceRequiresOriginalWindowAndLiveSelection();
     void replaceRevalidationNeverCallsSetForegroundWindowOrChangesFocus();
@@ -350,6 +358,74 @@ modelActionShowsDegradedBannerBeforeOfflineAiSearchDeltas()
     );
     QTRY_VERIFY(h.renders.constLast().committedText
                 == QStringLiteral("provider answer"));
+}
+
+void SelectionContextActionControllerTests::
+modelOptionsAreSnapshottedExactlyOncePerRequest()
+{
+    Harness h;
+    h.settings.selectionContext.networkConsentAcknowledged = true;
+    SelectionContextActionCustomization explain =
+        h.settings.selectionContext.actionCustomizations.value(
+            QStringLiteral("explain")
+        );
+    explain.modelId = QStringLiteral("openai:gpt-5.6-sol");
+    explain.promptOverride = text8("分三层解释");
+    h.settings.selectionContext.actionCustomizations.insert(
+        QStringLiteral("explain"),
+        explain
+    );
+    h.availableModels << ModelOption{
+        QStringLiteral("openai:gpt-5.6-sol"),
+        QStringLiteral("GPT-5.6 Sol"),
+        QStringLiteral("OpenAI")
+    };
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionController controller(&runner, h.actionAccess());
+    controller.setSelection(snapshot(QStringLiteral("subject")));
+
+    controller.triggerAction(QStringLiteral("explain"));
+
+    QTRY_COMPARE(h.providerCalls.loadAcquire(), 1);
+    QCOMPARE(h.modelOptionsSnapshotCalls, 1);
+    QCOMPARE(
+        h.requestAt(0).modelId,
+        QStringLiteral("openai:gpt-5.6-sol")
+    );
+    QVERIFY(h.requestAt(0).userPrompt.contains(text8("分三层解释")));
+}
+
+void SelectionContextActionControllerTests::
+unavailableExplicitModelNeverStartsRunnerOrConsent()
+{
+    Harness h;
+    SelectionContextActionCustomization explain =
+        h.settings.selectionContext.actionCustomizations.value(
+            QStringLiteral("explain")
+        );
+    explain.modelId = QStringLiteral("custom:removed-model");
+    explain.promptOverride = text8("私密指令不能进入状态消息");
+    h.settings.selectionContext.actionCustomizations.insert(
+        QStringLiteral("explain"),
+        explain
+    );
+    h.availableModels << ModelOption{
+        QStringLiteral("openai:gpt-5.6-sol"),
+        QStringLiteral("GPT-5.6 Sol"),
+        QStringLiteral("OpenAI")
+    };
+    SelectionContextModelRunner runner(h.runnerAccess());
+    SelectionContextActionController controller(&runner, h.actionAccess());
+    controller.setSelection(snapshot(QStringLiteral("private selection")));
+
+    controller.triggerAction(QStringLiteral("explain"));
+
+    QCOMPARE(h.modelOptionsSnapshotCalls, 1);
+    QCOMPARE(h.providerCalls.loadAcquire(), 0);
+    QCOMPARE(h.consentCalls, 0);
+    QVERIFY(!h.renders.isEmpty());
+    QVERIFY(h.renders.constLast().statusText.contains(text8("模型")));
+    QVERIFY(!h.renders.constLast().statusText.contains(explain.promptOverride));
 }
 
 void SelectionContextActionControllerTests::
@@ -605,6 +681,24 @@ everyInjectedCallbackMayDestroyTheControllerSynchronously()
             controller = nullptr;
             delete doomed;
             return AppSettingsData();
+        };
+        controller = new SelectionContextActionController(&runner, access);
+        QPointer<SelectionContextActionController> guard(controller);
+        controller->setSelection(snapshot(QStringLiteral("delete")));
+        controller->triggerAction(QStringLiteral("explain"));
+        QVERIFY(guard.isNull());
+    }
+
+    {
+        Harness h;
+        SelectionContextModelRunner runner(h.runnerAccess());
+        SelectionContextActionController *controller = nullptr;
+        SelectionContextActionAccess access = h.actionAccess();
+        access.modelOptionsSnapshot = [&controller]() {
+            SelectionContextActionController *doomed = controller;
+            controller = nullptr;
+            delete doomed;
+            return QVector<ModelOption>();
         };
         controller = new SelectionContextActionController(&runner, access);
         QPointer<SelectionContextActionController> guard(controller);

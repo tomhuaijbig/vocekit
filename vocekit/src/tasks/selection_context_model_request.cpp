@@ -2,6 +2,7 @@
 
 #include "../config/app_settings_defaults.h"
 #include "../domain/selection_context_actions.h"
+#include "../providers/model_catalog.h"
 #include "../result_flow_config.h"
 
 namespace {
@@ -46,6 +47,18 @@ QString configuredModel(
 {
     const QString model = function.modelId.trimmed();
     return model.isEmpty() ? defaultModelForFunction(runtimeId) : model;
+}
+
+bool containsModelId(
+    const QVector<ModelOption> &options,
+    const QString &modelId)
+{
+    for (const ModelOption &option : options) {
+        if (option.id == modelId) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void appendFollowUp(
@@ -130,6 +143,26 @@ SelectionContextModelRequest buildSelectionContextModelRequest(
         );
     }
 
+    const bool builtInAiAction =
+        actionId == selectionContextActionTranslate()
+        || actionId == selectionContextActionExplain()
+        || actionId == selectionContextActionAiSearch();
+    const SelectionContextActionCustomization customization =
+        input.settings.selectionContext.actionCustomizations.value(actionId);
+    const QString customInstruction =
+        customization.promptOverride.trimmed();
+    const QString explicitModel = builtInAiAction
+        ? normalizeExplicitModelId(customization.modelId)
+        : QString();
+    if (!explicitModel.isEmpty()
+        && !containsModelId(input.modelOptions, explicitModel)) {
+        return failure(
+            input,
+            QStringLiteral("selection.action_model_unavailable"),
+            text8("所选模型当前不可用，请在设置中重新选择。")
+        );
+    }
+
     PromptRuntimeSnapshot promptSnapshot = input.prompts;
     promptSnapshot.settings = input.settings;
     SelectionContextModelRequest result = baseResult(input);
@@ -139,10 +172,9 @@ SelectionContextModelRequest buildSelectionContextModelRequest(
         result.degradedMessage =
             text8("未进行联网搜索，已使用普通 AI 解答");
     }
-    result.modelRequest.modelId = configuredModel(
-        *runtimeFunction,
-        runtimeId
-    );
+    result.modelRequest.modelId = explicitModel.isEmpty()
+        ? configuredModel(*runtimeFunction, runtimeId)
+        : explicitModel;
     result.modelRequest.systemPrompt = promptRuntimeForFunction(
         promptSnapshot,
         runtimeId,
@@ -157,17 +189,27 @@ SelectionContextModelRequest buildSelectionContextModelRequest(
     );
 
     if (actionId == selectionContextActionTranslate()) {
-        const QString target = input.settings.targetLanguage.trimmed().isEmpty()
-            ? text8("简体中文")
-            : input.settings.targetLanguage.trimmed();
+        const QString configuredTarget =
+            customization.targetLanguage.trimmed();
+        const QString globalTarget = input.settings.targetLanguage.trimmed();
+        const QString target = !configuredTarget.isEmpty()
+            ? configuredTarget
+            : (globalTarget.isEmpty() ? text8("简体中文") : globalTarget);
         result.modelRequest.userPrompt = text8("目标语言：")
-            + target
-            + text8("\n待翻译内容：\n")
+            + target;
+        if (!customInstruction.isEmpty()) {
+            result.modelRequest.userPrompt += text8("\n\n用户要求：\n")
+                + customInstruction;
+        }
+        result.modelRequest.userPrompt += text8("\n待翻译内容：\n")
             + input.selectedText;
     } else if (actionId == selectionContextActionExplain()) {
         result.modelRequest.userPrompt = text8("选中文本：\n")
             + input.selectedText
-            + text8("\n\n用户问题：\n请解释这段文字的含义和关键信息。");
+            + text8("\n\n用户问题：\n")
+            + (customInstruction.isEmpty()
+                ? text8("请解释这段文字的含义和关键信息。")
+                : customInstruction);
     } else if (actionId == selectionContextActionAiSearch()) {
         result.modelRequest.systemPrompt += text8(
             "\n\n重要限制：没有进行实时网页检索，不得编造来源或时效性事实。"
@@ -175,7 +217,10 @@ SelectionContextModelRequest buildSelectionContextModelRequest(
         );
         result.modelRequest.userPrompt = text8("选中文本：\n")
             + input.selectedText
-            + text8("\n\n用户问题：\n请分析并回答与这段文字相关的问题。");
+            + text8("\n\n用户问题：\n")
+            + (customInstruction.isEmpty()
+                ? text8("请分析并回答与这段文字相关的问题。")
+                : customInstruction);
     } else {
         result.modelRequest.userPrompt = text8("选中文本：\n")
             + input.selectedText

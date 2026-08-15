@@ -3,6 +3,7 @@
 #include "../controllers/selection_context_action_controller.h"
 #include "../controllers/selection_context_coordinator.h"
 #include "../domain/selection_context_actions.h"
+#include "../providers/model_catalog.h"
 #include "../ui/selection_context_placement.h"
 #include "../ui/selection_context_toolbar.h"
 #include "../ui/selection_result_card.h"
@@ -738,6 +739,9 @@ public:
             return access.promptSnapshot
                 ? access.promptSnapshot()
                 : PromptRuntimeSnapshot();
+        };
+        actionAccess.modelOptionsSnapshot = []() {
+            return modelOptions();
         };
         actionAccess.ensureNetworkConsent = [this](
             const QString &actionId,

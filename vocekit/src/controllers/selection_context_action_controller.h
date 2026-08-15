@@ -30,6 +30,7 @@ struct SelectionContextActionAccess
     )> replaceSelection;
     std::function<AppSettingsData()> settingsSnapshot;
     std::function<PromptRuntimeSnapshot()> promptSnapshot;
+    std::function<QVector<ModelOption>()> modelOptionsSnapshot;
     std::function<bool(
         const QString &actionId,
         const QString &modelId

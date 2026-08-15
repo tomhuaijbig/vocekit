@@ -14,7 +14,11 @@ SOURCES += \
     ../../src/domain/prompt_runtime_library.cpp \
     ../../src/config/app_settings_defaults.cpp \
     ../../src/config/app_paths.cpp \
+    ../../src/config/secret_config.cpp \
+    ../../src/config/secret_store.cpp \
+    ../../src/config/selection_context_action_customization.cpp \
     ../../src/file_utils.cpp \
+    ../../src/providers/model_catalog.cpp \
     ../../src/result_flow_config.cpp
 
 HEADERS += \
@@ -24,4 +28,5 @@ HEADERS += \
     ../../src/domain/selection_context_actions.h \
     ../../src/domain/prompt_runtime_library.h \
     ../../src/config/app_settings_data.h \
+    ../../src/config/selection_context_action_customization.h \
     ../../src/domain/function_settings.h

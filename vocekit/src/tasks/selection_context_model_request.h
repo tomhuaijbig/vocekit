@@ -13,6 +13,7 @@ struct SelectionContextModelRequestInput
     QString followUpQuestion;
     AppSettingsData settings;
     PromptRuntimeSnapshot prompts;
+    QVector<ModelOption> modelOptions;
 };
 
 struct SelectionContextModelRequest

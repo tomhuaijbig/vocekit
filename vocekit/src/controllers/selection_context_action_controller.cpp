@@ -311,6 +311,15 @@ void SelectionContextActionController::startModelAction()
             return;
         }
     }
+    QVector<ModelOption> availableModels;
+    if (m_access.modelOptionsSnapshot) {
+        const std::function<QVector<ModelOption>()> modelOptionsSnapshot =
+            m_access.modelOptionsSnapshot;
+        availableModels = modelOptionsSnapshot();
+        if (!guard) {
+            return;
+        }
+    }
     m_title = actionTitle(m_actionId, settings);
 
     SelectionContextModelRequestInput input;
@@ -320,6 +329,7 @@ void SelectionContextActionController::startModelAction()
     input.followUpQuestion = m_followUpQuestion;
     input.settings = settings;
     input.prompts = prompts;
+    input.modelOptions = availableModels;
     const SelectionContextModelRequest built =
         buildSelectionContextModelRequest(input);
     if (!built.valid) {

@@ -77,6 +77,41 @@ void prepareButton(QAbstractButton *button)
     button->setStyleSheet(QStringLiteral("padding: 0 10px;"));
 }
 
+void restoreTextAsUndoableEdit(
+    QPlainTextEdit *editor,
+    const QString &previous
+)
+{
+    const QString current = editor->toPlainText();
+    int prefix = 0;
+    while (prefix < current.size()
+           && prefix < previous.size()
+           && current.at(prefix) == previous.at(prefix)) {
+        ++prefix;
+    }
+    int suffix = 0;
+    while (suffix < current.size() - prefix
+           && suffix < previous.size() - prefix
+           && current.at(current.size() - suffix - 1)
+               == previous.at(previous.size() - suffix - 1)) {
+        ++suffix;
+    }
+
+    QTextCursor visibleCursor(editor->document());
+    visibleCursor.setPosition(prefix);
+    editor->setTextCursor(visibleCursor);
+
+    QTextCursor correction(editor->document());
+    correction.beginEditBlock();
+    correction.setPosition(prefix);
+    correction.setPosition(current.size() - suffix, QTextCursor::KeepAnchor);
+    correction.insertText(previous.mid(
+        prefix,
+        previous.size() - prefix - suffix
+    ));
+    correction.endEditBlock();
+}
+
 QLabel *fieldLabel(const QString &text, QWidget *parent)
 {
     QLabel *label = new QLabel(text, parent);
@@ -263,6 +298,7 @@ SelectionContextActionEditor::SelectionContextActionEditor(
                     callbacks_.validationWarning;
                 const QString message =
                     text8("提示词不能超过 8000 个字符。");
+                const quint64 warningGeneration = changeDeliveryGeneration_;
                 {
                     QSignalBlocker blocker(promptEdit_);
                     const int rejectedCursorPosition =
@@ -271,20 +307,27 @@ SelectionContextActionEditor::SelectionContextActionEditor(
                         promptEdit_->undo();
                     }
                     if (promptEdit_->toPlainText() != lastValidPrompt_) {
-                        promptEdit_->setPlainText(lastValidPrompt_);
-                        QTextCursor cursor = promptEdit_->textCursor();
-                        cursor.setPosition(qMin(
-                            rejectedCursorPosition,
-                            lastValidPrompt_.size()
-                        ));
-                        promptEdit_->setTextCursor(cursor);
+                        restoreTextAsUndoableEdit(
+                            promptEdit_, lastValidPrompt_);
                     }
+                    if (promptEdit_->toPlainText() != lastValidPrompt_) {
+                        promptEdit_->setPlainText(lastValidPrompt_);
+                    }
+                    QTextCursor cursor(promptEdit_->document());
+                    cursor.setPosition(qMin(
+                        rejectedCursorPosition,
+                        lastValidPrompt_.size()
+                    ));
+                    promptEdit_->setTextCursor(cursor);
                     updatePromptCount(lastValidPrompt_.size());
                 }
                 if (warning) {
                     const QPointer<SelectionContextActionEditor> alive(this);
-                    QTimer::singleShot(0, [alive, warning, message]() {
-                        if (!alive) {
+                    QTimer::singleShot(0, [alive, warning, message,
+                                          warningGeneration]() {
+                        if (!alive
+                            || alive->changeDeliveryGeneration_
+                                != warningGeneration) {
                             return;
                         }
                         warning(message);
@@ -327,6 +370,9 @@ void SelectionContextActionEditor::setCustomization(
     const SelectionContextActionCustomization &value
 )
 {
+    ++changeDeliveryGeneration_;
+    pendingChanges_.clear();
+    changeDrainScheduled_ = false;
     updating_ = true;
     SelectionContextActionCustomization accepted = value;
     const bool rejectedPrompt = promptEdit_
@@ -446,13 +492,49 @@ void SelectionContextActionEditor::notifyChanged()
     if (!changed) {
         return;
     }
+    pendingChanges_.enqueue(current);
+    scheduleChangeDrain();
+}
+
+void SelectionContextActionEditor::scheduleChangeDrain()
+{
+    if (changeDrainScheduled_ || pendingChanges_.isEmpty()) {
+        return;
+    }
+    changeDrainScheduled_ = true;
+    const quint64 generation = changeDeliveryGeneration_;
     const QPointer<SelectionContextActionEditor> alive(this);
-    QTimer::singleShot(0, [alive, changed, current]() {
-        if (!alive) {
+    QTimer::singleShot(0, [alive, generation]() {
+        if (!alive
+            || alive->changeDeliveryGeneration_ != generation) {
             return;
         }
-        changed(current);
+        alive->drainOnePendingChange(generation);
     });
+}
+
+void SelectionContextActionEditor::drainOnePendingChange(quint64 generation)
+{
+    if (generation != changeDeliveryGeneration_) {
+        return;
+    }
+    if (pendingChanges_.isEmpty()) {
+        changeDrainScheduled_ = false;
+        return;
+    }
+
+    const SelectionContextActionCustomization current =
+        pendingChanges_.dequeue();
+    const std::function<void(const SelectionContextActionCustomization &)>
+        changed = callbacks_.changed;
+    changeDrainScheduled_ = false;
+    if (!pendingChanges_.isEmpty()) {
+        scheduleChangeDrain();
+    }
+    if (!changed) {
+        return;
+    }
+    changed(current);
 }
 
 void SelectionContextActionEditor::updatePromptCount(int length)

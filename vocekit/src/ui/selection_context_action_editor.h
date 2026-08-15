@@ -5,6 +5,7 @@
 
 #include <QFrame>
 #include <QPair>
+#include <QQueue>
 #include <QVector>
 
 #include <functional>
@@ -46,6 +47,8 @@ public:
 
 private:
     void notifyChanged();
+    void scheduleChangeDrain();
+    void drainOnePendingChange(quint64 generation);
     void updatePromptCount(int length);
     void selectCatalogValue(
         QComboBox *combo,
@@ -62,6 +65,9 @@ private:
     bool updating_ = false;
     bool expanded_ = false;
     QString lastValidPrompt_;
+    QQueue<SelectionContextActionCustomization> pendingChanges_;
+    quint64 changeDeliveryGeneration_ = 0;
+    bool changeDrainScheduled_ = false;
 
     QLineEdit *displayNameEdit_ = nullptr;
     QCheckBox *visibleCheck_ = nullptr;

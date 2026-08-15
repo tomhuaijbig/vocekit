@@ -90,6 +90,33 @@ bool hasDarkTextPixels(
     return false;
 }
 
+class ClipboardTextGuard
+{
+public:
+    explicit ClipboardTextGuard(QClipboard *clipboard)
+        : clipboard_(clipboard), originalText_(clipboard->text()) {}
+
+    ~ClipboardTextGuard()
+    {
+        restore();
+    }
+
+    void restore()
+    {
+        if (!active_) {
+            return;
+        }
+        QTest::qWait(20);
+        clipboard_->setText(originalText_);
+        active_ = false;
+    }
+
+private:
+    QClipboard *clipboard_;
+    QString originalText_;
+    bool active_ = true;
+};
+
 const quint32 kDeletionProbeAlive = 0x51ec7100u;
 
 class ChangedDeleteProbe
@@ -175,7 +202,8 @@ int runDeletionWorker(const QString &kind)
     int calls = 0;
     SelectionContextActionEditor *editor = nullptr;
     SelectionContextActionEditor::Callbacks callbacks;
-    if (kind == QStringLiteral("changed")) {
+    if (kind == QStringLiteral("changed")
+        || kind == QStringLiteral("changed-two")) {
         callbacks.changed = ChangedDeleteProbe(&editor, &calls);
     } else if (kind == QStringLiteral("restore")) {
         callbacks.restoreRequested = RestoreDeleteProbe(&editor, &calls);
@@ -189,9 +217,14 @@ int runDeletionWorker(const QString &kind)
     editor = new SelectionContextActionEditor(
         selectionContextActionAiSearch(), fullCatalogs(), callbacks);
     QPointer<SelectionContextActionEditor> guard(editor);
-    if (kind == QStringLiteral("changed")) {
+    if (kind == QStringLiteral("changed")
+        || kind == QStringLiteral("changed-two")) {
         required<QLineEdit>(editor, "selectionActionDisplayName")
             ->setText(QString::fromUtf8("删除编辑器"));
+        if (kind == QStringLiteral("changed-two")) {
+            required<QLineEdit>(editor, "selectionActionDisplayName")
+                ->setText(QString::fromUtf8("第二个待处理快照"));
+        }
     } else if (kind == QStringLiteral("restore")) {
         required<QPushButton>(editor, "selectionActionRestore")->click();
     } else if (kind == QStringLiteral("warning")) {
@@ -247,7 +280,7 @@ WorkerResult runDeletionWorkerProcess(const QString &kind)
 
 void flushQueuedCallbacks()
 {
-    QTest::qWait(1);
+    QTest::qWait(20);
 }
 
 void verifyDeletionWorkerResult(const QString &kind)
@@ -273,11 +306,16 @@ private slots:
     void actionSpecificControlsAreCreatedOnlyWhenApplicable();
     void promptRejectsMoreThanEightThousandWithoutRecursiveWarnings();
     void setCustomizationRejectsOverlongPromptWithoutTruncation();
+    void customizationUpdatesBeforeQueuedCallbackDelivery();
+    void setCustomizationInvalidatesOlderQueuedSnapshots();
+    void rapidUserChangesDeliverEverySnapshotInOrder();
+    void firstQueuedSnapshotDeletionCancelsRemainingSnapshots();
     void changedCallbackMayDeleteEditorSynchronously();
     void restoreCallbackMayDeleteEditorSynchronously();
     void warningCallbackMayDeleteEditorAfterRollback();
     void setCustomizationWarningMayDeleteEditorSynchronously();
     void rejectedPastePreservesPriorUndoAndCursor();
+    void continuousTypingAtEightThousandAndOnePreservesMergedUndo();
     void commonControlsExposeAccessibleRelationshipsAndExpandedState();
     void unavailableAndUnicodeCatalogValuesRoundTripWithoutSilentReplacement();
     void expandedStateOnlyAffectsSpecificFields();
@@ -475,6 +513,76 @@ setCustomizationRejectsOverlongPromptWithoutTruncation()
 }
 
 void SelectionContextActionEditorTests::
+customizationUpdatesBeforeQueuedCallbackDelivery()
+{
+    QVector<SelectionContextActionCustomization> changes;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        changes.append(value);
+    };
+    SelectionContextActionEditor editor(
+        selectionContextActionAiSearch(), fullCatalogs(), callbacks);
+    required<QLineEdit>(&editor, "selectionActionDisplayName")
+        ->setText(QStringLiteral("A"));
+
+    QCOMPARE(editor.customization().displayName, QStringLiteral("A"));
+    QVERIFY(changes.isEmpty());
+    flushQueuedCallbacks();
+    QCOMPARE(changes.size(), 1);
+    QCOMPARE(changes.first().displayName, QStringLiteral("A"));
+}
+
+void SelectionContextActionEditorTests::
+setCustomizationInvalidatesOlderQueuedSnapshots()
+{
+    QVector<SelectionContextActionCustomization> changes;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        changes.append(value);
+    };
+    SelectionContextActionEditor editor(
+        selectionContextActionAiSearch(), fullCatalogs(), callbacks);
+    required<QLineEdit>(&editor, "selectionActionDisplayName")
+        ->setText(QStringLiteral("A"));
+    SelectionContextActionCustomization replacement;
+    replacement.displayName = QStringLiteral("B");
+    editor.setCustomization(replacement);
+
+    QCOMPARE(editor.customization().displayName, QStringLiteral("B"));
+    flushQueuedCallbacks();
+    QVERIFY(changes.isEmpty());
+}
+
+void SelectionContextActionEditorTests::
+rapidUserChangesDeliverEverySnapshotInOrder()
+{
+    QVector<SelectionContextActionCustomization> changes;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        changes.append(value);
+    };
+    SelectionContextActionEditor editor(
+        selectionContextActionAiSearch(), fullCatalogs(), callbacks);
+    QLineEdit *name = required<QLineEdit>(
+        &editor, "selectionActionDisplayName");
+    name->setText(QStringLiteral("A"));
+    name->setText(QStringLiteral("B"));
+
+    QCOMPARE(editor.customization().displayName, QStringLiteral("B"));
+    QVERIFY(changes.isEmpty());
+    flushQueuedCallbacks();
+    QCOMPARE(changes.size(), 2);
+    QCOMPARE(changes.at(0).displayName, QStringLiteral("A"));
+    QCOMPARE(changes.at(1).displayName, QStringLiteral("B"));
+}
+
+void SelectionContextActionEditorTests::
+firstQueuedSnapshotDeletionCancelsRemainingSnapshots()
+{
+    verifyDeletionWorkerResult(QStringLiteral("changed-two"));
+}
+
+void SelectionContextActionEditorTests::
 changedCallbackMayDeleteEditorSynchronously()
 {
     verifyDeletionWorkerResult(QStringLiteral("changed"));
@@ -531,9 +639,11 @@ rejectedPastePreservesPriorUndoAndCursor()
     cursor.movePosition(QTextCursor::End);
     prompt->setTextCursor(cursor);
 
+    ClipboardTextGuard clipboardGuard(QApplication::clipboard());
     QApplication::clipboard()->setText(QStringLiteral("c"));
     prompt->paste();
     flushQueuedCallbacks();
+    clipboardGuard.restore();
     QCOMPARE(prompt->toPlainText().size(), 8000);
     QCOMPARE(prompt->textCursor().position(), 8000);
     QCOMPARE(warnings.size(), 1);
@@ -544,6 +654,43 @@ rejectedPastePreservesPriorUndoAndCursor()
     flushQueuedCallbacks();
     QCOMPARE(prompt->toPlainText().size(), 7999);
     QCOMPARE(changes.size(), 2);
+}
+
+void SelectionContextActionEditorTests::
+continuousTypingAtEightThousandAndOnePreservesMergedUndo()
+{
+    QVector<SelectionContextActionCustomization> changes;
+    QStringList warnings;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        changes.append(value);
+    };
+    callbacks.validationWarning = [&](const QString &warning) {
+        warnings.append(warning);
+    };
+    SelectionContextActionEditor editor(
+        selectionContextActionExplain(), fullCatalogs(), callbacks);
+    SelectionContextActionCustomization initial;
+    initial.promptOverride = QString(7998, QLatin1Char('a'));
+    editor.setCustomization(initial);
+    QPlainTextEdit *prompt = required<QPlainTextEdit>(
+        &editor, "selectionActionPrompt");
+    QTextCursor cursor = prompt->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    prompt->setTextCursor(cursor);
+
+    QTest::keyClicks(prompt, QStringLiteral("bcd"));
+    QCOMPARE(prompt->toPlainText().size(), 8000);
+    QCOMPARE(editor.customization().promptOverride.size(), 8000);
+    flushQueuedCallbacks();
+    QCOMPARE(warnings.size(), 1);
+    QCOMPARE(changes.size(), 2);
+    QCOMPARE(changes.at(0).promptOverride.size(), 7999);
+    QCOMPARE(changes.at(1).promptOverride.size(), 8000);
+    QVERIFY(prompt->document()->isUndoAvailable());
+
+    prompt->undo();
+    QCOMPARE(prompt->toPlainText().size(), 7998);
 }
 
 void SelectionContextActionEditorTests::
@@ -775,5 +922,3 @@ int main(int argc, char **argv)
 }
 
 #include "selection_context_action_editor_tests.moc"
-#include <QApplication>
-#include <QClipboard>

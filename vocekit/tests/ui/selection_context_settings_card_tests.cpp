@@ -611,13 +611,15 @@ successfulSaveEchoKeepsEditorAndNewerQueuedChange()
     QLineEdit *name = required<QLineEdit>(
         search, "selectionActionDisplayName");
     card.show();
-    QTest::qWait(1);
+    QTRY_VERIFY(card.isVisible());
     name->setFocus();
-    QVERIFY(name->hasFocus());
+    QTRY_VERIFY(name->hasFocus());
     name->setText(QStringLiteral("A"));
     name->setText(QStringLiteral("B"));
 
-    QTest::qWait(20);
+    const QStringList expectedNames = QStringList()
+        << QStringLiteral("A") << QStringLiteral("B");
+    QTRY_COMPARE(deliveredNames, expectedNames);
     const QString diagnostic = QStringLiteral("delivered=%1 originalAlive=%2")
         .arg(deliveredNames.join(QStringLiteral(",")))
         .arg(original ? QStringLiteral("true") : QStringLiteral("false"));
@@ -625,14 +627,10 @@ successfulSaveEchoKeepsEditorAndNewerQueuedChange()
     QVERIFY2(actionEditor(&card, selectionContextActionAiSearch())
                  == original.data(),
              qPrintable(diagnostic));
-    QVERIFY2(deliveredNames
-                 == (QStringList() << QStringLiteral("A")
-                                   << QStringLiteral("B")),
-             qPrintable(diagnostic));
     QCOMPARE(card.settings().actionCustomizations
              .value(selectionContextActionAiSearch()).displayName,
              QStringLiteral("B"));
-    QVERIFY(name->hasFocus());
+    QTRY_VERIFY(name->hasFocus());
 }
 
 void SelectionContextSettingsCardTests::
@@ -659,7 +657,8 @@ buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent()
         hostLayout->addWidget(scroll);
         host.resize(qMax(620, (620 * scale) / 100), 520);
         host.show();
-        QTest::qWait(20);
+        QTRY_VERIFY(host.isVisible());
+        QTRY_VERIFY(card->isVisibleTo(&host));
         scroll->verticalScrollBar()->setValue(0);
         QCoreApplication::processEvents();
 
@@ -744,14 +743,14 @@ smallWindowAndExpandedEditorsRemainScrollableAndReachable()
     layout->addWidget(scroll);
     host.resize(520, 360);
     host.show();
-    QTest::qWait(20);
+    QTRY_VERIFY(host.isVisible());
+    QTRY_VERIFY(scroll->verticalScrollBar()->maximum() > 0);
 
     QListWidget *actions = required<QListWidget>(
         card,
         "selectionContextActionList"
     );
     QCOMPARE(actions->count(), 5);
-    QVERIFY(scroll->verticalScrollBar()->maximum() > 0);
     scroll->verticalScrollBar()->setValue(
         scroll->verticalScrollBar()->maximum()
     );

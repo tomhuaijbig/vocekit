@@ -92,7 +92,8 @@ QJsonArray stringListToJson(const QStringList &values)
 }
 
 SelectionContextActionCustomizationMap actionCustomizationsFromJson(
-    const QJsonObject &objects
+    const QJsonObject &objects,
+    const QStringList &actionOrder
 )
 {
     SelectionContextActionCustomizationMap values =
@@ -133,20 +134,23 @@ SelectionContextActionCustomizationMap actionCustomizationsFromJson(
     }
     return normalizeSelectionContextActionCustomizations(
         values,
-        QStringList()
+        QStringList(),
+        actionOrder
     );
 }
 
 QJsonObject actionCustomizationsToJson(
     const SelectionContextActionCustomizationMap &values,
-    const QJsonObject &retainedObjects
+    const QJsonObject &retainedObjects,
+    const QStringList &actionOrder
 )
 {
     QJsonObject objects = retainedObjects;
     const SelectionContextActionCustomizationMap normalized =
         normalizeSelectionContextActionCustomizations(
             values,
-            QStringList()
+            QStringList(),
+            actionOrder
         );
     for (const QString &id : defaultSelectionContextActionOrder()) {
         QJsonObject object = objects.value(id).toObject();
@@ -549,7 +553,8 @@ AppSettingsData appSettingsDataFromJson(
         )
     );
     data.selectionContext.actionCustomizations = actionCustomizationsFromJson(
-        selection.value(QStringLiteral("actionCustomizations")).toObject()
+        selection.value(QStringLiteral("actionCustomizations")).toObject(),
+        data.selectionContext.actionOrder
     );
     data.selectionContext.blockedApplications = normalizeExecutableList(
         stringListFromJson(
@@ -838,7 +843,8 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
         QStringLiteral("actionCustomizations"),
         actionCustomizationsToJson(
             data.selectionContext.actionCustomizations,
-            selection.value(QStringLiteral("actionCustomizations")).toObject()
+            selection.value(QStringLiteral("actionCustomizations")).toObject(),
+            data.selectionContext.actionOrder
         )
     );
     root.remove(QStringLiteral("selectionContextToolbar"));

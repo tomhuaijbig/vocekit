@@ -49,8 +49,24 @@ normalizeSelectionContextActionCustomizations(
     const QStringList &writableVocabularyScopeIds
 )
 {
+    return normalizeSelectionContextActionCustomizations(
+        values,
+        writableVocabularyScopeIds,
+        defaultSelectionContextActionOrder()
+    );
+}
+
+SelectionContextActionCustomizationMap
+normalizeSelectionContextActionCustomizations(
+    const SelectionContextActionCustomizationMap &values,
+    const QStringList &writableVocabularyScopeIds,
+    const QStringList &actionOrder
+)
+{
     SelectionContextActionCustomizationMap normalized;
     const QStringList actionIds = defaultSelectionContextActionOrder();
+    const QStringList normalizedOrder =
+        normalizeSelectionContextActionOrder(actionOrder);
     for (const QString &id : actionIds) {
         SelectionContextActionCustomization item = values.contains(id)
             ? values.value(id)
@@ -78,11 +94,11 @@ normalizeSelectionContextActionCustomizations(
             break;
         }
     }
-    if (!hasVisibleAction && !actionIds.isEmpty()) {
+    if (!hasVisibleAction && !normalizedOrder.isEmpty()) {
         SelectionContextActionCustomization first =
-            normalized.value(actionIds.first());
+            normalized.value(normalizedOrder.first());
         first.visible = true;
-        normalized.insert(actionIds.first(), first);
+        normalized.insert(normalizedOrder.first(), first);
     }
     return normalized;
 }
@@ -108,25 +124,12 @@ QStringList visibleSelectionContextActionOrder(
 {
     const QStringList normalizedOrder =
         normalizeSelectionContextActionOrder(order);
-    const SelectionContextActionCustomizationMap defaults =
-        defaultSelectionContextActionCustomizations();
-    bool hasRequestedVisibleAction = false;
-    for (const QString &id : defaultSelectionContextActionOrder()) {
-        const SelectionContextActionCustomization item = values.contains(id)
-            ? values.value(id)
-            : defaults.value(id);
-        if (item.visible) {
-            hasRequestedVisibleAction = true;
-            break;
-        }
-    }
-    if (!hasRequestedVisibleAction) {
-        return normalizedOrder.isEmpty()
-            ? QStringList()
-            : QStringList() << normalizedOrder.first();
-    }
     const SelectionContextActionCustomizationMap normalizedValues =
-        normalizeSelectionContextActionCustomizations(values, QStringList());
+        normalizeSelectionContextActionCustomizations(
+            values,
+            QStringList(),
+            normalizedOrder
+        );
     QStringList visibleOrder;
     for (const QString &id : normalizedOrder) {
         if (normalizedValues.value(id).visible) {

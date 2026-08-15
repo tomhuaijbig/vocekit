@@ -108,6 +108,121 @@ private slots:
         );
     }
 
+    void normalizationUsesCurrentOrderFirstValidAction()
+    {
+        SelectionContextActionCustomizationMap allHidden =
+            defaultSelectionContextActionCustomizations();
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            SelectionContextActionCustomization item = allHidden.value(id);
+            item.visible = false;
+            allHidden.insert(id, item);
+        }
+        const QStringList requestedOrder = QStringList()
+            << QStringLiteral("unknown")
+            << selectionContextActionCopy()
+            << selectionContextActionCopy()
+            << selectionContextActionTranslate();
+
+        const SelectionContextActionCustomizationMap ordered =
+            normalizeSelectionContextActionCustomizations(
+                allHidden,
+                QStringList(),
+                requestedOrder
+            );
+
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            QCOMPARE(
+                ordered.value(id).visible,
+                id == selectionContextActionCopy()
+            );
+        }
+    }
+
+    void vocabularyScopeNormalizationDistinguishesSyntaxAndCatalogPasses()
+    {
+        SelectionContextActionCustomizationMap scopes =
+            defaultSelectionContextActionCustomizations();
+        SelectionContextActionCustomization ai =
+            scopes.value(selectionContextActionAiSearch());
+        ai.vocabularyScopeId = QStringLiteral("__global");
+        scopes.insert(selectionContextActionAiSearch(), ai);
+        SelectionContextActionCustomization translate =
+            scopes.value(selectionContextActionTranslate());
+        translate.vocabularyScopeId.clear();
+        scopes.insert(selectionContextActionTranslate(), translate);
+        SelectionContextActionCustomization explain =
+            scopes.value(selectionContextActionExplain());
+        explain.vocabularyScopeId = QStringLiteral("__all");
+        scopes.insert(selectionContextActionExplain(), explain);
+        SelectionContextActionCustomization save =
+            scopes.value(selectionContextActionSave());
+        save.vocabularyScopeId = QStringLiteral("custom-scope");
+        scopes.insert(selectionContextActionSave(), save);
+        SelectionContextActionCustomization copy =
+            scopes.value(selectionContextActionCopy());
+        copy.vocabularyScopeId = QStringLiteral("deleted-scope");
+        scopes.insert(selectionContextActionCopy(), copy);
+
+        const SelectionContextActionCustomizationMap syntaxOnly =
+            normalizeSelectionContextActionCustomizations(
+                scopes,
+                QStringList(),
+                defaultSelectionContextActionOrder()
+            );
+        QCOMPARE(
+            syntaxOnly.value(selectionContextActionAiSearch())
+                .vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+        QCOMPARE(
+            syntaxOnly.value(selectionContextActionTranslate())
+                .vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+        QCOMPARE(
+            syntaxOnly.value(selectionContextActionExplain())
+                .vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+        QCOMPARE(
+            syntaxOnly.value(selectionContextActionSave()).vocabularyScopeId,
+            QStringLiteral("custom-scope")
+        );
+        QCOMPARE(
+            syntaxOnly.value(selectionContextActionCopy()).vocabularyScopeId,
+            QStringLiteral("deleted-scope")
+        );
+
+        const SelectionContextActionCustomizationMap complete =
+            normalizeSelectionContextActionCustomizations(
+                scopes,
+                QStringList()
+                    << QStringLiteral("__global")
+                    << QStringLiteral("custom-scope"),
+                defaultSelectionContextActionOrder()
+            );
+        QCOMPARE(
+            complete.value(selectionContextActionAiSearch()).vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+        QCOMPARE(
+            complete.value(selectionContextActionTranslate()).vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+        QCOMPARE(
+            complete.value(selectionContextActionExplain()).vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+        QCOMPARE(
+            complete.value(selectionContextActionSave()).vocabularyScopeId,
+            QStringLiteral("custom-scope")
+        );
+        QCOMPARE(
+            complete.value(selectionContextActionCopy()).vocabularyScopeId,
+            QStringLiteral("__global")
+        );
+    }
+
     void defaultsKeepAutomaticSelectionToolbarOptIn()
     {
         const AppSettingsData data;

@@ -111,6 +111,85 @@ private slots:
         );
     }
 
+    void allHiddenCustomizationsRestoreCurrentOrderFirstAcrossRoundTrip()
+    {
+        QJsonObject actions;
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            actions.insert(
+                id,
+                QJsonObject{{QStringLiteral("visible"), false}}
+            );
+        }
+        QJsonObject selection;
+        selection.insert(
+            QStringLiteral("actionOrder"),
+            QJsonArray()
+                << selectionContextActionCopy()
+                << selectionContextActionTranslate()
+        );
+        selection.insert(QStringLiteral("actionCustomizations"), actions);
+        const QJsonObject root{
+            {QStringLiteral("selectionContextToolbar"), selection}
+        };
+
+        const AppSettingsData restored = appSettingsDataFromJson(root);
+
+        QCOMPARE(
+            restored.selectionContext.actionOrder.first(),
+            selectionContextActionCopy()
+        );
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            QCOMPARE(
+                restored.selectionContext.actionCustomizations.value(id)
+                    .visible,
+                id == selectionContextActionCopy()
+            );
+        }
+
+        const QJsonObject written = appSettingsDataToJson(restored);
+        const AppSettingsData roundTripped = appSettingsDataFromJson(written);
+        const QJsonObject writtenActions = written
+            .value(QStringLiteral("selectionContextToolbar")).toObject()
+            .value(QStringLiteral("actionCustomizations")).toObject();
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            QCOMPARE(
+                writtenActions.value(id).toObject()
+                    .value(QStringLiteral("visible")).toBool(),
+                id == selectionContextActionCopy()
+            );
+            QCOMPARE(
+                roundTripped.selectionContext.actionCustomizations.value(id)
+                    .visible,
+                id == selectionContextActionCopy()
+            );
+        }
+
+        AppSettingsData directlyWrittenData;
+        directlyWrittenData.selectionContext.actionOrder = QStringList()
+            << selectionContextActionCopy()
+            << selectionContextActionTranslate();
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            SelectionContextActionCustomization item = directlyWrittenData
+                .selectionContext.actionCustomizations.value(id);
+            item.visible = false;
+            directlyWrittenData.selectionContext.actionCustomizations.insert(
+                id,
+                item
+            );
+        }
+        const QJsonObject directlyWrittenActions = appSettingsDataToJson(
+            directlyWrittenData
+        ).value(QStringLiteral("selectionContextToolbar")).toObject()
+            .value(QStringLiteral("actionCustomizations")).toObject();
+        for (const QString &id : defaultSelectionContextActionOrder()) {
+            QCOMPARE(
+                directlyWrittenActions.value(id).toObject()
+                    .value(QStringLiteral("visible")).toBool(),
+                id == selectionContextActionCopy()
+            );
+        }
+    }
+
     void selectionContextSettingsRoundTripAndNormalize()
     {
         AppSettingsData data;

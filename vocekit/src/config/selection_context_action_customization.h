@@ -26,6 +26,12 @@ normalizeSelectionContextActionCustomizations(
     const SelectionContextActionCustomizationMap &values,
     const QStringList &writableVocabularyScopeIds
 );
+SelectionContextActionCustomizationMap
+normalizeSelectionContextActionCustomizations(
+    const SelectionContextActionCustomizationMap &values,
+    const QStringList &writableVocabularyScopeIds,
+    const QStringList &actionOrder
+);
 QString selectionContextActionDisplayName(
     const QString &actionId,
     const SelectionContextActionCustomizationMap &values

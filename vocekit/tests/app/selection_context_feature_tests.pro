@@ -27,7 +27,11 @@ SOURCES += \
     ../../src/ui/selection_result_card.cpp \
     ../../src/config/app_settings_defaults.cpp \
     ../../src/config/app_paths.cpp \
+    ../../src/config/secret_config.cpp \
+    ../../src/config/secret_store.cpp \
+    ../../src/config/selection_context_action_customization.cpp \
     ../../src/file_utils.cpp \
+    ../../src/providers/model_catalog.cpp \
     ../../src/result_flow_config.cpp
 
 HEADERS += \
@@ -35,9 +39,13 @@ HEADERS += \
     ../../src/controllers/selection_context_action_controller.h \
     ../../src/controllers/selection_context_coordinator.h \
     ../../src/controllers/selection_context_policy.h \
+    ../../src/config/secret_config.h \
+    ../../src/config/secret_store.h \
+    ../../src/config/selection_context_action_customization.h \
     ../../src/input/selection_observer.h \
     ../../src/input/selection_probe_runner.h \
     ../../src/tasks/selection_context_model_runner.h \
+    ../../src/providers/model_catalog.h \
     ../../src/ui/selection_context_toolbar.h \
     ../../src/ui/selection_result_card.h
 

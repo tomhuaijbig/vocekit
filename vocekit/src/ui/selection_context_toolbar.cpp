@@ -134,22 +134,7 @@ SelectionContextToolbar::SelectionContextToolbar(QWidget *parent)
     m_layout->addWidget(m_identity);
 
     for (const QString &id : defaultSelectionContextActionOrder()) {
-        QToolButton *button = new SelectionContextToolButton(
-            [this]() { requestClose(); },
-            this
-        );
-        button->setObjectName(actionButtonObjectName(id));
-        button->setProperty("selectionActionId", id);
-        button->setText(selectionContextActionTitle(id));
-        button->setToolTip(selectionContextActionTitle(id));
-        button->setAccessibleName(selectionContextActionTitle(id));
-        button->setFocusPolicy(Qt::StrongFocus);
-        connect(button, &QToolButton::clicked, this, [this, id]() {
-            requestAction(id);
-        });
-        m_actionButtons.insert(id, button);
         m_actionEnabled.insert(id, true);
-        m_layout->addWidget(button);
     }
 
     m_moreButton = new SelectionContextToolButton(
@@ -188,9 +173,11 @@ SelectionContextToolbar::SelectionContextToolbar(QWidget *parent)
     ));
     m_moreButton->setMenu(m_moreMenu);
 
+    setActionPresentation(
+        defaultSelectionContextActionOrder(),
+        defaultSelectionContextActionCustomizations()
+    );
     applyButtonMetrics();
-    rebuildActionLayout();
-    rebuildMoreMenu();
 }
 
 SelectionContextToolbar::~SelectionContextToolbar() = default;
@@ -210,20 +197,32 @@ void SelectionContextToolbar::setCallbacks(
     m_callbacks = callbacks;
 }
 
+void SelectionContextToolbar::setActionPresentation(
+    const QStringList &actionIds,
+    const SelectionContextActionCustomizationMap &customizations)
+{
+    m_actionOrder = visibleSelectionContextActionOrder(
+        actionIds,
+        customizations
+    );
+    m_actionTitles.clear();
+    for (const QString &id : m_actionOrder) {
+        m_actionTitles.insert(
+            id,
+            selectionContextActionDisplayName(id, customizations)
+        );
+    }
+    m_overflowActionIds.clear();
+    rebuildActionButtons();
+    rebuildMoreMenu();
+}
+
 void SelectionContextToolbar::setActionOrder(const QStringList &actionIds)
 {
-    QStringList order;
-    const QStringList known = defaultSelectionContextActionOrder();
-    for (const QString &value : actionIds) {
-        const QString id = value.trimmed();
-        if (known.contains(id) && !order.contains(id)) {
-            order.append(id);
-        }
-    }
-    m_actionOrder = order.isEmpty() ? known : order;
-    m_overflowActionIds.clear();
-    rebuildActionLayout();
-    rebuildMoreMenu();
+    setActionPresentation(
+        actionIds,
+        defaultSelectionContextActionCustomizations()
+    );
 }
 
 void SelectionContextToolbar::setMoreActions(
@@ -401,6 +400,48 @@ void SelectionContextToolbar::applyButtonMetrics()
     }
 }
 
+void SelectionContextToolbar::rebuildActionButtons()
+{
+    if (!m_layout || !m_moreButton) {
+        return;
+    }
+    for (QToolButton *button : m_actionButtons) {
+        m_layout->removeWidget(button);
+        button->hide();
+        button->setParent(nullptr);
+        button->deleteLater();
+    }
+    m_actionButtons.clear();
+
+    int insertion = m_layout->indexOf(m_moreButton);
+    for (const QString &id : m_actionOrder) {
+        const QString title = m_actionTitles.value(
+            id,
+            selectionContextActionTitle(id)
+        );
+        QToolButton *button = new SelectionContextToolButton(
+            [this]() { requestClose(); },
+            this
+        );
+        button->setObjectName(actionButtonObjectName(id));
+        button->setProperty("selectionActionId", id);
+        button->setText(title);
+        button->setToolTip(title);
+        button->setAccessibleName(title);
+        button->setFocusPolicy(Qt::StrongFocus);
+        button->setEnabled(
+            m_busyActionId.isEmpty() && m_actionEnabled.value(id, true)
+        );
+        connect(button, &QToolButton::clicked, this, [this, id]() {
+            requestAction(id);
+        });
+        m_actionButtons.insert(id, button);
+        m_layout->insertWidget(insertion++, button);
+    }
+    applyButtonMetrics();
+    m_layout->invalidate();
+}
+
 void SelectionContextToolbar::rebuildActionLayout()
 {
     if (!m_layout || !m_moreButton) {
@@ -416,9 +457,15 @@ void SelectionContextToolbar::rebuildActionLayout()
         if (!button) {
             continue;
         }
-        button->setText(selectionContextActionTitle(id));
+        const QString title = m_actionTitles.value(
+            id,
+            selectionContextActionTitle(id)
+        );
+        button->setText(title);
         button->setIcon(QIcon());
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setToolTip(title);
+        button->setAccessibleName(title);
         button->show();
         m_layout->insertWidget(insertion++, button);
     }
@@ -449,7 +496,7 @@ void SelectionContextToolbar::rebuildMoreMenu()
     };
 
     for (const QString &id : m_overflowActionIds) {
-        addItem(id, selectionContextActionTitle(id),
+        addItem(id, m_actionTitles.value(id, selectionContextActionTitle(id)),
                 m_actionEnabled.value(id, true));
     }
     if (!m_overflowActionIds.isEmpty()
@@ -525,8 +572,9 @@ void SelectionContextToolbar::configureForAvailableWidth(int width)
     if (visibleRowWidth() > width && !m_actionOrder.isEmpty()) {
         QToolButton *first = m_actionButtons.value(m_actionOrder.constFirst());
         if (first) {
-            const QString title = selectionContextActionTitle(
-                m_actionOrder.constFirst()
+            const QString title = m_actionTitles.value(
+                m_actionOrder.constFirst(),
+                selectionContextActionTitle(m_actionOrder.constFirst())
             );
             first->setText(QString());
             first->setIcon(style()->standardIcon(QStyle::SP_FileDialogInfoView));

@@ -1,6 +1,7 @@
 #ifndef VOCEKIT_SELECTION_CONTEXT_TOOLBAR_H
 #define VOCEKIT_SELECTION_CONTEXT_TOOLBAR_H
 
+#include "../config/selection_context_action_customization.h"
 #include "../input/selection_snapshot.h"
 
 #include <QMap>
@@ -39,6 +40,10 @@ public:
     ~SelectionContextToolbar() override;
 
     void setCallbacks(const SelectionContextToolbarCallbacks &callbacks);
+    void setActionPresentation(
+        const QStringList &actionIds,
+        const SelectionContextActionCustomizationMap &customizations
+    );
     void setActionOrder(const QStringList &actionIds);
     void setMoreActions(const QVector<SelectionContextMenuItem> &items);
     void setBusyAction(const QString &actionId);
@@ -59,6 +64,7 @@ protected:
 private:
     void applyWindowMode(bool keyboardNavigationMode);
     void applyButtonMetrics();
+    void rebuildActionButtons();
     void rebuildActionLayout();
     void rebuildMoreMenu();
     void updateMoreMenuEnabledState();
@@ -70,6 +76,7 @@ private:
 
     SelectionContextToolbarCallbacks m_callbacks;
     QStringList m_actionOrder;
+    QMap<QString, QString> m_actionTitles;
     QVector<SelectionContextMenuItem> m_moreActions;
     QStringList m_overflowActionIds;
     QMap<QString, bool> m_actionEnabled;

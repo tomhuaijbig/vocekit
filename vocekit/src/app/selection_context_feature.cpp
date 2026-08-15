@@ -448,10 +448,10 @@ public:
             1,
             settings.selectionContext.pauseMinutes
         );
-        settings.selectionContext.actionOrder =
-            normalizeSelectionContextActionOrder(
-                settings.selectionContext.actionOrder
-            );
+        settings.selectionContext = normalizeSelectionContextSettings(
+            settings.selectionContext,
+            settings
+        );
         QStringList blocked;
         for (const QString &entry :
              settings.selectionContext.blockedApplications) {
@@ -465,7 +465,10 @@ public:
 
     void applyToolbarSettings()
     {
-        toolbar->setActionOrder(settings.selectionContext.actionOrder);
+        toolbar->setActionPresentation(
+            settings.selectionContext.actionOrder,
+            settings.selectionContext.actionCustomizations
+        );
         QVector<SelectionContextMenuItem> items;
         QSet<QString> added;
         for (const FunctionSettings &function : settings.functions) {

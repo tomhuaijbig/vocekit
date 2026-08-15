@@ -276,6 +276,7 @@ private slots:
     void observerInstallFailureStillAllowsTheFallbackHotkeyAndCloseButton();
     void lockOrSuspendCancelsProbesAndSessionsAndUnlockRestartsOnlyWhenEnabled();
     void refreshAppliesSettingsWithoutRecreatingVisiblePinnedResult();
+    void settingsRefreshUpdatesToolbarPresentationWithoutRestart();
     void pinDetachesCurrentCardAndNextActionUsesANewCardUpToThreePinned();
     void moreMenuListsEachCustomFunctionOnceAndRoutesStableIds();
     void builtInAndCanvasFunctionsDoNotAppearInMoreMenu();
@@ -397,6 +398,99 @@ refreshAppliesSettingsWithoutRecreatingVisiblePinnedResult()
     feature->refresh();
     QCOMPARE(feature->pinnedResultCount(), 1);
     QVERIFY(card->isVisible());
+}
+
+void SelectionContextFeatureTests::
+settingsRefreshUpdatesToolbarPresentationWithoutRestart()
+{
+    Harness h;
+    SelectionContextActionCustomization search =
+        h.settings.selectionContext.actionCustomizations.value(
+            selectionContextActionAiSearch()
+        );
+    search.displayName = QString::fromUtf8("问 AI");
+    h.settings.selectionContext.actionCustomizations.insert(
+        selectionContextActionAiSearch(),
+        search
+    );
+    SelectionContextActionCustomization save =
+        h.settings.selectionContext.actionCustomizations.value(
+            selectionContextActionSave()
+        );
+    save.visible = false;
+    h.settings.selectionContext.actionCustomizations.insert(
+        selectionContextActionSave(),
+        save
+    );
+    FunctionSettings custom;
+    custom.id = QStringLiteral("classic-one");
+    custom.name = QString::fromUtf8("经典功能");
+    custom.executionMode = FunctionExecutionMode::Classic;
+    h.settings.functions.append(custom);
+
+    QScopedPointer<SelectionContextFeature> feature(h.create());
+    feature->start();
+    h.showSelection(feature.data());
+    SelectionContextToolbar *bar = h.toolbar(feature.data());
+    QVERIFY(bar);
+    QVERIFY(bar->isVisible());
+    QToolButton *searchButton = bar->findChild<QToolButton *>(
+        QStringLiteral("selectionActionAiSearchButton")
+    );
+    QVERIFY(searchButton);
+    QCOMPARE(searchButton->text(), QString::fromUtf8("问 AI"));
+    QVERIFY(!bar->findChild<QToolButton *>(
+        QStringLiteral("selectionActionSaveButton")
+    ));
+    QMenu *menu = bar->findChild<QMenu *>(
+        QStringLiteral("selectionContextMoreMenu")
+    );
+    QVERIFY(menuAction(
+        menu,
+        selectionContextActionForFunction(custom.id)
+    ));
+
+    search.displayName = QString::fromUtf8("继续问 AI");
+    h.settings.selectionContext.actionCustomizations.insert(
+        selectionContextActionAiSearch(),
+        search
+    );
+    save.visible = true;
+    h.settings.selectionContext.actionCustomizations.insert(
+        selectionContextActionSave(),
+        save
+    );
+    SelectionContextActionCustomization copy =
+        h.settings.selectionContext.actionCustomizations.value(
+            selectionContextActionCopy()
+        );
+    copy.visible = false;
+    h.settings.selectionContext.actionCustomizations.insert(
+        selectionContextActionCopy(),
+        copy
+    );
+    feature->refresh();
+
+    QCOMPARE(h.toolbar(feature.data()), bar);
+    QVERIFY(bar->isVisible());
+    searchButton = bar->findChild<QToolButton *>(
+        QStringLiteral("selectionActionAiSearchButton")
+    );
+    QVERIFY(searchButton);
+    QCOMPARE(searchButton->text(), QString::fromUtf8("继续问 AI"));
+    QVERIFY(bar->findChild<QToolButton *>(
+        QStringLiteral("selectionActionSaveButton")
+    ));
+    QVERIFY(!bar->findChild<QToolButton *>(
+        QStringLiteral("selectionActionCopyButton")
+    ));
+    menu = bar->findChild<QMenu *>(
+        QStringLiteral("selectionContextMoreMenu")
+    );
+    QVERIFY(menuAction(
+        menu,
+        selectionContextActionForFunction(custom.id)
+    ));
 }
 
 void SelectionContextFeatureTests::

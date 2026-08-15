@@ -22,31 +22,16 @@ QString titleForFunction(const QString &id)
     return id;
 }
 
-SelectionContextSettings normalizedSelectionContextSettings(
-    const SelectionContextSettings &source)
+SelectionContextSettings normalizedHubSelectionContextSettings(
+    const SelectionContextSettings &source,
+    const AppSettingsData &completeSettings)
 {
-    SelectionContextSettings result = source;
+    SelectionContextSettings result = normalizeSelectionContextSettings(
+        source,
+        completeSettings
+    );
     result.minimumTextLength = qBound(1, result.minimumTextLength, 1000);
     result.pauseMinutes = qBound(1, result.pauseMinutes, 1440);
-    const QStringList defaults = QStringList()
-        << QStringLiteral("ai-search")
-        << QStringLiteral("translate")
-        << QStringLiteral("explain")
-        << QStringLiteral("save")
-        << QStringLiteral("copy");
-    QStringList actionOrder;
-    for (const QString &value : result.actionOrder) {
-        const QString id = value.trimmed();
-        if (defaults.contains(id) && !actionOrder.contains(id)) {
-            actionOrder.append(id);
-        }
-    }
-    for (const QString &id : defaults) {
-        if (!actionOrder.contains(id)) {
-            actionOrder.append(id);
-        }
-    }
-    result.actionOrder = actionOrder;
     QStringList applications;
     for (const QString &value : result.blockedApplications) {
         const QString executable = QFileInfo(value.trimmed())
@@ -57,6 +42,16 @@ SelectionContextSettings normalizedSelectionContextSettings(
         }
     }
     result.blockedApplications = applications;
+    return result;
+}
+
+AppSettingsData normalizedHubSettingsData(const AppSettingsData &source)
+{
+    AppSettingsData result = source;
+    result.selectionContext = normalizedHubSelectionContextSettings(
+        source.selectionContext,
+        result
+    );
     return result;
 }
 
@@ -156,9 +151,10 @@ HubSettingsState::operator bool() const
 
 void HubSettingsState::load()
 {
-    m_data = m_access.settingsSnapshotProvider
+    const AppSettingsData loaded = m_access.settingsSnapshotProvider
         ? m_access.settingsSnapshotProvider()
         : AppSettingsData();
+    m_data = normalizedHubSettingsData(loaded);
     m_promptLibrary = m_access.promptLibraryProvider
         ? m_access.promptLibraryProvider()
         : QVector<PromptLibraryItem>();
@@ -167,11 +163,12 @@ void HubSettingsState::load()
 
 bool HubSettingsState::save(OperationError *error) const
 {
+    const AppSettingsData normalized = normalizedHubSettingsData(m_data);
     if (m_access.applyNonFlowAndSave) {
-        return m_access.applyNonFlowAndSave(m_data, error);
+        return m_access.applyNonFlowAndSave(normalized, error);
     }
     return m_access.applyAndSave
-        ? m_access.applyAndSave(m_data)
+        ? m_access.applyAndSave(normalized)
         : false;
 }
 
@@ -183,7 +180,7 @@ bool HubSettingsState::replaceAndSave(
     OperationError *saveError = error ? error : &localError;
     *saveError = OperationError();
     const AppSettingsData previous = m_data;
-    m_data = data;
+    m_data = normalizedHubSettingsData(data);
     refreshCustomFunctions();
     if (save(saveError)) {
         return true;
@@ -240,7 +237,7 @@ bool HubSettingsState::reloadFunctionFlowState(
 
 AppSettingsData HubSettingsState::toData() const
 {
-    return m_data;
+    return normalizedHubSettingsData(m_data);
 }
 
 const FunctionSettings *HubSettingsState::findFunction(const QString &id) const
@@ -929,12 +926,20 @@ bool HubSettingsState::strongSelectionEnabled() const { return m_data.strongSele
 void HubSettingsState::setStrongSelectionEnabled(bool enabled) { m_data.strongSelectionEnabled = enabled; }
 SelectionContextSettings HubSettingsState::selectionContextSettings() const
 {
-    return normalizedSelectionContextSettings(m_data.selectionContext);
+    return normalizedHubSelectionContextSettings(
+        m_data.selectionContext,
+        m_data
+    );
 }
 void HubSettingsState::setSelectionContextSettings(
     const SelectionContextSettings &settings)
 {
-    m_data.selectionContext = normalizedSelectionContextSettings(settings);
+    AppSettingsData completeSettings = m_data;
+    completeSettings.selectionContext = settings;
+    m_data.selectionContext = normalizedHubSelectionContextSettings(
+        settings,
+        completeSettings
+    );
 }
 bool HubSettingsState::floatingBarEnabled() const { return m_data.floatingBarEnabled; }
 void HubSettingsState::setFloatingBarEnabled(bool enabled) { m_data.floatingBarEnabled = enabled; }

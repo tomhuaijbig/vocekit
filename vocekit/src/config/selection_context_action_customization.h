@@ -5,6 +5,9 @@
 #include <QString>
 #include <QStringList>
 
+struct AppSettingsData;
+struct SelectionContextSettings;
+
 struct SelectionContextActionCustomization
 {
     QString displayName;
@@ -39,6 +42,13 @@ QString selectionContextActionDisplayName(
 QStringList visibleSelectionContextActionOrder(
     const QStringList &order,
     const SelectionContextActionCustomizationMap &values
+);
+QStringList writableSelectionContextVocabularyScopeIds(
+    const AppSettingsData &settings
+);
+SelectionContextSettings normalizeSelectionContextSettings(
+    const SelectionContextSettings &source,
+    const AppSettingsData &completeSettings
 );
 
 #endif // VOCEKIT_SELECTION_CONTEXT_ACTION_CUSTOMIZATION_H

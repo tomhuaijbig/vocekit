@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include "../../src/domain/selection_context_actions.h"
 #include "../../src/ui/hub_settings_state.h"
 
 class HubSettingsStateTests : public QObject
@@ -8,6 +9,12 @@ class HubSettingsStateTests : public QObject
 
 private slots:
     void readsAndNormalizesSelectionContextSettings();
+    void normalizesSelectionActionCustomizationsWithCompleteSettings();
+    void deletedVocabularyScopeFallsBackWithoutChangingUnknownModel();
+    void writableVocabularyScopeCatalogUsesFixedThenCustomOrder();
+    void completeNormalizerMigratesModelsAndPreservesOtherFields();
+    void replaceAndSaveNormalizesCompleteSelectionContextSettings();
+    void saveNormalizesScopeAfterCustomFunctionRemoval();
     void reloadFunctionFlowStateSynchronizesOnlyModeAndFlow();
     void reloadFunctionFlowStateRejectsMissingFunctions();
     void readsAndSavesTypedSettings();
@@ -24,6 +31,258 @@ private slots:
     void staleReplaceReloadsLatestStateWithoutReplayingEdits();
     void normalizesWindowsSpeechLanguage();
 };
+
+void HubSettingsStateTests::
+normalizesSelectionActionCustomizationsWithCompleteSettings()
+{
+    AppSettingsData source;
+    FunctionSettings custom;
+    custom.id = QStringLiteral("custom-summarize");
+    custom.name = QString::fromUtf8("摘要");
+    custom.builtIn = false;
+    source.functions.append(custom);
+
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionCustomization item =
+            source.selectionContext.actionCustomizations.value(id);
+        item.visible = false;
+        source.selectionContext.actionCustomizations.insert(id, item);
+    }
+    source.selectionContext.actionOrder = QStringList()
+        << selectionContextActionCopy()
+        << selectionContextActionTranslate()
+        << selectionContextActionExplain()
+        << selectionContextActionSave()
+        << selectionContextActionAiSearch();
+    SelectionContextActionCustomization save =
+        source.selectionContext.actionCustomizations.value(
+            selectionContextActionSave());
+    save.vocabularyScopeId = custom.id;
+    source.selectionContext.actionCustomizations.insert(
+        selectionContextActionSave(), save);
+
+    HubWindowAccess access;
+    access.settingsSnapshotProvider = [source]() { return source; };
+    HubSettingsState state(access);
+    const SelectionContextSettings normalized =
+        state.selectionContextSettings();
+    QCOMPARE(normalized.actionOrder.first(),
+             selectionContextActionCopy());
+    QVERIFY(normalized.actionCustomizations.value(
+        normalized.actionOrder.first()).visible);
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionSave()).vocabularyScopeId, custom.id);
+}
+
+void HubSettingsStateTests::
+deletedVocabularyScopeFallsBackWithoutChangingUnknownModel()
+{
+    AppSettingsData source;
+    SelectionContextActionCustomization save =
+        source.selectionContext.actionCustomizations.value(
+            selectionContextActionSave());
+    save.vocabularyScopeId = QStringLiteral("deleted-function");
+    source.selectionContext.actionCustomizations.insert(
+        selectionContextActionSave(), save);
+    SelectionContextActionCustomization explain =
+        source.selectionContext.actionCustomizations.value(
+            selectionContextActionExplain());
+    explain.modelId = QStringLiteral("openai:future");
+    source.selectionContext.actionCustomizations.insert(
+        selectionContextActionExplain(), explain);
+
+    HubWindowAccess access;
+    access.settingsSnapshotProvider = [source]() { return source; };
+    HubSettingsState state(access);
+    const SelectionContextSettings normalized =
+        state.selectionContextSettings();
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionSave()).vocabularyScopeId,
+        QStringLiteral("__global"));
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionExplain()).modelId,
+        QStringLiteral("openai:future"));
+}
+
+void HubSettingsStateTests::
+writableVocabularyScopeCatalogUsesFixedThenCustomOrder()
+{
+    AppSettingsData source;
+    const auto appendFunction = [&source](
+        const QString &id,
+        bool builtIn = false
+    ) {
+        FunctionSettings function;
+        function.id = id;
+        function.name = id;
+        function.builtIn = builtIn;
+        source.functions.append(function);
+    };
+    appendFunction(QStringLiteral(" custom-b "));
+    appendFunction(QStringLiteral("custom-a"));
+    appendFunction(QStringLiteral("custom-b"));
+    appendFunction(QStringLiteral("custom-built-in"), true);
+    appendFunction(QStringLiteral("   "));
+    appendFunction(QStringLiteral("__all"));
+    appendFunction(QStringLiteral("dictate"));
+
+    QCOMPARE(writableSelectionContextVocabularyScopeIds(source),
+             QStringList()
+                 << QStringLiteral("__global")
+                 << QStringLiteral("dictate")
+                 << QStringLiteral("translate")
+                 << QStringLiteral("ask")
+                 << QStringLiteral("custom-b")
+                 << QStringLiteral("custom-a"));
+}
+
+void HubSettingsStateTests::
+completeNormalizerMigratesModelsAndPreservesOtherFields()
+{
+    AppSettingsData completeSettings;
+    SelectionContextSettings source;
+    source.enabled = true;
+    source.keyboardSelectionEnabled = false;
+    source.closeOnOutsideClick = false;
+    source.pinEnabled = false;
+    source.networkConsentAcknowledged = true;
+    source.minimumTextLength = 777;
+    source.pauseMinutes = 999;
+    source.blockedApplications = QStringList()
+        << QStringLiteral(" C:/Apps/Future.EXE ")
+        << QStringLiteral("Future.EXE");
+    source.actionOrder = QStringList()
+        << selectionContextActionTranslate()
+        << selectionContextActionTranslate()
+        << QStringLiteral("future-action");
+
+    const QStringList ids = defaultSelectionContextActionOrder();
+    const QStringList models = QStringList()
+        << QStringLiteral("gpt-4o")
+        << QStringLiteral("openai:gpt-5.5")
+        << QStringLiteral("claude:claude-3-7-sonnet")
+        << QStringLiteral("openai:future")
+        << QStringLiteral(" custom:future ");
+    for (int index = 0; index < ids.size(); ++index) {
+        SelectionContextActionCustomization item =
+            source.actionCustomizations.value(ids.at(index));
+        item.modelId = models.at(index);
+        source.actionCustomizations.insert(ids.at(index), item);
+    }
+
+    const SelectionContextSettings normalized =
+        normalizeSelectionContextSettings(source, completeSettings);
+    QVERIFY(normalized.enabled);
+    QVERIFY(!normalized.keyboardSelectionEnabled);
+    QVERIFY(!normalized.closeOnOutsideClick);
+    QVERIFY(!normalized.pinEnabled);
+    QVERIFY(normalized.networkConsentAcknowledged);
+    QCOMPARE(normalized.minimumTextLength, 777);
+    QCOMPARE(normalized.pauseMinutes, 999);
+    QCOMPARE(normalized.blockedApplications,
+             source.blockedApplications);
+    QCOMPARE(normalized.actionOrder.first(),
+             selectionContextActionTranslate());
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionAiSearch()).modelId,
+        QStringLiteral("openai:gpt-5.6-terra"));
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionTranslate()).modelId,
+        QStringLiteral("openai:gpt-5.6-sol"));
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionExplain()).modelId,
+        QStringLiteral("claude:claude-sonnet-5"));
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionSave()).modelId,
+        QStringLiteral("openai:future"));
+    QCOMPARE(normalized.actionCustomizations.value(
+        selectionContextActionCopy()).modelId,
+        QStringLiteral("custom:future"));
+}
+
+void HubSettingsStateTests::
+replaceAndSaveNormalizesCompleteSelectionContextSettings()
+{
+    AppSettingsData persisted;
+    bool callbackInvoked = false;
+    HubWindowAccess access;
+    access.settingsSnapshotProvider = [persisted]() {
+        return persisted;
+    };
+    access.applyNonFlowAndSave = [&persisted, &callbackInvoked](
+        const AppSettingsData &edited,
+        OperationError *
+    ) {
+        callbackInvoked = true;
+        persisted = edited;
+        return true;
+    };
+    HubSettingsState state(access);
+
+    AppSettingsData replacement = state.toData();
+    replacement.selectionContext.actionOrder = QStringList()
+        << selectionContextActionCopy();
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionCustomization item =
+            replacement.selectionContext.actionCustomizations.value(id);
+        item.visible = false;
+        replacement.selectionContext.actionCustomizations.insert(id, item);
+    }
+    SelectionContextActionCustomization save =
+        replacement.selectionContext.actionCustomizations.value(
+            selectionContextActionSave());
+    save.vocabularyScopeId = QStringLiteral("missing-custom");
+    replacement.selectionContext.actionCustomizations.insert(
+        selectionContextActionSave(), save);
+
+    QVERIFY(state.replaceAndSave(replacement));
+    QVERIFY(callbackInvoked);
+    QCOMPARE(persisted.selectionContext.actionOrder.first(),
+             selectionContextActionCopy());
+    QVERIFY(persisted.selectionContext.actionCustomizations.value(
+        selectionContextActionCopy()).visible);
+    QCOMPARE(persisted.selectionContext.actionCustomizations.value(
+        selectionContextActionSave()).vocabularyScopeId,
+        QStringLiteral("__global"));
+    QCOMPARE(state.toData().selectionContext.actionCustomizations.value(
+        selectionContextActionSave()).vocabularyScopeId,
+        QStringLiteral("__global"));
+}
+
+void HubSettingsStateTests::
+saveNormalizesScopeAfterCustomFunctionRemoval()
+{
+    AppSettingsData source;
+    FunctionSettings custom;
+    custom.id = QStringLiteral("custom-scope");
+    custom.name = QString::fromUtf8("临时词库范围");
+    custom.builtIn = false;
+    source.functions.append(custom);
+    SelectionContextActionCustomization save =
+        source.selectionContext.actionCustomizations.value(
+            selectionContextActionSave());
+    save.vocabularyScopeId = custom.id;
+    source.selectionContext.actionCustomizations.insert(
+        selectionContextActionSave(), save);
+
+    AppSettingsData persisted;
+    HubWindowAccess access;
+    access.settingsSnapshotProvider = [source]() { return source; };
+    access.applyNonFlowAndSave = [&persisted](
+        const AppSettingsData &edited,
+        OperationError *
+    ) {
+        persisted = edited;
+        return true;
+    };
+    HubSettingsState state(access);
+    state.removeCustomFunction(custom.id);
+
+    QVERIFY(state.save());
+    QCOMPARE(persisted.selectionContext.actionCustomizations.value(
+        selectionContextActionSave()).vocabularyScopeId,
+        QStringLiteral("__global"));
+}
 
 void HubSettingsStateTests::readsAndNormalizesSelectionContextSettings()
 {

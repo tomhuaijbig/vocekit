@@ -1,6 +1,8 @@
 #include "selection_context_action_customization.h"
 
+#include "app_settings_data.h"
 #include "../domain/selection_context_actions.h"
+#include "../providers/model_catalog.h"
 
 namespace {
 
@@ -121,4 +123,52 @@ QStringList visibleSelectionContextActionOrder(
         }
     }
     return visibleOrder;
+}
+
+QStringList writableSelectionContextVocabularyScopeIds(
+    const AppSettingsData &settings
+)
+{
+    QStringList ids;
+    ids << QStringLiteral("__global")
+        << QStringLiteral("dictate")
+        << QStringLiteral("translate")
+        << QStringLiteral("ask");
+    for (const FunctionSettings &function : settings.functions) {
+        const QString id = function.id.trimmed();
+        if (!function.builtIn && !id.isEmpty()
+            && id != QStringLiteral("__all")
+            && !ids.contains(id)) {
+            ids.append(id);
+        }
+    }
+    return ids;
+}
+
+SelectionContextSettings normalizeSelectionContextSettings(
+    const SelectionContextSettings &source,
+    const AppSettingsData &completeSettings
+)
+{
+    SelectionContextSettings normalized = source;
+    normalized.actionOrder =
+        normalizeSelectionContextActionOrder(source.actionOrder);
+
+    SelectionContextActionNormalizationContext context;
+    context.actionOrder = normalized.actionOrder;
+    context.writableVocabularyScopeIds =
+        writableSelectionContextVocabularyScopeIds(completeSettings);
+    normalized.actionCustomizations =
+        normalizeSelectionContextActionCustomizations(
+            source.actionCustomizations,
+            context
+        );
+
+    for (const QString &id : defaultSelectionContextActionOrder()) {
+        SelectionContextActionCustomization item =
+            normalized.actionCustomizations.value(id);
+        item.modelId = normalizeExplicitModelId(item.modelId);
+        normalized.actionCustomizations.insert(id, item);
+    }
+    return normalized;
 }

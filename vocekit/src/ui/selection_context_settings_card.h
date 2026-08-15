@@ -53,6 +53,7 @@ private:
     void buildUi();
     void updateButtonMetrics();
     void updateActionListMetrics();
+    void updateItemPresentation(const QString &actionId);
     void updateConsentResetVisibility();
     void readWidgets();
     SelectionContextSettings snapshotFromWidgets() const;

@@ -127,6 +127,7 @@ private slots:
     void dragOrderStillContainsEveryBuiltInIdExactlyOnceWithDuplicateNames();
     void refreshInvalidatesQueuedEditorChanges();
     void successfulSaveEchoKeepsEditorAndNewerQueuedChange();
+    void simultaneousEditorSaveEchoPreservesBothPendingChanges();
     void buttonsAndChineseLabelsDoNotClipAt100_125_150_200Percent();
     void smallWindowAndExpandedEditorsRemainScrollableAndReachable();
 };
@@ -484,10 +485,26 @@ restoreAllRequiresConfirmationAndKeepsToolbarFieldsAndOrder()
     const SelectionContextSettings restored = changes.last();
     const SelectionContextActionCustomizationMap defaults =
         defaultSelectionContextActionCustomizations();
+    QListWidget *actions = required<QListWidget>(
+        &card, "selectionContextActionList");
     for (const QString &id : defaultSelectionContextActionOrder()) {
         QVERIFY2(sameCustomization(
             restored.actionCustomizations.value(id), defaults.value(id)),
             qPrintable(id));
+        QListWidgetItem *listItem = nullptr;
+        for (int row = 0; row < actions->count(); ++row) {
+            if (actions->item(row)->data(Qt::UserRole).toString() == id) {
+                listItem = actions->item(row);
+                break;
+            }
+        }
+        QVERIFY2(listItem, qPrintable(id));
+        SelectionContextActionEditor *editor = actionEditor(&card, id);
+        QVERIFY2(editor, qPrintable(id));
+        QCOMPARE(listItem->text(), defaults.value(id).displayName);
+        QCOMPARE(listItem->data(Qt::AccessibleTextRole).toString(),
+                 defaults.value(id).displayName);
+        QCOMPARE(listItem->sizeHint(), editor->sizeHint());
     }
     QCOMPARE(restored.enabled, settings.enabled);
     QCOMPARE(restored.keyboardSelectionEnabled,
@@ -631,6 +648,63 @@ successfulSaveEchoKeepsEditorAndNewerQueuedChange()
              .value(selectionContextActionAiSearch()).displayName,
              QStringLiteral("B"));
     QTRY_VERIFY(name->hasFocus());
+}
+
+void SelectionContextSettingsCardTests::
+simultaneousEditorSaveEchoPreservesBothPendingChanges()
+{
+    QVector<SelectionContextSettings> delivered;
+    SelectionContextSettingsCard *cardPointer = nullptr;
+    SelectionContextSettingsCard::Callbacks callbacks;
+    callbacks.settingsChanged = [&](const SelectionContextSettings &value) {
+        delivered.append(value);
+        cardPointer->setSettings(value);
+    };
+    SelectionContextSettingsCard card(
+        SelectionContextSettings(), callbacks);
+    cardPointer = &card;
+    SelectionContextActionEditor *search = actionEditor(
+        &card, selectionContextActionAiSearch());
+    SelectionContextActionEditor *translate = actionEditor(
+        &card, selectionContextActionTranslate());
+    QPointer<SelectionContextActionEditor> originalSearch(search);
+    QPointer<SelectionContextActionEditor> originalTranslate(translate);
+    QLineEdit *searchName = required<QLineEdit>(
+        search, "selectionActionDisplayName");
+    QLineEdit *translateName = required<QLineEdit>(
+        translate, "selectionActionDisplayName");
+    card.show();
+    QTRY_VERIFY(card.isVisible());
+
+    searchName->setText(QStringLiteral("Search A"));
+    translateName->setFocus();
+    translateName->setText(QStringLiteral("Translate B"));
+    QTRY_VERIFY(translateName->hasFocus());
+
+    QTRY_COMPARE(delivered.size(), 2);
+    QCoreApplication::processEvents();
+    QCOMPARE(delivered.size(), 2);
+    for (const SelectionContextSettings &snapshot : delivered) {
+        QCOMPARE(snapshot.actionCustomizations
+                 .value(selectionContextActionAiSearch()).displayName,
+                 QStringLiteral("Search A"));
+        QCOMPARE(snapshot.actionCustomizations
+                 .value(selectionContextActionTranslate()).displayName,
+                 QStringLiteral("Translate B"));
+    }
+    QVERIFY(originalSearch);
+    QVERIFY(originalTranslate);
+    QCOMPARE(actionEditor(&card, selectionContextActionAiSearch()),
+             originalSearch.data());
+    QCOMPARE(actionEditor(&card, selectionContextActionTranslate()),
+             originalTranslate.data());
+    QCOMPARE(card.settings().actionCustomizations
+             .value(selectionContextActionAiSearch()).displayName,
+             QStringLiteral("Search A"));
+    QCOMPARE(card.settings().actionCustomizations
+             .value(selectionContextActionTranslate()).displayName,
+             QStringLiteral("Translate B"));
+    QTRY_VERIFY(translateName->hasFocus());
 }
 
 void SelectionContextSettingsCardTests::

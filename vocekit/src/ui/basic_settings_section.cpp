@@ -44,7 +44,11 @@ BasicSettingsSection::BasicSettingsSection(
 
 void BasicSettingsSection::refreshFromSettings()
 {
+    const QPointer<BasicSettingsSection> alive(this);
     const BasicSettingsSnapshot current = snapshot();
+    if (!alive) {
+        return;
+    }
     if (m_autoStartBox && m_autoStartBox->isChecked() != current.autoStartEnabled) {
         m_autoStartBox->blockSignals(true);
         m_autoStartBox->setChecked(current.autoStartEnabled);
@@ -56,7 +60,32 @@ void BasicSettingsSection::refreshFromSettings()
         m_strongSelectionBox->blockSignals(false);
     }
     if (m_selectionContextCard) {
+        SelectionContextActionEditor::Catalogs catalogs;
+        const std::function<QVector<QPair<QString, QString>>()> modelProvider =
+            m_callbacks.modelCatalogProvider;
+        const std::function<QVector<QPair<QString, QString>>()> scopeProvider =
+            m_callbacks.vocabularyScopeCatalogProvider;
+        if (modelProvider) {
+            catalogs.models = modelProvider();
+            if (!alive) {
+                return;
+            }
+        }
+        if (scopeProvider) {
+            catalogs.vocabularyScopes = scopeProvider();
+            if (!alive) {
+                return;
+            }
+        }
+        catalogs.targetLanguages = selectionTargetLanguages();
+        m_selectionContextCard->setCatalogs(catalogs);
+        if (!alive) {
+            return;
+        }
         m_selectionContextCard->setSettings(current.selectionContext);
+        if (!alive) {
+            return;
+        }
     }
     if (m_floatingBarStyleSelector
         && m_floatingBarStyleSelector->currentStyle()
@@ -144,7 +173,11 @@ void BasicSettingsSection::addGeneralRows(QVBoxLayout *layout)
     SelectionContextSettingsCard::Callbacks callbacks;
     callbacks.settingsChanged = [this](
         const SelectionContextSettings &settings) {
+        const QPointer<BasicSettingsSection> alive(this);
         BasicSettingsSnapshot next = snapshot();
+        if (!alive) {
+            return;
+        }
         next.selectionContext = settings;
         applyAndRefresh(next);
     };
@@ -612,8 +645,14 @@ BasicSettingsSnapshot BasicSettingsSection::snapshot() const
 void BasicSettingsSection::applyAndRefresh(
     const BasicSettingsSnapshot &settings)
 {
-    if (m_callbacks.applySnapshot) {
-        m_callbacks.applySnapshot(settings);
+    const QPointer<BasicSettingsSection> alive(this);
+    const std::function<void(const BasicSettingsSnapshot &)> apply =
+        m_callbacks.applySnapshot;
+    if (apply) {
+        apply(settings);
+        if (!alive) {
+            return;
+        }
     }
     saveAndRefresh();
 }

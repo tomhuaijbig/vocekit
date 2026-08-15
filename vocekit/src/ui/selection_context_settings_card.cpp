@@ -182,9 +182,12 @@ void SelectionContextSettingsCard::setSettings(
                 const QString id = item->data(Qt::UserRole).toString();
                 SelectionContextActionEditor *editor =
                     m_actionEditors.value(id, nullptr);
-                editor->setCustomization(
-                    m_settings.actionCustomizations.value(id));
-                item->setText(editor->customization().displayName);
+                const SelectionContextActionCustomization incoming =
+                    m_settings.actionCustomizations.value(id);
+                if (!sameCustomization(editor->customization(), incoming)) {
+                    editor->setCustomization(incoming);
+                }
+                updateItemPresentation(id);
             }
             setExpandedAction(m_expandedActionId);
             updateButtonMetrics();
@@ -198,14 +201,21 @@ void SelectionContextSettingsCard::setSettings(
 void SelectionContextSettingsCard::setCatalogs(
     const SelectionContextActionEditor::Catalogs &catalogs)
 {
+    SelectionContextActionEditor::Catalogs accepted;
+    accepted.models = normalizedCatalog(catalogs.models, false, false);
+    accepted.vocabularyScopes = normalizedCatalog(
+        catalogs.vocabularyScopes, false, true);
+    accepted.targetLanguages = normalizedCatalog(
+        catalogs.targetLanguages, true, false);
+    if (accepted.models == m_catalogs.models
+        && accepted.vocabularyScopes == m_catalogs.vocabularyScopes
+        && accepted.targetLanguages == m_catalogs.targetLanguages) {
+        return;
+    }
     if (m_actions) {
         m_settings = snapshotFromWidgets();
     }
-    m_catalogs.models = normalizedCatalog(catalogs.models, false, false);
-    m_catalogs.vocabularyScopes = normalizedCatalog(
-        catalogs.vocabularyScopes, false, true);
-    m_catalogs.targetLanguages = normalizedCatalog(
-        catalogs.targetLanguages, true, false);
+    m_catalogs = accepted;
     rebuildActionEditors();
 }
 
@@ -469,8 +479,8 @@ void SelectionContextSettingsCard::rebuildActionEditors()
         editor->setCustomization(
             m_settings.actionCustomizations.value(id));
         m_actionEditors.insert(id, editor);
-        item->setText(editor->customization().displayName);
         m_actions->setItemWidget(item, editor);
+        updateItemPresentation(id);
         QToolButton *expand = editor->findChild<QToolButton *>(
             QStringLiteral("selectionActionExpand"));
         if (expand) {
@@ -534,14 +544,7 @@ void SelectionContextSettingsCard::restoreActionDefaults(
     next.actionCustomizations.insert(actionId, value);
     m_settings = next;
     m_actionEditors.value(actionId)->setCustomization(value);
-    for (int row = 0; row < m_actions->count(); ++row) {
-        QListWidgetItem *item = m_actions->item(row);
-        if (item->data(Qt::UserRole).toString() == actionId) {
-            item->setText(value.displayName);
-            item->setSizeHint(m_actionEditors.value(actionId)->sizeHint());
-            break;
-        }
-    }
+    updateItemPresentation(actionId);
     const std::function<void(const SelectionContextSettings &)> callback =
         m_callbacks.settingsChanged;
     if (callback) {
@@ -568,6 +571,7 @@ void SelectionContextSettingsCard::restoreAllActionDefaults()
         if (editor) {
             editor->setCustomization(
                 m_settings.actionCustomizations.value(id));
+            updateItemPresentation(id);
         }
     }
     m_updating = previousUpdating;
@@ -593,11 +597,12 @@ bool SelectionContextSettingsCard::applyCustomization(
         return false;
     }
 
+    SelectionContextSettings next = snapshotFromWidgets();
     SelectionContextActionCustomizationMap values =
-        m_settings.actionCustomizations;
+        next.actionCustomizations;
     values.insert(actionId, value);
     SelectionContextActionNormalizationContext context;
-    context.actionOrder = snapshotFromWidgets().actionOrder;
+    context.actionOrder = next.actionOrder;
     for (const QPair<QString, QString> &scope : m_catalogs.vocabularyScopes) {
         context.writableVocabularyScopeIds.append(scope.second);
     }
@@ -605,19 +610,14 @@ bool SelectionContextSettingsCard::applyCustomization(
         normalizeSelectionContextActionCustomizations(values, context);
     const SelectionContextActionCustomization accepted =
         normalized.value(actionId);
-    m_settings.actionOrder = context.actionOrder;
-    m_settings.actionCustomizations = normalized;
+    next.actionOrder = context.actionOrder;
+    next.actionCustomizations = normalized;
+    m_settings = next;
     SelectionContextActionEditor *editor = m_actionEditors.value(actionId);
     if (editor && !sameCustomization(value, accepted)) {
         editor->setCustomization(accepted);
     }
-    for (int row = 0; row < m_actions->count(); ++row) {
-        QListWidgetItem *item = m_actions->item(row);
-        if (item->data(Qt::UserRole).toString() == actionId) {
-            item->setText(accepted.displayName);
-            break;
-        }
-    }
+    updateItemPresentation(actionId);
     const std::function<void(const SelectionContextSettings &)> callback =
         m_callbacks.settingsChanged;
     if (callback) {
@@ -659,6 +659,30 @@ void SelectionContextSettingsCard::updateActionListMetrics()
     m_actions->setMinimumHeight(qMin(totalHeight + 8, 720));
     m_actions->doItemsLayout();
     m_actions->updateGeometry();
+}
+
+void SelectionContextSettingsCard::updateItemPresentation(
+    const QString &actionId)
+{
+    if (!m_actions) {
+        return;
+    }
+    SelectionContextActionEditor *editor =
+        m_actionEditors.value(actionId, nullptr);
+    if (!editor) {
+        return;
+    }
+    for (int row = 0; row < m_actions->count(); ++row) {
+        QListWidgetItem *item = m_actions->item(row);
+        if (item->data(Qt::UserRole).toString() != actionId) {
+            continue;
+        }
+        const QString displayName = editor->customization().displayName;
+        item->setText(displayName);
+        item->setData(Qt::AccessibleTextRole, displayName);
+        item->setSizeHint(editor->sizeHint());
+        return;
+    }
 }
 
 void SelectionContextSettingsCard::updateConsentResetVisibility()

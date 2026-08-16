@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPointer>
@@ -230,7 +231,43 @@ private slots:
             }
             QVERIFY2(button, qPrintable(id));
             QCOMPARE(button->text(), selectionContextActionTitle(id));
+            const QString usageHint = selectionContextActionUsageHint(
+                id, defaultSelectionContextActionCustomizations());
+            QVERIFY2(!usageHint.isEmpty(), qPrintable(id));
+            QCOMPARE(
+                button->toolTip(),
+                selectionContextActionTitle(id)
+                    + QStringLiteral("\n") + usageHint
+            );
         }
+    }
+
+    void firstActionDismissesLightweightUsageGuideForTheSession()
+    {
+        SelectionContextToolbar toolbar;
+        QLabel *identity = toolbar.findChild<QLabel *>(
+            QStringLiteral("selectionContextIdentity"));
+        QVERIFY(identity);
+        QCOMPARE(identity->text(), QStringLiteral("?"));
+        QCOMPARE(
+            identity->toolTip(),
+            QString::fromUtf8("将鼠标停在按钮上可查看功能说明")
+        );
+
+        int actions = 0;
+        SelectionContextToolbarCallbacks callbacks;
+        callbacks.actionRequested = [&actions](const QString &) {
+            ++actions;
+        };
+        toolbar.setCallbacks(callbacks);
+        QToolButton *copy = toolbar.findChild<QToolButton *>(
+            QStringLiteral("selectionActionCopyButton"));
+        QVERIFY(copy);
+        copy->click();
+
+        QCOMPARE(actions, 1);
+        QCOMPARE(identity->text(), QStringLiteral("AI"));
+        QCOMPARE(identity->toolTip(), QString::fromUtf8("AI 助手"));
     }
 
     void customPresentationFiltersAndRenamesWithoutChangingIds()
@@ -242,6 +279,8 @@ private slots:
                 selectionContextActionAiSearch()
             );
         search.displayName = QString::fromUtf8("问 AI");
+        search.usageHint = QString::fromUtf8(
+            "结合选中文字搜索并整理相关信息");
         settings.actionCustomizations.insert(
             selectionContextActionAiSearch(),
             search
@@ -267,6 +306,14 @@ private slots:
         );
         QVERIFY(searchButton);
         QCOMPARE(searchButton->text(), QString::fromUtf8("问 AI"));
+        QCOMPARE(
+            searchButton->toolTip(),
+            QString::fromUtf8("问 AI\n结合选中文字搜索并整理相关信息")
+        );
+        QCOMPARE(
+            searchButton->accessibleDescription(),
+            QString::fromUtf8("结合选中文字搜索并整理相关信息")
+        );
         QVERIFY(!toolbar.findChild<QToolButton *>(
             QStringLiteral("selectionActionSaveButton")
         ));
@@ -434,6 +481,41 @@ private slots:
         );
     }
 
+    void overflowMenuCarriesUsageHints()
+    {
+        SelectionContextToolbar toolbar;
+        SelectionContextActionCustomizationMap customizations =
+            defaultSelectionContextActionCustomizations();
+        SelectionContextActionCustomization copy = customizations.value(
+            selectionContextActionCopy());
+        copy.usageHint = QString::fromUtf8("复制原文到系统剪贴板");
+        customizations.insert(selectionContextActionCopy(), copy);
+        toolbar.setActionPresentation(
+            defaultSelectionContextActionOrder(), customizations);
+
+        SelectionSnapshot snapshot;
+        snapshot.anchorRect = QRect(80, 80, 80, 20);
+        snapshot.cursorPosition = QPoint(120, 90);
+        toolbar.showForSnapshot(snapshot, QRect(0, 0, 260, 400));
+
+        QMenu *menu = toolbar.findChild<QMenu *>(
+            QStringLiteral("selectionContextMoreMenu"));
+        QVERIFY(menu);
+        QAction *copyAction = nullptr;
+        for (QAction *action : menu->actions()) {
+            if (action->data().toString() == selectionContextActionCopy()) {
+                copyAction = action;
+                break;
+            }
+        }
+        QVERIFY(copyAction);
+        QCOMPARE(
+            copyAction->toolTip(),
+            QString::fromUtf8("复制原文到系统剪贴板")
+        );
+        QCOMPARE(copyAction->statusTip(), copyAction->toolTip());
+    }
+
     void longCustomNameKeepsStableAccessibilityAndFlexibleHeight()
     {
         SelectionContextToolbar toolbar;
@@ -459,7 +541,10 @@ private slots:
         QCOMPARE(button->objectName(),
                  QStringLiteral("selectionActionAiSearchButton"));
         QCOMPARE(button->text(), title);
-        QCOMPARE(button->toolTip(), title);
+        QCOMPARE(
+            button->toolTip(),
+            title + QStringLiteral("\n") + search.usageHint
+        );
         QCOMPARE(button->accessibleName(), title);
         QVERIFY(button->minimumHeight()
             >= qMax(40, button->fontMetrics().height() + 16));
@@ -634,7 +719,10 @@ private slots:
         QVERIFY(searchButton);
         QVERIFY(searchButton->isVisible());
         QCOMPARE(searchButton->text(), title);
-        QCOMPARE(searchButton->toolTip(), title);
+        QCOMPARE(
+            searchButton->toolTip(),
+            title + QStringLiteral("\n") + search.usageHint
+        );
         QVERIFY(toolbar.width() > compactWidth);
         QVERIFY(searchButton->width() >= searchButton->sizeHint().width());
         QVERIFY(searchButton->height() >= searchButton->sizeHint().height());

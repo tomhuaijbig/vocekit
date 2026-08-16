@@ -14,6 +14,15 @@ QString normalizedDisplayName(const QString &actionId, const QString &value)
         : trimmed.left(24);
 }
 
+QString normalizedUsageHint(const QString &actionId, const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    return trimmed.isEmpty()
+        ? defaultSelectionContextActionCustomizations()
+              .value(actionId).usageHint
+        : trimmed.left(120);
+}
+
 QString normalizedVocabularyScope(
     const QString &value,
     const QStringList &writableVocabularyScopeIds
@@ -48,6 +57,7 @@ normalizeSelectionContextActionCustomizations(
             ? values.value(id)
             : SelectionContextActionCustomization();
         item.displayName = normalizedDisplayName(id, item.displayName);
+        item.usageHint = normalizedUsageHint(id, item.usageHint);
         item.modelId = item.modelId.trimmed();
         item.promptOverride = item.promptOverride.trimmed().left(8000);
         item.targetLanguage = item.targetLanguage.trimmed().left(64);
@@ -77,6 +87,20 @@ normalizeSelectionContextActionCustomizations(
         normalized.insert(normalizedOrder.first(), first);
     }
     return normalized;
+}
+
+QString selectionContextActionUsageHint(
+    const QString &actionId,
+    const SelectionContextActionCustomizationMap &values
+)
+{
+    if (!defaultSelectionContextActionOrder().contains(actionId)) {
+        return QString();
+    }
+    return normalizedUsageHint(
+        actionId,
+        values.value(actionId).usageHint
+    );
 }
 
 QString selectionContextActionDisplayName(

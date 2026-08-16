@@ -126,6 +126,7 @@ bool sameCustomization(
 )
 {
     return left.displayName == right.displayName
+        && left.usageHint == right.usageHint
         && left.visible == right.visible
         && left.modelId == right.modelId
         && left.promptOverride == right.promptOverride
@@ -253,6 +254,18 @@ SelectionContextActionEditor::SelectionContextActionEditor(
     specific->setVerticalSpacing(8);
     specific->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
+    usageHintEdit_ = new QLineEdit(specificFields_);
+    usageHintEdit_->setObjectName(QStringLiteral("selectionActionUsageHint"));
+    usageHintEdit_->setAccessibleName(text8("使用提醒"));
+    usageHintEdit_->setPlaceholderText(text8("鼠标悬停按钮时显示的用途说明"));
+    usageHintEdit_->setMaxLength(120);
+    prepareEditor(usageHintEdit_);
+    QLabel *usageHintLabel = fieldLabel(text8("使用提醒"), specificFields_);
+    usageHintLabel->setObjectName(
+        QStringLiteral("selectionActionUsageHintLabel"));
+    usageHintLabel->setBuddy(usageHintEdit_);
+    specific->addRow(usageHintLabel, usageHintEdit_);
+
     const bool isAiAction = actionId_ == selectionContextActionAiSearch()
         || actionId_ == selectionContextActionTranslate()
         || actionId_ == selectionContextActionExplain();
@@ -350,6 +363,8 @@ SelectionContextActionEditor::SelectionContextActionEditor(
             [this](const QString &) { notifyChanged(); });
     connect(visibleCheck_, &QCheckBox::toggled, this,
             [this](bool) { notifyChanged(); });
+    connect(usageHintEdit_, &QLineEdit::textChanged, this,
+            [this](const QString &) { notifyChanged(); });
     connect(expandButton_, &QToolButton::clicked, this,
             [this]() { setExpanded(!isExpanded()); });
     connect(restoreButton, &QPushButton::clicked, this, [this]() {
@@ -466,6 +481,7 @@ void SelectionContextActionEditor::setCustomization(
     }
     value_ = accepted;
     displayNameEdit_->setText(accepted.displayName);
+    usageHintEdit_->setText(accepted.usageHint);
     visibleCheck_->setChecked(accepted.visible);
 
     if (modelCombo_) {
@@ -510,6 +526,7 @@ SelectionContextActionEditor::customization() const
 {
     SelectionContextActionCustomization result = value_;
     result.displayName = displayNameEdit_->text();
+    result.usageHint = usageHintEdit_->text();
     result.visible = visibleCheck_->isChecked();
     if (modelCombo_) {
         result.modelId = modelCombo_->currentData().toString();

@@ -133,10 +133,13 @@ SelectionContextToolbar::SelectionContextToolbar(QWidget *parent)
     m_dragHandle = drag;
     m_layout->addWidget(drag);
 
-    m_identity = new QLabel(QStringLiteral("AI"), this);
+    m_identity = new QLabel(QStringLiteral("?"), this);
     m_identity->setObjectName(QStringLiteral("selectionContextIdentity"));
     m_identity->setAlignment(Qt::AlignCenter);
-    m_identity->setAccessibleName(QString::fromUtf8("AI 助手"));
+    m_identity->setToolTip(
+        QString::fromUtf8("将鼠标停在按钮上可查看功能说明"));
+    m_identity->setAccessibleName(QString::fromUtf8("使用提示"));
+    m_identity->setAccessibleDescription(m_identity->toolTip());
     m_layout->addWidget(m_identity);
 
     for (const QString &id : defaultSelectionContextActionOrder()) {
@@ -216,10 +219,15 @@ void SelectionContextToolbar::setActionPresentation(
         customizations
     );
     m_actionTitles.clear();
+    m_actionHints.clear();
     for (const QString &id : m_actionOrder) {
         m_actionTitles.insert(
             id,
             selectionContextActionDisplayName(id, customizations)
+        );
+        m_actionHints.insert(
+            id,
+            selectionContextActionUsageHint(id, customizations)
         );
     }
     m_overflowActionIds.clear();
@@ -465,6 +473,7 @@ void SelectionContextToolbar::rebuildActionLayout()
         button->setIcon(QIcon());
         button->setToolTip(QString());
         button->setAccessibleName(QString());
+        button->setAccessibleDescription(QString());
         SelectionContextToolButton *inactive =
             static_cast<SelectionContextToolButton *>(button);
         inactive->setEscapeRequested(std::function<void()>());
@@ -479,13 +488,17 @@ void SelectionContextToolbar::rebuildActionLayout()
             id,
             selectionContextActionTitle(id)
         );
+        const QString hint = m_actionHints.value(id);
         button->setObjectName(actionButtonObjectName(id));
         button->setProperty("selectionActionId", id);
         button->setText(title);
         button->setIcon(QIcon());
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        button->setToolTip(title);
+        button->setToolTip(
+            hint.isEmpty() ? title : title + QStringLiteral("\n") + hint
+        );
         button->setAccessibleName(title);
+        button->setAccessibleDescription(hint);
         SelectionContextToolButton *active =
             static_cast<SelectionContextToolButton *>(button);
         active->setEscapeRequested([this]() { requestClose(); });
@@ -508,6 +521,7 @@ void SelectionContextToolbar::rebuildMoreMenu()
     auto addItem = [this, &added](
         const QString &id,
         const QString &title,
+        const QString &usageHint,
         bool enabled) {
         if (id.trimmed().isEmpty() || added.contains(id)) {
             return;
@@ -515,6 +529,10 @@ void SelectionContextToolbar::rebuildMoreMenu()
         added.insert(id);
         QAction *action = m_moreMenu->addAction(title);
         action->setData(id);
+        action->setToolTip(
+            usageHint.trimmed().isEmpty() ? title : usageHint.trimmed()
+        );
+        action->setStatusTip(action->toolTip());
         action->setEnabled(m_busyActionId.isEmpty() && enabled);
         connect(action, &QAction::triggered, this, [this, id]() {
             requestAction(id);
@@ -523,6 +541,7 @@ void SelectionContextToolbar::rebuildMoreMenu()
 
     for (const QString &id : m_overflowActionIds) {
         addItem(id, m_actionTitles.value(id, selectionContextActionTitle(id)),
+                m_actionHints.value(id),
                 m_actionEnabled.value(id, true));
     }
     if (!m_overflowActionIds.isEmpty()
@@ -530,7 +549,7 @@ void SelectionContextToolbar::rebuildMoreMenu()
         m_moreMenu->addSeparator();
     }
     for (const SelectionContextMenuItem &item : m_moreActions) {
-        addItem(item.actionId, item.title, item.enabled);
+        addItem(item.actionId, item.title, item.usageHint, item.enabled);
     }
     if (!added.isEmpty()) {
         m_moreMenu->addSeparator();
@@ -538,11 +557,13 @@ void SelectionContextToolbar::rebuildMoreMenu()
     addItem(
         selectionContextMenuBlockApplication(),
         selectionContextActionTitle(selectionContextMenuBlockApplication()),
+        QString::fromUtf8("不再在当前应用中显示选中文字工具条"),
         true
     );
     addItem(
         selectionContextMenuOpenSettings(),
         selectionContextActionTitle(selectionContextMenuOpenSettings()),
+        QString::fromUtf8("打开设置并调整按钮顺序、名称和使用提醒"),
         true
     );
 }
@@ -639,8 +660,15 @@ void SelectionContextToolbar::configureForAvailableWidth(int width)
             first->setText(QString());
             first->setIcon(style()->standardIcon(QStyle::SP_FileDialogInfoView));
             first->setToolButtonStyle(Qt::ToolButtonIconOnly);
-            first->setToolTip(title);
+            const QString hint = m_actionHints.value(
+                m_actionOrder.constFirst());
+            first->setToolTip(
+                hint.isEmpty()
+                    ? title
+                    : title + QStringLiteral("\n") + hint
+            );
             first->setAccessibleName(title);
+            first->setAccessibleDescription(hint);
         }
     }
     rebuildMoreMenu();
@@ -683,6 +711,18 @@ QToolButton *SelectionContextToolbar::firstVisibleActionButton() const
         : m_closeButton;
 }
 
+void SelectionContextToolbar::dismissUsageGuide()
+{
+    if (!m_usageGuidePending || !m_identity) {
+        return;
+    }
+    m_usageGuidePending = false;
+    m_identity->setText(QStringLiteral("AI"));
+    m_identity->setToolTip(QString::fromUtf8("AI 助手"));
+    m_identity->setAccessibleName(QString::fromUtf8("AI 助手"));
+    m_identity->setAccessibleDescription(QString());
+}
+
 void SelectionContextToolbar::requestAction(const QString &actionId)
 {
     const std::function<void(const QString &)> callback =
@@ -690,6 +730,7 @@ void SelectionContextToolbar::requestAction(const QString &actionId)
     if (!callback) {
         return;
     }
+    dismissUsageGuide();
     QPointer<SelectionContextToolbar> guard(this);
     callback(actionId);
     if (!guard) {

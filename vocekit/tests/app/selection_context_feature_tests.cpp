@@ -564,6 +564,10 @@ moreMenuListsEachCustomFunctionOnceAndRoutesStableIds()
     QCOMPARE(count, 1);
     QAction *action = menuAction(menu, actionId);
     QVERIFY(action);
+    QCOMPARE(
+        action->toolTip(),
+        QString::fromUtf8("使用选中文字运行自定义功能：自定义一")
+    );
     action->trigger();
     QTRY_COMPARE(h.modelRuns, 1);
 }

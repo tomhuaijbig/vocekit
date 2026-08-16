@@ -53,6 +53,7 @@ bool sameCustomization(
     const SelectionContextActionCustomization &right)
 {
     return left.displayName == right.displayName
+        && left.usageHint == right.usageHint
         && left.visible == right.visible
         && left.modelId == right.modelId
         && left.promptOverride == right.promptOverride

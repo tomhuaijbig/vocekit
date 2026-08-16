@@ -275,6 +275,7 @@ class SelectionContextActionEditorTests : public QObject
 
 private slots:
     void commonFieldsRoundTripAndCallbacksAreStable();
+    void usageHintIsEditableAndDelivered();
     void actionSpecificControlsAreCreatedOnlyWhenApplicable();
     void actionSpecificLabelsNameAndDescribeTheirBuddyControls();
     void promptRejectsMoreThanEightThousandWithoutRecursiveWarnings();
@@ -342,6 +343,34 @@ commonFieldsRoundTripAndCallbacksAreStable()
     QVERIFY(!editor.isExpanded());
     expand->click();
     QVERIFY(editor.isExpanded());
+}
+
+void SelectionContextActionEditorTests::usageHintIsEditableAndDelivered()
+{
+    QVector<SelectionContextActionCustomization> changes;
+    SelectionContextActionEditor::Callbacks callbacks;
+    callbacks.changed = [&](const SelectionContextActionCustomization &value) {
+        changes.append(value);
+    };
+
+    SelectionContextActionEditor editor(
+        selectionContextActionCopy(), fullCatalogs(), callbacks);
+    SelectionContextActionCustomization initial;
+    initial.displayName = QString::fromUtf8("复制");
+    initial.usageHint = QString::fromUtf8("复制选中文字，不调用模型");
+    editor.setCustomization(initial);
+
+    QLineEdit *usageHint = required<QLineEdit>(
+        &editor, "selectionActionUsageHint");
+    QCOMPARE(usageHint->text(), initial.usageHint);
+
+    usageHint->setText(QString::fromUtf8("复制原文到系统剪贴板"));
+    flushQueuedCallbacks();
+    QCOMPARE(changes.size(), 1);
+    QCOMPARE(
+        changes.last().usageHint,
+        QString::fromUtf8("复制原文到系统剪贴板")
+    );
 }
 
 void SelectionContextActionEditorTests::

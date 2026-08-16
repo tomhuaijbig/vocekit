@@ -70,6 +70,7 @@ private:
     bool changeDrainScheduled_ = false;
 
     QLineEdit *displayNameEdit_ = nullptr;
+    QLineEdit *usageHintEdit_ = nullptr;
     QCheckBox *visibleCheck_ = nullptr;
     QToolButton *expandButton_ = nullptr;
     QWidget *specificFields_ = nullptr;

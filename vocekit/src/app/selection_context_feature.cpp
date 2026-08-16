@@ -489,6 +489,8 @@ public:
             item.title = function.name.trimmed().isEmpty()
                 ? text8("自定义功能")
                 : function.name.trimmed();
+            item.usageHint = text8("使用选中文字运行自定义功能：")
+                + item.title;
             items.append(item);
         }
         toolbar->setMoreActions(items);

@@ -28,6 +28,7 @@ struct SelectionContextMenuItem
 {
     QString actionId;
     QString title;
+    QString usageHint;
     bool enabled = true;
 };
 
@@ -73,12 +74,14 @@ private:
     void configureForAvailableWidth(int width);
     int visibleRowWidth() const;
     QToolButton *firstVisibleActionButton() const;
+    void dismissUsageGuide();
     void requestAction(const QString &actionId);
     void requestClose();
 
     SelectionContextToolbarCallbacks m_callbacks;
     QStringList m_actionOrder;
     QMap<QString, QString> m_actionTitles;
+    QMap<QString, QString> m_actionHints;
     QVector<SelectionContextMenuItem> m_moreActions;
     QStringList m_overflowActionIds;
     QMap<QString, bool> m_actionEnabled;
@@ -92,6 +95,7 @@ private:
     QToolButton *m_closeButton = nullptr;
     QMenu *m_moreMenu = nullptr;
     bool m_dragging = false;
+    bool m_usageGuidePending = true;
     QPoint m_dragOffset;
 };
 

@@ -108,6 +108,10 @@ SelectionContextActionCustomizationMap actionCustomizationsFromJson(
             item.displayName = object
                 .value(QStringLiteral("displayName")).toString();
         }
+        if (object.contains(QStringLiteral("usageHint"))) {
+            item.usageHint = object
+                .value(QStringLiteral("usageHint")).toString();
+        }
         if (object.contains(QStringLiteral("visible"))) {
             item.visible = object.value(QStringLiteral("visible"))
                 .toBool(item.visible);
@@ -154,6 +158,7 @@ QJsonObject actionCustomizationsToJson(
         QJsonObject object = objects.value(id).toObject();
         const SelectionContextActionCustomization item = normalized.value(id);
         object.insert(QStringLiteral("displayName"), item.displayName);
+        object.insert(QStringLiteral("usageHint"), item.usageHint);
         object.insert(QStringLiteral("visible"), item.visible);
         object.insert(QStringLiteral("modelId"), item.modelId);
         object.insert(QStringLiteral("promptOverride"), item.promptOverride);

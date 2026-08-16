@@ -57,6 +57,7 @@ private slots:
         SelectionContextActionCustomization explain = data.selectionContext
             .actionCustomizations.value(selectionContextActionExplain());
         explain.displayName = QString::fromUtf8("给我讲明白");
+        explain.usageHint = QString::fromUtf8("解释选中文字的背景和含义");
         explain.modelId = QStringLiteral("openai:gpt-5.6-sol");
         explain.promptOverride = QString::fromUtf8("用三个层次解释");
         data.selectionContext.actionCustomizations.insert(
@@ -93,6 +94,11 @@ private slots:
             restored.selectionContext.actionCustomizations
                 .value(selectionContextActionExplain()).modelId,
             QStringLiteral("openai:gpt-5.6-sol")
+        );
+        QCOMPARE(
+            restored.selectionContext.actionCustomizations
+                .value(selectionContextActionExplain()).usageHint,
+            QString::fromUtf8("解释选中文字的背景和含义")
         );
         QCOMPARE(
             restored.selectionContext.actionCustomizations

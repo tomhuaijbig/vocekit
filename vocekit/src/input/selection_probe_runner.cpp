@@ -419,12 +419,12 @@ public:
 #else
         const quint32 ownProcessId = access.clipboardOwnerProcessId();
 #endif
-        if (selectionClipboardOwnershipMatches(
-                sentinelSequence,
-                access.clipboardSequenceNumber(),
-                ownProcessId,
-                access.clipboardOwnerProcessId(),
-                access.targetStillForeground(current.request.targetWindow))) {
+        const bool sentinelStillOwned = sentinelSequence != 0
+            && sentinelSequence == access.clipboardSequenceNumber()
+            && ownProcessId != 0
+            && ownProcessId == access.clipboardOwnerProcessId()
+            && QApplication::clipboard()->text() == clipboardSentinel;
+        if (sentinelStillOwned) {
             QApplication::clipboard()->setMimeData(
                 mimeDataFromClipboardSnapshot(clipboardOriginal)
             );
@@ -449,6 +449,9 @@ public:
 
     void finishCurrentState()
     {
+        if (fallbackActive) {
+            restoreSentinelClipboardIfOwned();
+        }
         workerActive = false;
         fallbackActive = false;
         timedOut = false;

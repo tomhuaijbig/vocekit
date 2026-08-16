@@ -332,6 +332,95 @@ private slots:
         );
     }
 
+    void strongFallbackRestoresOriginalClipboardAfterTargetLosesForeground()
+    {
+#ifndef Q_OS_WIN
+        QSKIP("The clipboard fallback ownership contract is Windows-specific.");
+#else
+        QApplication::clipboard()->setText(QStringLiteral("original"));
+
+        int copyShortcutCalls = 0;
+        SelectionProbeRunnerAccess access;
+        access.probeUiAutomationPhysical = [](const SelectionProbeRequest &) {
+            return textResult(QString(), 42);
+        };
+        access.targetStillForeground = [](SelectedTextNativeWindowHandle) {
+            return false;
+        };
+        access.sendCopyShortcut = [&copyShortcutCalls]() {
+            ++copyShortcutCalls;
+        };
+
+        SelectionProbeRunner runner(access);
+        bool completed = false;
+        SelectionProbeRunnerCallbacks callbacks;
+        callbacks.completed = [&completed](
+            quint64,
+            const SelectionSnapshot &) {
+            completed = true;
+        };
+        runner.start(requestAt(1), true, 9, callbacks);
+
+        QTRY_VERIFY_WITH_TIMEOUT(completed, 1000);
+        QCOMPARE(copyShortcutCalls, 0);
+        QCOMPARE(
+            QApplication::clipboard()->text(),
+            QStringLiteral("original")
+        );
+#endif
+    }
+
+    void replacingStrongFallbackRestoresOriginalClipboardBeforeNextProbe()
+    {
+#ifndef Q_OS_WIN
+        QSKIP("The clipboard fallback ownership contract is Windows-specific.");
+#else
+        QApplication::clipboard()->setText(QStringLiteral("original"));
+
+        QAtomicInt probeCalls(0);
+        SelectionProbeRunnerAccess access;
+        access.probeUiAutomationPhysical = [&probeCalls](
+            const SelectionProbeRequest &) {
+            const int call = probeCalls.fetchAndAddOrdered(1);
+            return call == 0
+                ? textResult(QString(), 42)
+                : textResult(QStringLiteral("next"), 42);
+        };
+        access.targetStillForeground = [](SelectedTextNativeWindowHandle) {
+            return true;
+        };
+        access.sendCopyShortcut = []() {};
+
+        SelectionProbeRunner runner(access);
+        QVector<quint64> completedGenerations;
+        SelectionProbeRunnerCallbacks callbacks;
+        callbacks.completed = [&completedGenerations](
+            quint64 generation,
+            const SelectionSnapshot &) {
+            completedGenerations.append(generation);
+        };
+        runner.start(requestAt(1), true, 10, callbacks);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            QApplication::clipboard()->text().startsWith(
+                QStringLiteral("__VOCEKIT_SELECTION_SENTINEL__")
+            ),
+            1000
+        );
+
+        runner.start(requestAt(2), false, 11, callbacks);
+
+        QTRY_COMPARE_WITH_TIMEOUT(
+            completedGenerations,
+            QVector<quint64>() << 11,
+            1500
+        );
+        QCOMPARE(
+            QApplication::clipboard()->text(),
+            QStringLiteral("original")
+        );
+#endif
+    }
+
     void externalClipboardChangeIsNeverOverwrittenByFallbackRestore()
     {
         QApplication::clipboard()->setText(QStringLiteral("original"));

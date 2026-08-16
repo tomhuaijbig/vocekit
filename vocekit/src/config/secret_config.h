@@ -10,12 +10,18 @@ struct CustomModelProfile
     QString url;
     QString apiKey;
     QString model;
+    bool temperatureEnabled = false;
+    double temperature = 0.2;
+    bool topPEnabled = false;
+    double topP = 1.0;
 
     bool hasEndpoint() const { return !url.trimmed().isEmpty(); }
 };
 
 // 自定义大模型 ID 会写入配置和功能设置，统一清洗可以避免同一模型出现多个写法。
 QString normalizeCustomModelProfileId(QString id);
+bool isValidCustomModelTemperature(double value);
+bool isValidCustomModelTopP(double value);
 
 // 接口密钥结构：集中保存语音识别、OCR 和大模型服务的密钥，不把密钥散落在业务代码里。
 struct SecretConfig

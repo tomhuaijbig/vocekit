@@ -12,6 +12,8 @@
 #include <functional>
 
 class QPushButton;
+class QCheckBox;
+class QDoubleSpinBox;
 class WindowsSpeechSettingsCard;
 
 struct ApiSettingsSnapshot
@@ -74,6 +76,10 @@ private:
         QLineEdit **urlEdit,
         QLineEdit **keyEdit,
         QLineEdit **modelEdit,
+        QCheckBox **temperatureEnabled,
+        QDoubleSpinBox **temperatureSpin,
+        QCheckBox **topPEnabled,
+        QDoubleSpinBox **topPSpin,
         QPushButton **deleteButton
     );
     void showCustomModelConfigDialog();

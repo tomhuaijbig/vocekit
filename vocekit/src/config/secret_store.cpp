@@ -49,6 +49,19 @@ CustomModelProfile customModelProfileFromJsonObject(const QJsonObject &object)
     profile.url = object.value(QStringLiteral("url")).toString().trimmed();
     profile.apiKey = object.value(QStringLiteral("api_key")).toString().trimmed();
     profile.model = object.value(QStringLiteral("model")).toString().trimmed();
+    const QJsonValue temperature = object.value(
+        QStringLiteral("temperature")
+    );
+    if (temperature.isDouble()
+        && isValidCustomModelTemperature(temperature.toDouble())) {
+        profile.temperatureEnabled = true;
+        profile.temperature = temperature.toDouble();
+    }
+    const QJsonValue topP = object.value(QStringLiteral("top_p"));
+    if (topP.isDouble() && isValidCustomModelTopP(topP.toDouble())) {
+        profile.topPEnabled = true;
+        profile.topP = topP.toDouble();
+    }
     if (profile.name.isEmpty()) {
         profile.name = profile.model.trimmed().isEmpty() ? ssTr8("自定义大模型") : profile.model.trimmed();
     }
@@ -63,6 +76,13 @@ QJsonObject customModelProfileToJsonObject(const CustomModelProfile &profile)
     object.insert(QStringLiteral("url"), profile.url.trimmed());
     object.insert(QStringLiteral("api_key"), profile.apiKey.trimmed());
     object.insert(QStringLiteral("model"), profile.model.trimmed());
+    if (profile.temperatureEnabled
+        && isValidCustomModelTemperature(profile.temperature)) {
+        object.insert(QStringLiteral("temperature"), profile.temperature);
+    }
+    if (profile.topPEnabled && isValidCustomModelTopP(profile.topP)) {
+        object.insert(QStringLiteral("top_p"), profile.topP);
+    }
     return object;
 }
 

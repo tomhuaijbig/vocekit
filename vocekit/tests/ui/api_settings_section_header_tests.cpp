@@ -5,8 +5,13 @@
 
 #include <QFile>
 #include <QComboBox>
+#include <QCheckBox>
+#include <QDialog>
+#include <QDoubleSpinBox>
+#include <QDir>
 #include <QPushButton>
 #include <QMessageBox>
+#include <QTimer>
 #include <type_traits>
 
 namespace {
@@ -67,6 +72,7 @@ private slots:
     void wiresSaveButtonSizing();
     void carriesAndPersistsWindowsSpeechLanguage();
     void savesThreeRuntimeValuesAndRollsBackOnFailure();
+    void customModelDialogOffersOptionalSamplingParameters();
 };
 
 void ApiSettingsSectionHeaderTests::constructsFromCallbacksOnly()
@@ -293,6 +299,108 @@ savesThreeRuntimeValuesAndRollsBackOnFailure()
     setAttentionMessageBoxClickCallbackForTests(
         std::function<void(QWidget *)>()
     );
+}
+
+void ApiSettingsSectionHeaderTests::
+customModelDialogOffersOptionalSamplingParameters()
+{
+    ApiSettingsSection::Callbacks callbacks;
+    ApiSettingsSection section(callbacks);
+    QPushButton *configure = nullptr;
+    const QList<QPushButton *> buttons = section.findChildren<QPushButton *>();
+    for (QPushButton *button : buttons) {
+        if (button && button->text() == QString::fromUtf8("配置")) {
+            configure = button;
+            break;
+        }
+    }
+    QVERIFY(configure);
+
+    bool inspected = false;
+    QTimer::singleShot(0, [&inspected]() {
+        QDialog *dialog = nullptr;
+        const QWidgetList topLevels = QApplication::topLevelWidgets();
+        for (QWidget *widget : topLevels) {
+            QDialog *candidate = qobject_cast<QDialog *>(widget);
+            if (candidate && candidate->windowTitle()
+                    == QString::fromUtf8("配置自定义大模型")) {
+                dialog = candidate;
+                break;
+            }
+        }
+        QVERIFY(dialog);
+        QTimer::singleShot(1000, dialog, &QDialog::reject);
+
+        QPushButton *add = nullptr;
+        const QList<QPushButton *> dialogButtons =
+            dialog->findChildren<QPushButton *>();
+        for (QPushButton *button : dialogButtons) {
+            if (button && button->text() == QString::fromUtf8("新增模型")) {
+                add = button;
+                break;
+            }
+        }
+        QVERIFY(add);
+        add->click();
+
+        const QList<QCheckBox *> temperatureSwitches =
+            dialog->findChildren<QCheckBox *>(
+                QStringLiteral("customModelTemperatureEnabled")
+            );
+        const QList<QDoubleSpinBox *> temperatureSpins =
+            dialog->findChildren<QDoubleSpinBox *>(
+                QStringLiteral("customModelTemperatureSpin")
+            );
+        const QList<QCheckBox *> topPSwitches =
+            dialog->findChildren<QCheckBox *>(
+                QStringLiteral("customModelTopPEnabled")
+            );
+        const QList<QDoubleSpinBox *> topPSpins =
+            dialog->findChildren<QDoubleSpinBox *>(
+                QStringLiteral("customModelTopPSpin")
+            );
+        QVERIFY(!temperatureSwitches.isEmpty());
+        QCOMPARE(temperatureSwitches.size(), temperatureSpins.size());
+        QCOMPARE(topPSwitches.size(), topPSpins.size());
+        QCOMPARE(topPSwitches.size(), temperatureSwitches.size());
+
+        QCheckBox *temperatureEnabled = temperatureSwitches.constLast();
+        QDoubleSpinBox *temperature = temperatureSpins.constLast();
+        QCheckBox *topPEnabled = topPSwitches.constLast();
+        QDoubleSpinBox *topP = topPSpins.constLast();
+        QVERIFY(!temperatureEnabled->isChecked());
+        QVERIFY(!temperature->isEnabled());
+        QCOMPARE(temperature->minimum(), 0.0);
+        QCOMPARE(temperature->maximum(), 2.0);
+        QVERIFY(!topPEnabled->isChecked());
+        QVERIFY(!topP->isEnabled());
+        QCOMPARE(topP->minimum(), 0.0);
+        QCOMPARE(topP->maximum(), 1.0);
+
+        const QString visualOutputDir = QString::fromLocal8Bit(
+            qgetenv("VOCEKIT_VISUAL_OUTPUT_DIR")
+        ).trimmed();
+        if (!visualOutputDir.isEmpty()) {
+            QVERIFY(QDir().mkpath(visualOutputDir));
+            QApplication::processEvents();
+            const QString imagePath = QDir(visualOutputDir).filePath(
+                QStringLiteral("custom-model-sampling-dialog.png")
+            );
+            QVERIFY(dialog->grab().save(imagePath));
+        }
+
+        temperatureEnabled->setChecked(true);
+        topPEnabled->setChecked(true);
+        QVERIFY(temperature->isEnabled());
+        QVERIFY(topP->isEnabled());
+        QVERIFY(temperature->minimumHeight() >= temperature->sizeHint().height());
+        QVERIFY(topP->minimumHeight() >= topP->sizeHint().height());
+        inspected = true;
+        dialog->reject();
+    });
+
+    configure->click();
+    QVERIFY(inspected);
 }
 
 QTEST_MAIN(ApiSettingsSectionHeaderTests)

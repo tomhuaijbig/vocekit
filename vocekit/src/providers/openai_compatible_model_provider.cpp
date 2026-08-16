@@ -66,6 +66,10 @@ struct ResolvedProviderConfig
     QUrl endpoint;
     QString apiKey;
     QString defaultModel;
+    bool temperatureEnabled = false;
+    double temperature = 0.2;
+    bool topPEnabled = false;
+    double topP = 1.0;
     OperationError error;
 };
 
@@ -161,6 +165,12 @@ ResolvedProviderConfig resolveConfig(
     }
     config.apiKey = profile.apiKey.trimmed();
     config.defaultModel = profile.model.trimmed();
+    config.temperatureEnabled = profile.temperatureEnabled
+        && isValidCustomModelTemperature(profile.temperature);
+    config.temperature = profile.temperature;
+    config.topPEnabled = profile.topPEnabled
+        && isValidCustomModelTopP(profile.topP);
+    config.topP = profile.topP;
     if (config.defaultModel.isEmpty()) {
         QString fallback = requestModelId.trimmed();
         if (fallback.startsWith(
@@ -214,7 +224,16 @@ QJsonObject requestBody(
         requestModelName(providerId, request, config)
     );
     body.insert(QStringLiteral("messages"), messages);
-    body.insert(QStringLiteral("temperature"), 0.2);
+    if (isCustomProvider(providerId)) {
+        if (config.temperatureEnabled) {
+            body.insert(QStringLiteral("temperature"), config.temperature);
+        }
+        if (config.topPEnabled) {
+            body.insert(QStringLiteral("top_p"), config.topP);
+        }
+    } else {
+        body.insert(QStringLiteral("temperature"), 0.2);
+    }
     body.insert(QStringLiteral("max_tokens"), 1024);
     body.insert(QStringLiteral("stream"), request.stream);
     return body;

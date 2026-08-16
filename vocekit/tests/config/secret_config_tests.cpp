@@ -6,6 +6,7 @@
 #include "../../src/file_utils.h"
 
 #include <QDir>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -35,6 +36,10 @@ private slots:
         profile.url = QStringLiteral("https://model.example.test/v1/chat/completions");
         profile.apiKey = QStringLiteral("model-key");
         profile.model = QStringLiteral("model-a");
+        profile.temperatureEnabled = true;
+        profile.temperature = 0.75;
+        profile.topPEnabled = true;
+        profile.topP = 0.9;
         secrets.customModels.append(profile);
 
         QVERIFY(store.save(secrets));
@@ -49,6 +54,10 @@ private slots:
         QCOMPARE(profiles.constFirst().id, QStringLiteral("MyModel"));
         QCOMPARE(profiles.constFirst().name, QStringLiteral("我的模型"));
         QCOMPARE(profiles.constFirst().apiKey, QStringLiteral("model-key"));
+        QVERIFY(profiles.constFirst().temperatureEnabled);
+        QCOMPARE(profiles.constFirst().temperature, 0.75);
+        QVERIFY(profiles.constFirst().topPEnabled);
+        QCOMPARE(profiles.constFirst().topP, 0.9);
         QVERIFY(loaded.hasCustomModel());
     }
 
@@ -114,6 +123,44 @@ private slots:
         QCOMPARE(profiles.constFirst().url, QStringLiteral("https://legacy.example.test"));
         QCOMPARE(profiles.constFirst().apiKey, QStringLiteral("legacy-key"));
         QCOMPARE(profiles.constFirst().model, QStringLiteral("legacy-model"));
+        QVERIFY(!profiles.constFirst().temperatureEnabled);
+        QVERIFY(!profiles.constFirst().topPEnabled);
+    }
+
+    void omitsDisabledOrInvalidSamplingParameters()
+    {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString path = QDir(temp.path()).filePath(
+            QStringLiteral("config/secrets.json")
+        );
+        SecretStore store(path);
+
+        SecretConfig secrets;
+        CustomModelProfile profile;
+        profile.id = QStringLiteral("default-sampling");
+        profile.url = QStringLiteral("https://model.example.test");
+        profile.temperatureEnabled = false;
+        profile.temperature = 1.4;
+        profile.topPEnabled = true;
+        profile.topP = 2.0;
+        secrets.customModels.append(profile);
+        QVERIFY(store.save(secrets));
+
+        QJsonObject root;
+        QVERIFY(readJsonObjectFile(path, &root));
+        const QJsonArray models = root.value(
+            QStringLiteral("custom_models")
+        ).toArray();
+        QCOMPARE(models.size(), 1);
+        const QJsonObject saved = models.first().toObject();
+        QVERIFY(!saved.contains(QStringLiteral("temperature")));
+        QVERIFY(!saved.contains(QStringLiteral("top_p")));
+
+        const SecretConfig loaded = store.load();
+        QCOMPARE(loaded.customModels.size(), 1);
+        QVERIFY(!loaded.customModels.constFirst().temperatureEnabled);
+        QVERIFY(!loaded.customModels.constFirst().topPEnabled);
     }
 
     void findsCustomModelByProviderId()

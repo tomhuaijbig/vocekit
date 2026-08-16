@@ -811,6 +811,10 @@ QWidget *ApiSettingsSection::customModelEditorRow(
         QLineEdit **urlEdit,
         QLineEdit **keyEdit,
         QLineEdit **modelEdit,
+        QCheckBox **temperatureEnabled,
+        QDoubleSpinBox **temperatureSpin,
+        QCheckBox **topPEnabled,
+        QDoubleSpinBox **topPSpin,
         QPushButton **deleteButton
     )
     {
@@ -831,6 +835,63 @@ QWidget *ApiSettingsSection::customModelEditorRow(
             row->addWidget(label);
             row->addWidget(edit, 1);
             layout->addLayout(row);
+        };
+
+        auto addSamplingLine = [&](
+            const QString &labelText,
+            const QString &hintText,
+            const QString &switchObjectName,
+            const QString &spinObjectName,
+            bool enabled,
+            double value,
+            double minimum,
+            double maximum,
+            QCheckBox **enabledSwitch,
+            QDoubleSpinBox **spin
+        ) {
+            auto *row = new QHBoxLayout;
+            auto *label = new QLabel(labelText);
+            label->setMinimumWidth(132);
+            label->setFont(appFont(10, QFont::DemiBold));
+            label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+
+            auto *controls = new QWidget(frame);
+            auto *controlsLayout = new QVBoxLayout(controls);
+            controlsLayout->setContentsMargins(0, 0, 0, 0);
+            controlsLayout->setSpacing(4);
+            auto *valueRow = new QHBoxLayout;
+            *enabledSwitch = new QCheckBox(apiTr8("使用自定义值"), controls);
+            (*enabledSwitch)->setObjectName(switchObjectName);
+            (*enabledSwitch)->setChecked(enabled);
+            *spin = new QDoubleSpinBox(controls);
+            (*spin)->setObjectName(spinObjectName);
+            (*spin)->setRange(minimum, maximum);
+            (*spin)->setDecimals(2);
+            (*spin)->setSingleStep(0.05);
+            (*spin)->setValue(qBound(minimum, value, maximum));
+            (*spin)->setEnabled(enabled);
+            (*spin)->setMinimumWidth(112);
+            (*spin)->setMinimumHeight(
+                qMax(34, (*spin)->sizeHint().height())
+            );
+            valueRow->addWidget(*enabledSwitch);
+            valueRow->addWidget(*spin);
+            valueRow->addStretch();
+            controlsLayout->addLayout(valueRow);
+
+            auto *hint = new QLabel(hintText, controls);
+            hint->setWordWrap(true);
+            hint->setStyleSheet(QStringLiteral("color: #667085;"));
+            controlsLayout->addWidget(hint);
+            row->addWidget(label);
+            row->addWidget(controls, 1);
+            layout->addLayout(row);
+            connect(
+                *enabledSwitch,
+                &QCheckBox::toggled,
+                *spin,
+                &QDoubleSpinBox::setEnabled
+            );
         };
 
         *nameEdit = newPlainEdit(profile.name, apiTr8("显示名称，例如：公司网关 GPT"));
@@ -894,19 +955,57 @@ QWidget *ApiSettingsSection::customModelEditorRow(
 
         addLine(apiTr8("接口密钥"), *keyEdit);
         addLine(apiTr8("模型名称"), *modelEdit);
+        addSamplingLine(
+            apiTr8("温度（Temperature）"),
+            apiTr8("关闭时不发送此参数，使用接口默认值；数值越高通常越自由。"),
+            QStringLiteral("customModelTemperatureEnabled"),
+            QStringLiteral("customModelTemperatureSpin"),
+            profile.temperatureEnabled,
+            isValidCustomModelTemperature(profile.temperature)
+                ? profile.temperature
+                : 0.2,
+            0.0,
+            2.0,
+            temperatureEnabled,
+            temperatureSpin
+        );
+        addSamplingLine(
+            apiTr8("Top P"),
+            apiTr8("关闭时不发送此参数，使用接口默认值；数值越低通常越聚焦。一般只需调整温度或 Top P 其中一个。"),
+            QStringLiteral("customModelTopPEnabled"),
+            QStringLiteral("customModelTopPSpin"),
+            profile.topPEnabled,
+            isValidCustomModelTopP(profile.topP) ? profile.topP : 1.0,
+            0.0,
+            1.0,
+            topPEnabled,
+            topPSpin
+        );
 
         QLineEdit * const nameField = *nameEdit;
         QLineEdit * const urlField = *urlEdit;
         QLineEdit * const keyField = *keyEdit;
         QLineEdit * const modelField = *modelEdit;
+        QCheckBox * const temperatureEnabledField = *temperatureEnabled;
+        QDoubleSpinBox * const temperatureField = *temperatureSpin;
+        QCheckBox * const topPEnabledField = *topPEnabled;
+        QDoubleSpinBox * const topPField = *topPSpin;
         const QPointer<QPushButton> testButtonGuard(testButton);
-        connect(testButton, &QPushButton::clicked, this, [this, profile, testButtonGuard, nameField, urlField, keyField, modelField]() {
+        connect(testButton, &QPushButton::clicked, this, [this, profile, testButtonGuard, nameField, urlField, keyField, modelField, temperatureEnabledField, temperatureField, topPEnabledField, topPField]() {
             CustomModelProfile testProfile = profile;
             testProfile.id = normalizeCustomModelProfileId(testProfile.id);
             testProfile.name = nameField ? nameField->text().trimmed() : QString();
             testProfile.url = urlField ? urlField->text().trimmed() : QString();
             testProfile.apiKey = keyField ? keyField->text().trimmed() : QString();
             testProfile.model = modelField ? modelField->text().trimmed() : QString();
+            testProfile.temperatureEnabled = temperatureEnabledField
+                && temperatureEnabledField->isChecked();
+            testProfile.temperature = temperatureField
+                ? temperatureField->value()
+                : 0.2;
+            testProfile.topPEnabled = topPEnabledField
+                && topPEnabledField->isChecked();
+            testProfile.topP = topPField ? topPField->value() : 1.0;
             if (testProfile.url.isEmpty()) {
                 showAttentionWarning(this, apiTr8("测试失败"), apiTr8("请先填写自定义大模型接口地址。"));
                 return;
@@ -989,6 +1088,10 @@ void ApiSettingsSection::showCustomModelConfigDialog()
             QLineEdit *url = nullptr;
             QLineEdit *key = nullptr;
             QLineEdit *model = nullptr;
+            QCheckBox *temperatureEnabled = nullptr;
+            QDoubleSpinBox *temperature = nullptr;
+            QCheckBox *topPEnabled = nullptr;
+            QDoubleSpinBox *topP = nullptr;
         };
         QVector<RowEditors> rows;
 
@@ -1018,8 +1121,23 @@ void ApiSettingsSection::showCustomModelConfigDialog()
                 QLineEdit *urlEdit = nullptr;
                 QLineEdit *keyEdit = nullptr;
                 QLineEdit *modelEdit = nullptr;
+                QCheckBox *temperatureEnabled = nullptr;
+                QDoubleSpinBox *temperatureSpin = nullptr;
+                QCheckBox *topPEnabled = nullptr;
+                QDoubleSpinBox *topPSpin = nullptr;
                 QPushButton *deleteButton = nullptr;
-                QWidget *row = customModelEditorRow(profiles.at(i), &nameEdit, &urlEdit, &keyEdit, &modelEdit, &deleteButton);
+                QWidget *row = customModelEditorRow(
+                    profiles.at(i),
+                    &nameEdit,
+                    &urlEdit,
+                    &keyEdit,
+                    &modelEdit,
+                    &temperatureEnabled,
+                    &temperatureSpin,
+                    &topPEnabled,
+                    &topPSpin,
+                    &deleteButton
+                );
                 const int rowIndex = i;
                 connect(deleteButton, &QPushButton::clicked, &dialog, [&, rowIndex]() {
                     if (rowIndex >= 0 && rowIndex < profiles.size()) {
@@ -1033,6 +1151,10 @@ void ApiSettingsSection::showCustomModelConfigDialog()
                 editors.url = urlEdit;
                 editors.key = keyEdit;
                 editors.model = modelEdit;
+                editors.temperatureEnabled = temperatureEnabled;
+                editors.temperature = temperatureSpin;
+                editors.topPEnabled = topPEnabled;
+                editors.topP = topPSpin;
                 rows.append(editors);
                 list->addWidget(row);
             }
@@ -1078,6 +1200,14 @@ void ApiSettingsSection::showCustomModelConfigDialog()
                 profile.url = row.url ? row.url->text().trimmed() : QString();
                 profile.apiKey = row.key ? row.key->text().trimmed() : QString();
                 profile.model = row.model ? row.model->text().trimmed() : QString();
+                profile.temperatureEnabled = row.temperatureEnabled
+                    && row.temperatureEnabled->isChecked();
+                profile.temperature = row.temperature
+                    ? row.temperature->value()
+                    : 0.2;
+                profile.topPEnabled = row.topPEnabled
+                    && row.topPEnabled->isChecked();
+                profile.topP = row.topP ? row.topP->value() : 1.0;
                 if (profile.name.isEmpty()) {
                     profile.name = profile.model.isEmpty() ? apiTr8("自定义大模型") : profile.model;
                 }

@@ -93,6 +93,10 @@ private:
             ? QStringLiteral("custom-test-key")
             : QString();
         profile.model = QStringLiteral("vendor-model");
+        profile.temperatureEnabled = true;
+        profile.temperature = 0.85;
+        profile.topPEnabled = true;
+        profile.topP = 0.65;
         secrets.customModels.append(profile);
         return secrets;
     }
@@ -311,6 +315,47 @@ private slots:
             body.value(QStringLiteral("model")).toString(),
             QStringLiteral("vendor-model")
         );
+        QCOMPARE(
+            body.value(QStringLiteral("temperature")).toDouble(),
+            0.85
+        );
+        QCOMPARE(body.value(QStringLiteral("top_p")).toDouble(), 0.65);
+    }
+
+    void customProviderOmitsDisabledSamplingParameters()
+    {
+        const QSharedPointer<FakeOpenAiTransport> transport =
+            fakeTransport();
+        transport->jsonResponse.statusCode = 200;
+        transport->jsonResponse.body = QByteArrayLiteral(
+            "{\"choices\":[{\"message\":{\"content\":\"默认采样\"}}]}"
+        );
+        SecretConfig secrets = customSecrets();
+        QVERIFY(!secrets.customModels.isEmpty());
+        secrets.customModels[0].temperatureEnabled = false;
+        secrets.customModels[0].topPEnabled = false;
+        OpenAiCompatibleModelProvider provider(
+            QStringLiteral("custom:office"),
+            transport,
+            [secrets]() { return secrets; }
+        );
+        CancellationSource cancellation;
+        ModelRequest request;
+        request.modelId = QStringLiteral("custom:office");
+        request.stream = false;
+
+        const ModelResult result = provider.complete(
+            request,
+            ModelDeltaCallback(),
+            cancellation.token()
+        );
+
+        QCOMPARE(result.text, QStringLiteral("默认采样"));
+        QVERIFY(result.error.isEmpty());
+        const QJsonObject body =
+            QJsonDocument::fromJson(transport->lastBody).object();
+        QVERIFY(!body.contains(QStringLiteral("temperature")));
+        QVERIFY(!body.contains(QStringLiteral("top_p")));
     }
 
     void customProviderAllowsMissingOptionalKey()

@@ -2,6 +2,7 @@
 #include "secret_store.h"
 
 #include <QString>
+#include <QtMath>
 #include <algorithm>
 
 namespace {
@@ -23,6 +24,16 @@ QString normalizeCustomModelProfileId(QString id)
         }
     }
     return normalized.isEmpty() ? QStringLiteral("model") : normalized;
+}
+
+bool isValidCustomModelTemperature(double value)
+{
+    return qIsFinite(value) && value >= 0.0 && value <= 2.0;
+}
+
+bool isValidCustomModelTopP(double value)
+{
+    return qIsFinite(value) && value >= 0.0 && value <= 1.0;
 }
 
 bool SecretConfig::hasXfyun() const

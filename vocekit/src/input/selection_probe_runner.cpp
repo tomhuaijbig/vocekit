@@ -16,7 +16,6 @@
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
-#include <QUuid>
 #include <QVariant>
 #include <QtConcurrent>
 
@@ -330,14 +329,10 @@ public:
     {
         fallbackActive = true;
         fallbackSnapshot = base;
-        clipboardOriginal = captureClipboardSnapshot(
-            QApplication::clipboard()->mimeData()
-        );
-        clipboardSentinel =
-            QStringLiteral("__VOCEKIT_SELECTION_SENTINEL__")
-            + QUuid::createUuid().toString();
-        QApplication::clipboard()->setText(clipboardSentinel);
-        sentinelSequence = access.clipboardSequenceNumber();
+        clipboardOriginal = ClipboardSnapshot();
+        clipboardSequenceBeforeCopy = 0;
+        clipboardSequenceAfterCopy = 0;
+        copyShortcutDispatched = false;
         clipboardPollCount = 0;
         QTimer::singleShot(60, q, [this]() {
             if (!fallbackActive
@@ -346,10 +341,14 @@ public:
                 return;
             }
             if (!access.targetStillForeground(current.request.targetWindow)) {
-                restoreSentinelClipboardIfOwned();
                 deliverSnapshot(fallbackSnapshot);
                 return;
             }
+            clipboardOriginal = captureClipboardSnapshot(
+                QApplication::clipboard()->mimeData()
+            );
+            clipboardSequenceBeforeCopy = access.clipboardSequenceNumber();
+            copyShortcutDispatched = true;
             access.sendCopyShortcut();
             scheduleClipboardPoll();
         });
@@ -370,18 +369,16 @@ public:
             return;
         }
         ++clipboardPollCount;
-        const QString text = QApplication::clipboard()->text();
-        if (text == clipboardSentinel) {
+        const quint32 ownedSequence = access.clipboardSequenceNumber();
+        if (ownedSequence == clipboardSequenceBeforeCopy) {
             if (clipboardPollCount < 10) {
                 scheduleClipboardPoll();
                 return;
             }
-            restoreSentinelClipboardIfOwned();
             deliverSnapshot(fallbackSnapshot);
             return;
         }
 
-        const quint32 ownedSequence = access.clipboardSequenceNumber();
         const quint32 ownerProcess = access.clipboardOwnerProcessId();
         const bool foreground = access.targetStillForeground(
             current.request.targetWindow
@@ -396,35 +393,31 @@ public:
             return;
         }
 
-        fallbackSnapshot.text = text.trimmed();
+        clipboardSequenceAfterCopy = ownedSequence;
+        fallbackSnapshot.text = QApplication::clipboard()->text().trimmed();
         fallbackSnapshot.method =
             SelectionAcquisitionMethod::ClipboardFallback;
-        if (selectionClipboardOwnershipMatches(
-                ownedSequence,
-                access.clipboardSequenceNumber(),
-                fallbackSnapshot.targetProcessId,
-                access.clipboardOwnerProcessId(),
-                access.targetStillForeground(current.request.targetWindow))) {
-            QApplication::clipboard()->setMimeData(
-                mimeDataFromClipboardSnapshot(clipboardOriginal)
-            );
-        }
+        restoreCopiedClipboardIfOwned();
         deliverSnapshot(fallbackSnapshot);
     }
 
-    void restoreSentinelClipboardIfOwned()
+    void restoreCopiedClipboardIfOwned()
     {
-#ifdef Q_OS_WIN
-        const quint32 ownProcessId = quint32(GetCurrentProcessId());
-#else
-        const quint32 ownProcessId = access.clipboardOwnerProcessId();
-#endif
-        const bool sentinelStillOwned = sentinelSequence != 0
-            && sentinelSequence == access.clipboardSequenceNumber()
-            && ownProcessId != 0
-            && ownProcessId == access.clipboardOwnerProcessId()
-            && QApplication::clipboard()->text() == clipboardSentinel;
-        if (sentinelStillOwned) {
+        if (!copyShortcutDispatched) {
+            return;
+        }
+        const quint32 sequence = access.clipboardSequenceNumber();
+        const quint32 ownerProcess = access.clipboardOwnerProcessId();
+        const bool expectedSequence = clipboardSequenceAfterCopy != 0
+            ? sequence == clipboardSequenceAfterCopy
+            : sequence != clipboardSequenceBeforeCopy;
+        const bool copiedClipboardStillOwned = sequence != 0
+            && expectedSequence
+            && fallbackSnapshot.targetProcessId != 0
+            && fallbackSnapshot.targetProcessId == ownerProcess;
+        copyShortcutDispatched = false;
+        clipboardSequenceAfterCopy = 0;
+        if (copiedClipboardStillOwned) {
             QApplication::clipboard()->setMimeData(
                 mimeDataFromClipboardSnapshot(clipboardOriginal)
             );
@@ -450,14 +443,16 @@ public:
     void finishCurrentState()
     {
         if (fallbackActive) {
-            restoreSentinelClipboardIfOwned();
+            restoreCopiedClipboardIfOwned();
         }
         workerActive = false;
         fallbackActive = false;
         timedOut = false;
         cancellationRequested = false;
         current = Job();
-        clipboardSentinel.clear();
+        clipboardSequenceBeforeCopy = 0;
+        clipboardSequenceAfterCopy = 0;
+        copyShortcutDispatched = false;
         if (hasPending) {
             const Job next = pending;
             pending = Job();
@@ -487,7 +482,7 @@ public:
             access.cancelComCall(threadId);
         }
         if (fallbackActive) {
-            restoreSentinelClipboardIfOwned();
+            restoreCopiedClipboardIfOwned();
             fallbackActive = false;
             current = Job();
         }
@@ -508,8 +503,9 @@ public:
     quint64 latestGeneration = 0;
     ClipboardSnapshot clipboardOriginal;
     SelectionSnapshot fallbackSnapshot;
-    QString clipboardSentinel;
-    quint32 sentinelSequence = 0;
+    quint32 clipboardSequenceBeforeCopy = 0;
+    quint32 clipboardSequenceAfterCopy = 0;
+    bool copyShortcutDispatched = false;
     int clipboardPollCount = 0;
 };
 

@@ -332,6 +332,52 @@ private slots:
         );
     }
 
+    void strongFallbackNeverPublishesAnInternalMarkerBeforeCopy()
+    {
+        QApplication::clipboard()->setText(QStringLiteral("original"));
+
+        quint32 sequence = 20;
+        QString clipboardBeforeCopy;
+        SelectionProbeRunnerAccess access;
+        access.probeUiAutomationPhysical = [](const SelectionProbeRequest &) {
+            return textResult(QString(), 42);
+        };
+        access.clipboardSequenceNumber = [&sequence]() { return sequence; };
+        access.clipboardOwnerProcessId = []() { return quint32(42); };
+        access.targetStillForeground = [](SelectedTextNativeWindowHandle) {
+            return true;
+        };
+        access.sendCopyShortcut = [&clipboardBeforeCopy, &sequence]() {
+            clipboardBeforeCopy = QApplication::clipboard()->text();
+            ++sequence;
+            QApplication::clipboard()->setText(QStringLiteral("selected"));
+        };
+
+        SelectionProbeRunner runner(access);
+        SelectionSnapshot completed;
+        SelectionProbeRunnerCallbacks callbacks;
+        callbacks.completed = [&completed](
+            quint64,
+            const SelectionSnapshot &value) {
+            completed = value;
+        };
+        runner.start(requestAt(1), true, 8, callbacks);
+
+        QTRY_COMPARE_WITH_TIMEOUT(
+            completed.text,
+            QStringLiteral("selected"),
+            1500
+        );
+        QCOMPARE(clipboardBeforeCopy, QStringLiteral("original"));
+        QVERIFY(!clipboardBeforeCopy.contains(
+            QStringLiteral("VOCEKIT_SELECTION_SENTINEL")
+        ));
+        QCOMPARE(
+            QApplication::clipboard()->text(),
+            QStringLiteral("original")
+        );
+    }
+
     void strongFallbackRestoresOriginalClipboardAfterTargetLosesForeground()
     {
 #ifndef Q_OS_WIN
@@ -378,6 +424,7 @@ private slots:
         QApplication::clipboard()->setText(QStringLiteral("original"));
 
         QAtomicInt probeCalls(0);
+        quint32 sequence = 30;
         SelectionProbeRunnerAccess access;
         access.probeUiAutomationPhysical = [&probeCalls](
             const SelectionProbeRequest &) {
@@ -389,7 +436,14 @@ private slots:
         access.targetStillForeground = [](SelectedTextNativeWindowHandle) {
             return true;
         };
-        access.sendCopyShortcut = []() {};
+        access.clipboardSequenceNumber = [&sequence]() { return sequence; };
+        access.clipboardOwnerProcessId = []() { return quint32(42); };
+        QAtomicInt copyShortcutCalls(0);
+        access.sendCopyShortcut = [&copyShortcutCalls, &sequence]() {
+            copyShortcutCalls.ref();
+            ++sequence;
+            QApplication::clipboard()->setText(QStringLiteral("selected"));
+        };
 
         SelectionProbeRunner runner(access);
         QVector<quint64> completedGenerations;
@@ -400,11 +454,10 @@ private slots:
             completedGenerations.append(generation);
         };
         runner.start(requestAt(1), true, 10, callbacks);
-        QTRY_VERIFY_WITH_TIMEOUT(
-            QApplication::clipboard()->text().startsWith(
-                QStringLiteral("__VOCEKIT_SELECTION_SENTINEL__")
-            ),
-            1000
+        QTRY_COMPARE_WITH_TIMEOUT(copyShortcutCalls.loadAcquire(), 1, 1000);
+        QCOMPARE(
+            QApplication::clipboard()->text(),
+            QStringLiteral("selected")
         );
 
         runner.start(requestAt(2), false, 11, callbacks);
@@ -417,6 +470,57 @@ private slots:
         QCOMPARE(
             QApplication::clipboard()->text(),
             QStringLiteral("original")
+        );
+#endif
+    }
+
+    void strongFallbackRestoresOriginalWhenCopyOnlyChangesSequence()
+    {
+#ifndef Q_OS_WIN
+        QSKIP("The clipboard fallback ownership contract is Windows-specific.");
+#else
+        auto *original = new QMimeData;
+        original->setText(QStringLiteral("original"));
+        original->setHtml(QStringLiteral("<b>original</b>"));
+        QApplication::clipboard()->setMimeData(original);
+
+        quint32 sequence = 70;
+        int copyShortcutCalls = 0;
+        SelectionProbeRunnerAccess access;
+        access.probeUiAutomationPhysical = [](const SelectionProbeRequest &) {
+            return textResult(QString(), 42);
+        };
+        access.clipboardSequenceNumber = [&sequence]() { return sequence; };
+        access.clipboardOwnerProcessId = []() {
+            return quint32(QCoreApplication::applicationPid());
+        };
+        access.targetStillForeground = [](SelectedTextNativeWindowHandle) {
+            return true;
+        };
+        access.sendCopyShortcut = [&copyShortcutCalls, &sequence]() {
+            ++copyShortcutCalls;
+            ++sequence;
+        };
+
+        SelectionProbeRunner runner(access);
+        bool completed = false;
+        SelectionProbeRunnerCallbacks callbacks;
+        callbacks.completed = [&completed](
+            quint64,
+            const SelectionSnapshot &) {
+            completed = true;
+        };
+        runner.start(requestAt(1), true, 12, callbacks);
+
+        QTRY_VERIFY_WITH_TIMEOUT(completed, 1500);
+        QCOMPARE(copyShortcutCalls, 1);
+        QCOMPARE(
+            QApplication::clipboard()->text(),
+            QStringLiteral("original")
+        );
+        QCOMPARE(
+            QApplication::clipboard()->mimeData()->html(),
+            QStringLiteral("<b>original</b>")
         );
 #endif
     }

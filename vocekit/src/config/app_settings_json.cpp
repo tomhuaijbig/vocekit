@@ -91,6 +91,38 @@ QJsonArray stringListToJson(const QStringList &values)
     return array;
 }
 
+ModelSamplingSettings modelSamplingFromJson(const QJsonObject &object)
+{
+    ModelSamplingSettings settings;
+    const QJsonValue temperature =
+        object.value(QStringLiteral("temperature"));
+    if (temperature.isDouble()
+        && isValidModelTemperature(temperature.toDouble())) {
+        settings.temperatureEnabled = true;
+        settings.temperature = temperature.toDouble();
+    }
+    const QJsonValue topP = object.value(QStringLiteral("topP"));
+    if (topP.isDouble() && isValidModelTopP(topP.toDouble())) {
+        settings.topPEnabled = true;
+        settings.topP = topP.toDouble();
+    }
+    return settings;
+}
+
+QJsonObject modelSamplingToJson(const ModelSamplingSettings &rawSettings)
+{
+    const ModelSamplingSettings settings =
+        normalizeModelSamplingSettings(rawSettings);
+    QJsonObject object;
+    if (settings.temperatureEnabled) {
+        object.insert(QStringLiteral("temperature"), settings.temperature);
+    }
+    if (settings.topPEnabled) {
+        object.insert(QStringLiteral("topP"), settings.topP);
+    }
+    return object;
+}
+
 SelectionContextActionCustomizationMap actionCustomizationsFromJson(
     const QJsonObject &objects,
     const QStringList &actionOrder
@@ -600,6 +632,8 @@ AppSettingsData appSettingsDataFromJson(
 
     const QJsonObject models =
         root.value(QStringLiteral("models")).toObject();
+    const QJsonObject modelSampling =
+        root.value(QStringLiteral("modelSampling")).toObject();
     const QJsonObject outputModes =
         root.value(QStringLiteral("outputModes")).toObject();
     const QJsonObject outputOrders =
@@ -629,6 +663,9 @@ AppSettingsData appSettingsDataFromJson(
         if (!model.isEmpty()) {
             settings.modelId = model;
         }
+        settings.sampling = modelSamplingFromJson(
+            modelSampling.value(id).toObject()
+        );
         const QString outputMode =
             outputModes.value(id).toString().trimmed();
         if (!outputMode.isEmpty()) {
@@ -676,6 +713,9 @@ AppSettingsData appSettingsDataFromJson(
         settings.modelId =
             object.value(QStringLiteral("model"))
                 .toString(defaultModelForFunction(QString()));
+        settings.sampling = modelSamplingFromJson(
+            modelSampling.value(settings.id).toObject()
+        );
         settings.promptId =
             object.value(QStringLiteral("promptId")).toString().trimmed();
         if (settings.promptId.isEmpty()) {
@@ -860,6 +900,7 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
     }
 
     QJsonObject models;
+    QJsonObject modelSampling;
     QJsonObject outputModes;
     QJsonObject outputOrders;
     QJsonObject resultTemplates;
@@ -879,6 +920,11 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
             settings.id,
             functionFlowJson(settings)
         );
+        const QJsonObject sampling =
+            modelSamplingToJson(settings.sampling);
+        if (!sampling.isEmpty()) {
+            modelSampling.insert(settings.id, sampling);
+        }
         if (settings.builtIn) {
             hotkeys.insert(settings.id, settings.shortcut);
             models.insert(settings.id, settings.modelId);
@@ -955,6 +1001,7 @@ QJsonObject appSettingsDataToJson(const AppSettingsData &data)
 
     root.insert(QStringLiteral("hotkeys"), hotkeys);
     root.insert(QStringLiteral("models"), models);
+    root.insert(QStringLiteral("modelSampling"), modelSampling);
     root.insert(QStringLiteral("outputModes"), outputModes);
     root.insert(QStringLiteral("outputOrders"), outputOrders);
     root.insert(QStringLiteral("resultTemplates"), resultTemplates);

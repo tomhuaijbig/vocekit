@@ -16,6 +16,10 @@ private slots:
         FunctionSettings function;
         function.id = QStringLiteral("dictate");
         function.modelId = QStringLiteral("model-a");
+        function.sampling.temperatureEnabled = true;
+        function.sampling.temperature = 0.75;
+        function.sampling.topPEnabled = true;
+        function.sampling.topP = 0.6;
         settings.functions.append(function);
 
         const VoiceModelRuntimeSettings runtime =
@@ -29,6 +33,10 @@ private slots:
         QCOMPARE(runtime.systemPrompt, QStringLiteral("custom prompt"));
         QCOMPARE(runtime.useSystemProxy, true);
         QCOMPARE(runtime.dictatePolishEnabled, true);
+        QVERIFY(runtime.sampling.temperatureEnabled);
+        QCOMPARE(runtime.sampling.temperature, 0.75);
+        QVERIFY(runtime.sampling.topPEnabled);
+        QCOMPARE(runtime.sampling.topP, 0.6);
     }
 
     void suppliesModeSpecificFallbackPrompt()

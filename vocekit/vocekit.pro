@@ -341,6 +341,7 @@ HEADERS += \
     src/domain/function_flow_runtime_types.h \
     src/domain/function_flow_scheduler.h \
     src/domain/function_flow_validation.h \
+    src/domain/model_sampling_settings.h \
     src/domain/function_settings.h \
     src/domain/selection_context_actions.h \
     src/domain/history_filter.h \

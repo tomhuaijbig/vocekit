@@ -9,6 +9,7 @@ struct VoiceModelRuntimeSettings
 {
     QString defaultModel;
     QString systemPrompt;
+    ModelSamplingSettings sampling;
     bool useSystemProxy = false;
     bool dictatePolishEnabled = false;
 };

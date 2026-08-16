@@ -302,6 +302,7 @@ bool FunctionFlowRuntimeAdapters::resolveDependencies(
                 return false;
             }
             nodeSettings.modelId = normalizedModelId;
+            nodeSettings.sampling = node.config.model.sampling;
             nodeSettings.systemPrompt = systemPrompt;
             nodeSettings.promptVersion =
                 promptVersion(systemPrompt);
@@ -492,6 +493,7 @@ void FunctionFlowRuntimeAdapters::runModel(
     request.modelId = resolved.modelId;
     request.systemPrompt = resolved.systemPrompt;
     request.userPrompt = userPrompt;
+    request.sampling = resolved.sampling;
     request.stream = node.config.model.stream;
     request.networkPolicy =
         resolved.effectiveNetworkPolicy;

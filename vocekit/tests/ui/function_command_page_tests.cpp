@@ -10,9 +10,13 @@
 #include "../../src/config/app_settings_defaults.h"
 
 #include <QComboBox>
+#include <QCheckBox>
+#include <QDoubleSpinBox>
+#include <QDir>
 #include <QPointer>
 #include <QPushButton>
 #include <QFontMetrics>
+#include <QRawFont>
 #include <QLabel>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -319,7 +323,170 @@ private slots:
     void customFunctionPersistsFloatingBarStyleOverride();
     void builtInFunctionHasNoFloatingBarStyleOverride();
     void speechSelectorsContainCatalogProvidersExactlyOnce();
+    void classicAiSectionEditsFunctionSamplingOverrides();
+    void classicAiSamplingControlsDoNotClipAt100_125_150Percent();
 };
+
+void FunctionCommandPageTests::
+classicAiSectionEditsFunctionSamplingOverrides()
+{
+    PageEnvironment environment;
+    FunctionCommandPage page(environment.pageAccess);
+    QVERIFY(page.setFunctionId(QStringLiteral("custom_1")));
+    showPage(&page);
+
+    QCheckBox *temperatureEnabled = page.findChild<QCheckBox *>(
+        QStringLiteral("functionTemperatureEnabled")
+    );
+    QDoubleSpinBox *temperature = page.findChild<QDoubleSpinBox *>(
+        QStringLiteral("functionTemperatureSpin")
+    );
+    QCheckBox *topPEnabled = page.findChild<QCheckBox *>(
+        QStringLiteral("functionTopPEnabled")
+    );
+    QDoubleSpinBox *topP = page.findChild<QDoubleSpinBox *>(
+        QStringLiteral("functionTopPSpin")
+    );
+    QVERIFY(temperatureEnabled);
+    QVERIFY(temperature);
+    QVERIFY(topPEnabled);
+    QVERIFY(topP);
+    QVERIFY(!temperatureEnabled->isChecked());
+    QVERIFY(!temperature->isEnabled());
+    QVERIFY(!topPEnabled->isChecked());
+    QVERIFY(!topP->isEnabled());
+
+    temperatureEnabled->setChecked(true);
+    temperature->setValue(1.1);
+    topPEnabled->setChecked(true);
+    topP->setValue(0.65);
+
+    const ModelSamplingSettings sampling =
+        environment.settings->modelSamplingFor(
+            QStringLiteral("custom_1")
+        );
+    QVERIFY(sampling.temperatureEnabled);
+    QCOMPARE(sampling.temperature, 1.1);
+    QVERIFY(sampling.topPEnabled);
+    QCOMPARE(sampling.topP, 0.65);
+    QVERIFY(environment.saves >= 4);
+}
+
+void FunctionCommandPageTests::
+classicAiSamplingControlsDoNotClipAt100_125_150Percent()
+{
+    const QFont originalFont = QApplication::font();
+    const QVector<int> scales = QVector<int>() << 100 << 125 << 150;
+    const QString visualOutputDir = QString::fromLocal8Bit(
+        qgetenv("VOCEKIT_VISUAL_OUTPUT_DIR")
+    ).trimmed();
+
+    for (int scale : scales) {
+        QFont font(QStringLiteral("Microsoft YaHei UI"));
+        font.setPixelSize(qMax(12, (14 * scale) / 100));
+        QApplication::setFont(font);
+
+        PageEnvironment environment;
+        FunctionCommandPage page(environment.pageAccess);
+        QVERIFY(page.setFunctionId(QStringLiteral("custom_1")));
+        page.resize(1100, 860);
+        page.show();
+        QCoreApplication::processEvents();
+
+        QCheckBox *temperatureEnabled = page.findChild<QCheckBox *>(
+            QStringLiteral("functionTemperatureEnabled")
+        );
+        QDoubleSpinBox *temperature = page.findChild<QDoubleSpinBox *>(
+            QStringLiteral("functionTemperatureSpin")
+        );
+        QCheckBox *topPEnabled = page.findChild<QCheckBox *>(
+            QStringLiteral("functionTopPEnabled")
+        );
+        QDoubleSpinBox *topP = page.findChild<QDoubleSpinBox *>(
+            QStringLiteral("functionTopPSpin")
+        );
+        QLabel *hint = page.findChild<QLabel *>(
+            QStringLiteral("functionSamplingHint")
+        );
+        QVERIFY(temperatureEnabled);
+        QVERIFY(temperature);
+        QVERIFY(topPEnabled);
+        QVERIFY(topP);
+        QVERIFY(hint);
+
+        QWidget *body = temperatureEnabled->parentWidget();
+        while (body && body != &page
+               && body->objectName() != QStringLiteral("commandAccordionBody")) {
+            body = body->parentWidget();
+        }
+        QVERIFY(body);
+        QCOMPARE(body->objectName(), QStringLiteral("commandAccordionBody"));
+        QWidget *card = body->parentWidget();
+        QVERIFY(card);
+        QWidget *header = card->findChild<QWidget *>(
+            QStringLiteral("commandMethodHeader"),
+            Qt::FindDirectChildrenOnly
+        );
+        QVERIFY(header);
+        QTest::mouseClick(header, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QVERIFY(body->isVisibleTo(&page));
+
+        QScrollArea *scroll = page.findChild<QScrollArea *>();
+        QVERIFY(scroll);
+        scroll->ensureWidgetVisible(card, 0, 24);
+        QCoreApplication::processEvents();
+
+        if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+            const QRawFont rawFont = QRawFont::fromFont(page.font());
+            QVERIFY2(rawFont.isValid(),
+                     "Windows native visual gate requires a valid raw font");
+            const QString requiredCjk = QString::fromUtf8("温度自定义默认关闭");
+            for (const QChar character : requiredCjk) {
+                QVERIFY2(rawFont.supportsCharacter(character),
+                         qPrintable(QStringLiteral("missing CJK glyph U+%1")
+                             .arg(character.unicode(), 4, 16, QLatin1Char('0'))));
+            }
+        }
+
+        const QList<QCheckBox *> switches =
+            QList<QCheckBox *>() << temperatureEnabled << topPEnabled;
+        for (QCheckBox *control : switches) {
+            QVERIFY(control->isVisibleTo(&page));
+            QVERIFY2(control->height() >= control->sizeHint().height(),
+                     qPrintable(QStringLiteral("scale=%1 checkbox height=%2 hint=%3")
+                         .arg(scale).arg(control->height())
+                         .arg(control->sizeHint().height())));
+            QVERIFY(control->width() >= control->sizeHint().width());
+        }
+        const QList<QDoubleSpinBox *> spins =
+            QList<QDoubleSpinBox *>() << temperature << topP;
+        for (QDoubleSpinBox *control : spins) {
+            QVERIFY(control->isVisibleTo(&page));
+            QVERIFY2(control->height() >= control->sizeHint().height(),
+                     qPrintable(QStringLiteral("scale=%1 spin height=%2 hint=%3")
+                         .arg(scale).arg(control->height())
+                         .arg(control->sizeHint().height())));
+            QVERIFY(control->width() >= control->sizeHint().width());
+        }
+        QVERIFY(hint->isVisibleTo(&page));
+        QVERIFY2(hint->height() >= hint->sizeHint().height(),
+                 qPrintable(QStringLiteral("scale=%1 hint height=%2 sizeHint=%3 body=%4/%5 card=%6/%7")
+                     .arg(scale).arg(hint->height())
+                     .arg(hint->sizeHint().height())
+                     .arg(body->height()).arg(body->sizeHint().height())
+                     .arg(card->height()).arg(card->sizeHint().height())));
+
+        if (!visualOutputDir.isEmpty()) {
+            QVERIFY(QDir().mkpath(visualOutputDir));
+            const QString imagePath = QDir(visualOutputDir).filePath(
+                QStringLiteral("function-ai-sampling-%1.png").arg(scale)
+            );
+            QVERIFY(card->grab().save(imagePath));
+        }
+    }
+    QApplication::setFont(originalFont);
+}
 
 void FunctionCommandPageTests::
 speechSelectorsContainCatalogProvidersExactlyOnce()

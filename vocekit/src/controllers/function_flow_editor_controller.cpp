@@ -1102,6 +1102,7 @@ FunctionFlowNode FunctionFlowEditorController::defaultNode(
     case FunctionFlowNodeType::Model:
         node.config.model.modelId = function.modelId;
         node.config.model.promptId = function.promptId;
+        node.config.model.sampling = function.sampling;
         node.config.model.networkPolicy = function.network.model;
         break;
     case FunctionFlowNodeType::Output:

@@ -78,6 +78,11 @@ public:
 
     QString modelFor(const QString &id) const;
     void setModelFor(const QString &id, const QString &model);
+    ModelSamplingSettings modelSamplingFor(const QString &id) const;
+    void setModelSamplingFor(
+        const QString &id,
+        const ModelSamplingSettings &sampling
+    );
     QString outputModeFor(const QString &id) const;
     void setOutputModeFor(const QString &id, const QString &mode);
     QString floatingBarStyleOverrideFor(const QString &id) const;

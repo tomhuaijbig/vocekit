@@ -2,6 +2,7 @@
 #define VOCEKIT_FUNCTION_FLOW_GRAPH_H
 
 #include "function_flow_ports.h"
+#include "model_sampling_settings.h"
 
 #include <QJsonObject>
 #include <QPointF>
@@ -58,6 +59,7 @@ struct FunctionFlowModelConfig
 {
     QString modelId;
     QString promptId;
+    ModelSamplingSettings sampling;
     bool stream = false;
     QString networkPolicy = QStringLiteral("inherit");
 };

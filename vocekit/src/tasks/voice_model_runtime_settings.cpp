@@ -30,6 +30,7 @@ VoiceModelRuntimeSettings buildVoiceModelRuntimeSettings(
 {
     VoiceModelRuntimeSettings runtime;
     runtime.defaultModel = settings.function(modeId).modelId.trimmed();
+    runtime.sampling = settings.function(modeId).sampling;
     runtime.systemPrompt = configuredPrompt.trimmed();
     if (runtime.systemPrompt.isEmpty()) {
         runtime.systemPrompt = defaultVoiceModelSystemPrompt(modeId);

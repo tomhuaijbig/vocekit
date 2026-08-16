@@ -12,6 +12,7 @@ struct ModelRequestTaskRequest
     QString modelId;
     QString systemPrompt;
     QString userPrompt;
+    ModelSamplingSettings sampling;
     bool stream = false;
     bool useSystemProxy = false;
     QString networkPolicy = QStringLiteral("inherit");

@@ -43,9 +43,18 @@ FunctionFlowGraph graph()
     FunctionFlowNode voice =
         node(QStringLiteral("voice"), FunctionFlowNodeType::VoiceSource);
     voice.config.voice.speechProviderId = QStringLiteral("speech");
+    FunctionFlowNode model =
+        node(QStringLiteral("model"), FunctionFlowNodeType::Model);
+    model.config.model.modelId = QStringLiteral("deepseek-v4-flash");
+    model.config.model.promptId = QStringLiteral("dictate");
+    model.config.model.sampling.temperatureEnabled = true;
+    model.config.model.sampling.temperature = 0.65;
+    model.config.model.sampling.topPEnabled = true;
+    model.config.model.sampling.topP = 0.8;
     value.nodes
         << voice
         << node(QStringLiteral("input"), FunctionFlowNodeType::Input)
+        << model
         << node(QStringLiteral("output"), FunctionFlowNodeType::Output)
         << node(
             QStringLiteral("popup"),
@@ -60,8 +69,15 @@ FunctionFlowGraph graph()
             QStringLiteral("text_in")
         )
         << edge(
-            QStringLiteral("input-output"),
+            QStringLiteral("input-model"),
             QStringLiteral("input"),
+            QStringLiteral("text_out"),
+            QStringLiteral("model"),
+            QStringLiteral("text_in")
+        )
+        << edge(
+            QStringLiteral("model-output"),
+            QStringLiteral("model"),
             QStringLiteral("text_out"),
             QStringLiteral("output"),
             QStringLiteral("text_in")
@@ -152,13 +168,37 @@ void FunctionFlowJsonTests::roundTripsKnownFieldsAndEditorState()
     QCOMPARE(restored.draft.revision, 3);
     QCOMPARE(restored.published.revision, 2);
     QCOMPARE(restored.published.sourceDraftRevision, 3);
-    QCOMPARE(restored.draft.graph.nodes.size(), 4);
-    QCOMPARE(restored.draft.graph.edges.size(), 3);
+    QCOMPARE(restored.draft.graph.nodes.size(), 5);
+    QCOMPARE(restored.draft.graph.edges.size(), 4);
+    FunctionFlowNode restoredModel;
+    for (const FunctionFlowNode &candidate :
+         restored.draft.graph.nodes) {
+        if (candidate.id == QStringLiteral("model")) {
+            restoredModel = candidate;
+            break;
+        }
+    }
+    QCOMPARE(restoredModel.id, QStringLiteral("model"));
+    QVERIFY(restoredModel.config.model.sampling.temperatureEnabled);
+    QCOMPARE(restoredModel.config.model.sampling.temperature, 0.65);
+    QVERIFY(restoredModel.config.model.sampling.topPEnabled);
+    QCOMPARE(restoredModel.config.model.sampling.topP, 0.8);
     QCOMPARE(
         restored.draft.graphHash,
         functionFlowGraphHash(restored.draft.graph)
     );
     QVERIFY(restored.published.supported);
+
+    FunctionFlowGraph changed = restored.draft.graph;
+    for (FunctionFlowNode &candidate : changed.nodes) {
+        if (candidate.id == QStringLiteral("model")) {
+            candidate.config.model.sampling.temperature = 1.1;
+        }
+    }
+    QVERIFY(
+        functionFlowGraphHash(changed)
+        != functionFlowGraphHash(restored.draft.graph)
+    );
 }
 
 void FunctionFlowJsonTests::preservesUnknownFieldsAtEveryKnownLevel()

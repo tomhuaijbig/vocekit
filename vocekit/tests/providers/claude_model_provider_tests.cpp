@@ -104,6 +104,10 @@ private slots:
         request.systemPrompt = QStringLiteral("system");
         request.userPrompt = QStringLiteral("user");
         request.stream = false;
+        request.sampling.temperatureEnabled = true;
+        request.sampling.temperature = 0.8;
+        request.sampling.topPEnabled = true;
+        request.sampling.topP = 0.7;
         request.network.timeoutMs = 43210;
         request.network.networkPolicy = QStringLiteral("direct");
 
@@ -145,6 +149,8 @@ private slots:
 
         const QJsonObject body =
             QJsonDocument::fromJson(transport->lastBody).object();
+        QVERIFY(!body.contains(QStringLiteral("temperature")));
+        QVERIFY(!body.contains(QStringLiteral("top_p")));
         QCOMPARE(
             body.value(QStringLiteral("model")).toString(),
             QStringLiteral("claude-sonnet-5")

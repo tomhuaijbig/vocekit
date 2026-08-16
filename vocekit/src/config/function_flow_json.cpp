@@ -156,6 +156,25 @@ QJsonObject configJson(const FunctionFlowNode &node)
             node.config.model.promptId
         );
         object.insert(QStringLiteral("stream"), node.config.model.stream);
+        {
+            const ModelSamplingSettings sampling =
+                normalizeModelSamplingSettings(
+                    node.config.model.sampling
+                );
+            if (sampling.temperatureEnabled) {
+                object.insert(
+                    QStringLiteral("temperature"),
+                    sampling.temperature
+                );
+            } else {
+                object.remove(QStringLiteral("temperature"));
+            }
+            if (sampling.topPEnabled) {
+                object.insert(QStringLiteral("topP"), sampling.topP);
+            } else {
+                object.remove(QStringLiteral("topP"));
+            }
+        }
         object.insert(
             QStringLiteral("networkPolicy"),
             node.config.model.networkPolicy
@@ -294,6 +313,22 @@ void readConfig(
             object.value(QStringLiteral("modelId")).toString();
         node->config.model.promptId =
             object.value(QStringLiteral("promptId")).toString();
+        if (object.value(QStringLiteral("temperature")).isDouble()
+            && isValidModelTemperature(
+                object.value(QStringLiteral("temperature")).toDouble()
+            )) {
+            node->config.model.sampling.temperatureEnabled = true;
+            node->config.model.sampling.temperature =
+                object.value(QStringLiteral("temperature")).toDouble();
+        }
+        if (object.value(QStringLiteral("topP")).isDouble()
+            && isValidModelTopP(
+                object.value(QStringLiteral("topP")).toDouble()
+            )) {
+            node->config.model.sampling.topPEnabled = true;
+            node->config.model.sampling.topP =
+                object.value(QStringLiteral("topP")).toDouble();
+        }
         node->config.model.stream =
             object.value(QStringLiteral("stream"))
                 .toBool(node->config.model.stream);

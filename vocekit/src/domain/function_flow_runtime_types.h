@@ -80,6 +80,7 @@ struct FunctionFlowValue
 struct FunctionFlowResolvedNodeSettings
 {
     QString modelId;
+    ModelSamplingSettings sampling;
     QString systemPrompt;
     QString promptVersion;
     QString speechProviderId;

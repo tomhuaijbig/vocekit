@@ -3,6 +3,7 @@
 
 #include "../result_flow_config.h"
 #include "function_flow_graph.h"
+#include "model_sampling_settings.h"
 #include "operation_error.h"
 
 #include <QString>
@@ -84,6 +85,7 @@ struct FunctionSettings
     QString modelId;
     QString promptId;
     QString prompt;
+    ModelSamplingSettings sampling;
     FunctionInputSettings input;
     FunctionRecordingSettings recording;
     FunctionOutputSettings output;

@@ -42,6 +42,10 @@ FunctionFlowExecutionPlan planForSelectionModel()
         QStringLiteral("fake-model");
     model.config.model.promptId =
         QStringLiteral("prompt");
+    model.config.model.sampling.temperatureEnabled = true;
+    model.config.model.sampling.temperature = 0.72;
+    model.config.model.sampling.topPEnabled = true;
+    model.config.model.sampling.topP = 0.58;
     model.config.model.stream = true;
     model.config.model.networkPolicy =
         QStringLiteral("inherit");
@@ -577,6 +581,10 @@ runsGenericModelTaskWithFrozenRequestAndStreaming()
         QStringLiteral("systemProxy")
     );
     QVERIFY(captured.useSystemProxy);
+    QVERIFY(captured.sampling.temperatureEnabled);
+    QCOMPARE(captured.sampling.temperature, 0.72);
+    QVERIFY(captured.sampling.topPEnabled);
+    QCOMPARE(captured.sampling.topP, 0.58);
     QCOMPARE(
         captured.cancellation.executionId(),
         cancellation.executionId()

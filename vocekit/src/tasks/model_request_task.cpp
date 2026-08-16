@@ -51,6 +51,8 @@ ModelRequestTaskResult runModelRequestTask(
     );
     request.systemPrompt = taskRequest.systemPrompt;
     request.userPrompt = taskRequest.userPrompt;
+    request.sampling =
+        normalizeModelSamplingSettings(taskRequest.sampling);
     request.stream = taskRequest.stream;
     request.network.globalUseSystemProxy = taskRequest.useSystemProxy;
     request.network.networkPolicy = taskRequest.networkPolicy;

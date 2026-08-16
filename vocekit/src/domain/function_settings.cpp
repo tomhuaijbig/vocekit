@@ -182,6 +182,8 @@ FunctionSettings normalizeFunctionSettings(
     normalized.shortcut = normalized.shortcut.trimmed();
     normalized.modelId = normalized.modelId.trimmed();
     normalized.promptId = normalized.promptId.trimmed();
+    normalized.sampling =
+        normalizeModelSamplingSettings(normalized.sampling);
 
     normalized.input.order =
         normalizeFunctionInputOrder(normalized.input.order);

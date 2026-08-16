@@ -476,6 +476,11 @@ private slots:
         QVERIFY(written.contains(QStringLiteral("displayTimes")));
         QVERIFY(written.contains(QStringLiteral("recordingModes")));
         QVERIFY(written.contains(QStringLiteral("customFunctions")));
+        QVERIFY(
+            written.value(QStringLiteral("modelSampling"))
+                .toObject()
+                .isEmpty()
+        );
         QCOMPARE(
             written.value(QStringLiteral("hotkeys"))
                 .toObject()
@@ -642,6 +647,10 @@ private slots:
         FunctionSettings dictate =
             settings.function(QStringLiteral("dictate"));
         dictate.modelId = QStringLiteral("deepseek-v4-pro");
+        dictate.sampling.temperatureEnabled = true;
+        dictate.sampling.temperature = 0.85;
+        dictate.sampling.topPEnabled = true;
+        dictate.sampling.topP = 0.7;
         dictate.output.floatingBarSeconds = 9;
         QVERIFY(settings.updateFunction(dictate));
 
@@ -668,6 +677,12 @@ private slots:
             restored.function(QStringLiteral("dictate")).modelId,
             QStringLiteral("deepseek-v4-pro")
         );
+        const ModelSamplingSettings sampling =
+            restored.function(QStringLiteral("dictate")).sampling;
+        QVERIFY(sampling.temperatureEnabled);
+        QCOMPARE(sampling.temperature, 0.85);
+        QVERIFY(sampling.topPEnabled);
+        QCOMPARE(sampling.topP, 0.7);
         QCOMPARE(
             restored.function(QStringLiteral("dictate"))
                 .output

@@ -229,6 +229,7 @@ class FunctionFlowEditorControllerTests : public QObject
 private slots:
     void editsGraphWithOneUndoCommandPerIntent();
     void placingPopupUsesFlowActionsInsteadOfUnsupportedClassicActions();
+    void placingModelCopiesFunctionSamplingDefaults();
     void rejectsInvalidDuplicateAndFullSingleInputConnections();
     void allowsMultipleSourcesToConnectToOneInput();
     void preservesRetainedValuesAcrossEditsAndUndo();
@@ -247,6 +248,33 @@ private slots:
     void analyzesEveryGraphCommandWithoutAddingUndoEntries();
     void exposesUnsupportedDraftAsReadOnly();
 };
+
+void FunctionFlowEditorControllerTests::
+placingModelCopiesFunctionSamplingDefaults()
+{
+    FakeFlowSettings fake;
+    FunctionFlowPlacementDefaults defaults = placementDefaults();
+    defaults.function.sampling.temperatureEnabled = true;
+    defaults.function.sampling.temperature = 0.9;
+    defaults.function.sampling.topPEnabled = true;
+    defaults.function.sampling.topP = 0.6;
+    FunctionFlowEditorController controller(fake.access());
+    controller.setSaveDebounceMs(60000);
+    QVERIFY(controller.openFunction(fake.functionId, defaults));
+
+    const QString modelId = controller.placeNode(
+        FunctionFlowNodeType::Model,
+        QPointF()
+    );
+    const FunctionFlowNode model = nodeById(
+        controller.graph(),
+        modelId
+    );
+    QVERIFY(model.config.model.sampling.temperatureEnabled);
+    QCOMPARE(model.config.model.sampling.temperature, 0.9);
+    QVERIFY(model.config.model.sampling.topPEnabled);
+    QCOMPARE(model.config.model.sampling.topP, 0.6);
+}
 
 void FunctionFlowEditorControllerTests::
 editsGraphWithOneUndoCommandPerIntent()

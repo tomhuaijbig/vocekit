@@ -62,6 +62,10 @@ void normalizeNodeConfig(FunctionFlowNode *node)
             trimmed(node->config.model.modelId);
         node->config.model.promptId =
             trimmed(node->config.model.promptId);
+        node->config.model.sampling =
+            normalizeModelSamplingSettings(
+                node->config.model.sampling
+            );
         node->config.model.networkPolicy =
             trimmed(node->config.model.networkPolicy);
         break;
@@ -235,6 +239,21 @@ QJsonObject nodeConfigJson(const FunctionFlowNode &node)
             node.config.model.promptId
         );
         object.insert(QStringLiteral("stream"), node.config.model.stream);
+        {
+            const ModelSamplingSettings sampling =
+                normalizeModelSamplingSettings(
+                    node.config.model.sampling
+                );
+            if (sampling.temperatureEnabled) {
+                object.insert(
+                    QStringLiteral("temperature"),
+                    sampling.temperature
+                );
+            }
+            if (sampling.topPEnabled) {
+                object.insert(QStringLiteral("topP"), sampling.topP);
+            }
+        }
         object.insert(
             QStringLiteral("networkPolicy"),
             node.config.model.networkPolicy

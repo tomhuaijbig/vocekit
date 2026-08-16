@@ -332,7 +332,7 @@ QWidget *FunctionCommandPage::commandAccordionCard(const QString &title, const Q
     body->setStyleSheet(QStringLiteral(
         "QWidget#commandAccordionBody { background: #f7f9fc; border-top: 1px solid #d7dee9; }"
         "QLabel { background: transparent; }"
-        "QComboBox, QSpinBox, QLineEdit, QKeySequenceEdit, QTextEdit {"
+        "QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QKeySequenceEdit, QTextEdit {"
         "  background: #ffffff; border: 1px solid #cbd3df; border-radius: 4px; padding: 5px 9px;"
         "}"));
     body->setObjectName(QStringLiteral("commandAccordionBody"));
@@ -1156,6 +1156,137 @@ void FunctionCommandPage::refresh()
     aiGrid->setColumnStretch(0, 1);
     aiGrid->setColumnStretch(1, 1);
     aiLayout->addLayout(aiGrid);
+
+    const ModelSamplingSettings sampling =
+        m_access.settings->modelSamplingFor(id);
+    auto *samplingGrid = new QGridLayout;
+    samplingGrid->setHorizontalSpacing(14);
+    samplingGrid->setVerticalSpacing(8);
+    auto samplingControl = [aiBody](
+        const QString &enabledObjectName,
+        const QString &spinObjectName,
+        bool enabled,
+        double value,
+        double maximum,
+        QCheckBox **enabledSwitch,
+        QDoubleSpinBox **spin) {
+        auto *control = new QWidget(aiBody);
+        auto *layout = new QHBoxLayout(control);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(8);
+        *enabledSwitch = new QCheckBox(text8("自定义"), control);
+        (*enabledSwitch)->setObjectName(enabledObjectName);
+        (*enabledSwitch)->setChecked(enabled);
+        *spin = new QDoubleSpinBox(control);
+        (*spin)->setObjectName(spinObjectName);
+        (*spin)->setRange(0.0, maximum);
+        (*spin)->setDecimals(2);
+        (*spin)->setSingleStep(0.05);
+        (*spin)->setValue(qBound(0.0, value, maximum));
+        (*spin)->setEnabled(enabled);
+        (*spin)->setMinimumWidth(104);
+        (*spin)->setMinimumHeight(qMax(34, (*spin)->sizeHint().height()));
+        layout->addWidget(*enabledSwitch);
+        layout->addWidget(*spin, 1);
+        return control;
+    };
+    QCheckBox *temperatureEnabled = nullptr;
+    QDoubleSpinBox *temperature = nullptr;
+    QCheckBox *topPEnabled = nullptr;
+    QDoubleSpinBox *topP = nullptr;
+    samplingGrid->addWidget(
+        commandField(
+            text8("温度（Temperature）"),
+            samplingControl(
+                QStringLiteral("functionTemperatureEnabled"),
+                QStringLiteral("functionTemperatureSpin"),
+                sampling.temperatureEnabled,
+                sampling.temperature,
+                2.0,
+                &temperatureEnabled,
+                &temperature
+            )
+        ),
+        0,
+        0
+    );
+    samplingGrid->addWidget(
+        commandField(
+            text8("Top P"),
+            samplingControl(
+                QStringLiteral("functionTopPEnabled"),
+                QStringLiteral("functionTopPSpin"),
+                sampling.topPEnabled,
+                sampling.topP,
+                1.0,
+                &topPEnabled,
+                &topP
+            )
+        ),
+        0,
+        1
+    );
+    samplingGrid->setColumnStretch(0, 1);
+    samplingGrid->setColumnStretch(1, 1);
+    aiLayout->addLayout(samplingGrid);
+    auto *samplingHint = new QLabel(
+        text8("默认关闭并继承大模型设置；模型设置也关闭时，接口不发送该参数。一般只需调整温度或 Top P 其中一个；不支持的模型会忽略。"),
+        aiBody
+    );
+    samplingHint->setObjectName(QStringLiteral("functionSamplingHint"));
+    samplingHint->setWordWrap(true);
+    samplingHint->setSizePolicy(
+        QSizePolicy::Preferred,
+        QSizePolicy::Minimum
+    );
+    samplingHint->setMinimumHeight(samplingHint->sizeHint().height());
+    samplingHint->setStyleSheet(QStringLiteral("color: #667085;"));
+    aiLayout->addWidget(samplingHint);
+
+    auto saveSampling = [this, id, temperatureEnabled, temperature,
+                         topPEnabled, topP]() {
+        ModelSamplingSettings value;
+        value.temperatureEnabled = temperatureEnabled->isChecked();
+        value.temperature = temperature->value();
+        value.topPEnabled = topPEnabled->isChecked();
+        value.topP = topP->value();
+        m_access.settings->setModelSamplingFor(id, value);
+        saveSettings();
+    };
+    connect(
+        temperatureEnabled,
+        &QCheckBox::toggled,
+        aiBody,
+        [temperature, saveSampling](bool enabled) {
+            temperature->setEnabled(enabled);
+            saveSampling();
+        }
+    );
+    connect(
+        temperature,
+        static_cast<void (QDoubleSpinBox::*)(double)>(
+            &QDoubleSpinBox::valueChanged
+        ),
+        aiBody,
+        [saveSampling](double) { saveSampling(); }
+    );
+    connect(
+        topPEnabled,
+        &QCheckBox::toggled,
+        aiBody,
+        [topP, saveSampling](bool enabled) {
+            topP->setEnabled(enabled);
+            saveSampling();
+        }
+    );
+    connect(
+        topP,
+        static_cast<void (QDoubleSpinBox::*)(double)>(
+            &QDoubleSpinBox::valueChanged
+        ),
+        aiBody,
+        [saveSampling](double) { saveSampling(); }
+    );
     auto *promptEditor = new QTextEdit;
     promptEditor->setMinimumHeight(150);
     promptEditor->setPlainText(sharedPromptText(
@@ -1296,7 +1427,7 @@ void FunctionCommandPage::refresh()
     outputCards.insert(
         functionOutputAiId(),
         commandAccordionCard(text8("AI 处理"),
-                             text8("选择当前功能使用的大模型和提示词。"),
+                             text8("选择当前功能使用的大模型、提示词和可选采样参数。"),
                              modelTitle(m_access.settings->modelFor(id)), true, false,
                              false, aiBody, std::function<void(bool)>())
     );

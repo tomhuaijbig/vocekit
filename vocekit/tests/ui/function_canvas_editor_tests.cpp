@@ -9,6 +9,7 @@
 
 #include <QAbstractButton>
 #include <QCheckBox>
+#include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QDrag>
 #include <QDragEnterEvent>
@@ -379,6 +380,7 @@ private slots:
     void inspectorScalesChineseTextAndUsesTheAppFont();
     void inspectorShowsOnlyTheSpecifiedTypedSettings();
     void inspectorDisplaysMigratedModelWithoutChangingTheDraft();
+    void modelSamplingControlsEditTypedNodeWithoutInitialWrite();
     void inputRoleShowsChineseButEmitsTheStableRoleId();
     void popupActionsShowChineseButKeepTheStableActionIds();
     void inspectorEmitsAWholeTypedNodeWithoutDroppingRetainedValues();
@@ -396,6 +398,60 @@ private slots:
     void canvasPublishDoesNotShowClassicActivationInformation();
     void publishFailureUsesThePublishFlowTitle();
 };
+
+void FunctionCanvasEditorTests::
+modelSamplingControlsEditTypedNodeWithoutInitialWrite()
+{
+    FunctionCanvasInspector inspector;
+    FunctionFlowGraph graph;
+    FunctionFlowNode node;
+    node.id = QStringLiteral("model_sampling");
+    node.type = FunctionFlowNodeType::Model;
+    node.config.model.sampling.temperatureEnabled = true;
+    node.config.model.sampling.temperature = 0.8;
+    graph.nodes.append(node);
+
+    int changed = 0;
+    FunctionFlowNode emitted;
+    QObject::connect(
+        &inspector,
+        &FunctionCanvasInspector::nodeChanged,
+        &inspector,
+        [&](const FunctionFlowNode &value) {
+            ++changed;
+            emitted = value;
+        }
+    );
+    inspector.setGraphAndSelection(graph, node.id);
+
+    QCheckBox *temperatureEnabled = inspector.findChild<QCheckBox *>(
+        QStringLiteral("flowTemperatureEnabled")
+    );
+    QDoubleSpinBox *temperature = inspector.findChild<QDoubleSpinBox *>(
+        QStringLiteral("flowTemperatureSpin")
+    );
+    QCheckBox *topPEnabled = inspector.findChild<QCheckBox *>(
+        QStringLiteral("flowTopPEnabled")
+    );
+    QDoubleSpinBox *topP = inspector.findChild<QDoubleSpinBox *>(
+        QStringLiteral("flowTopPSpin")
+    );
+    QVERIFY(temperatureEnabled);
+    QVERIFY(temperature);
+    QVERIFY(topPEnabled);
+    QVERIFY(topP);
+    QCOMPARE(changed, 0);
+    QVERIFY(temperatureEnabled->isChecked());
+    QCOMPARE(temperature->value(), 0.8);
+    QVERIFY(!topPEnabled->isChecked());
+    QVERIFY(!topP->isEnabled());
+
+    topPEnabled->setChecked(true);
+    topP->setValue(0.55);
+    QVERIFY(changed >= 2);
+    QVERIFY(emitted.config.model.sampling.topPEnabled);
+    QCOMPARE(emitted.config.model.sampling.topP, 0.55);
+}
 
 void FunctionCanvasEditorTests::
 inspectorDisplaysMigratedModelWithoutChangingTheDraft()

@@ -687,6 +687,10 @@ updatingCustomFunctionPreservesItsEntireFlowState()
     FunctionSettings original;
     original.id = QStringLiteral("custom_1");
     original.name = QStringLiteral("旧名称");
+    original.sampling.temperatureEnabled = true;
+    original.sampling.temperature = 0.88;
+    original.sampling.topPEnabled = true;
+    original.sampling.topP = 0.62;
     original.flow.enabled = true;
     original.flow.draft.revision = 7;
     original.flow.draft.graphHash = QStringLiteral("draft_hash");
@@ -714,6 +718,10 @@ updatingCustomFunctionPreservesItsEntireFlowState()
     const FunctionSettings saved =
         state.toData().function(QStringLiteral("custom_1"));
     QCOMPARE(saved.name, QStringLiteral("新名称"));
+    QVERIFY(saved.sampling.temperatureEnabled);
+    QCOMPARE(saved.sampling.temperature, 0.88);
+    QVERIFY(saved.sampling.topPEnabled);
+    QCOMPARE(saved.sampling.topP, 0.62);
     QCOMPARE(saved.flow.enabled, original.flow.enabled);
     QCOMPARE(saved.flow.draft.revision, 7);
     QCOMPARE(saved.flow.draft.graphHash, QStringLiteral("draft_hash"));

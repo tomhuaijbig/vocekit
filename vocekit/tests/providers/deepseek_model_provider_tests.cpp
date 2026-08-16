@@ -101,6 +101,10 @@ private slots:
         request.stream = false;
         request.network.timeoutMs = 43210;
         request.network.networkPolicy = QStringLiteral("direct");
+        request.sampling.temperatureEnabled = true;
+        request.sampling.temperature = 0.95;
+        request.sampling.topPEnabled = true;
+        request.sampling.topP = 0.7;
 
         const ModelResult result = provider.complete(
             request,
@@ -141,6 +145,8 @@ private slots:
             QStringLiteral("disabled")
         );
         QVERIFY(!body.value(QStringLiteral("stream")).toBool());
+        QCOMPARE(body.value(QStringLiteral("temperature")).toDouble(), 0.95);
+        QCOMPARE(body.value(QStringLiteral("top_p")).toDouble(), 0.7);
     }
 
     void parsesSplitStreamingEvents()
@@ -192,6 +198,10 @@ private slots:
                 .value(QStringLiteral("stream"))
                 .toBool()
         );
+        const QJsonObject body =
+            QJsonDocument::fromJson(transport->lastBody).object();
+        QVERIFY(!body.contains(QStringLiteral("temperature")));
+        QVERIFY(!body.contains(QStringLiteral("top_p")));
     }
 
     void missingKeyDoesNotReachNetwork()

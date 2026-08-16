@@ -98,7 +98,14 @@ QJsonObject requestBody(const ModelRequest &request, bool stream)
             : request.modelId.trimmed()
     );
     body.insert(QStringLiteral("messages"), messages);
-    body.insert(QStringLiteral("temperature"), 0.2);
+    const ModelSamplingSettings sampling =
+        normalizeModelSamplingSettings(request.sampling);
+    if (sampling.temperatureEnabled) {
+        body.insert(QStringLiteral("temperature"), sampling.temperature);
+    }
+    if (sampling.topPEnabled) {
+        body.insert(QStringLiteral("top_p"), sampling.topP);
+    }
     body.insert(QStringLiteral("max_tokens"), 1024);
     body.insert(QStringLiteral("stream"), stream);
     QJsonObject thinking;

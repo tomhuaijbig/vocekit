@@ -425,6 +425,7 @@ void HubSettingsState::updateCustomFunction(const CustomFunctionDef &function)
         functionSettingsFromCustomFunction(function);
     const int index = m_data.functionIndex(settings.id);
     if (index >= 0 && !m_data.functions.at(index).builtIn) {
+        settings.sampling = m_data.functions.at(index).sampling;
         settings.flow = m_data.functions.at(index).flow;
         m_data.functions[index] = settings;
     } else if (index < 0) {
@@ -572,6 +573,24 @@ QString HubSettingsState::modelFor(const QString &id) const
 void HubSettingsState::setModelFor(const QString &id, const QString &model)
 {
     mutableFunction(id)->modelId = model;
+    refreshCustomFunctions();
+}
+
+ModelSamplingSettings HubSettingsState::modelSamplingFor(
+    const QString &id) const
+{
+    const FunctionSettings *settings = findFunction(id);
+    return settings
+        ? normalizeModelSamplingSettings(settings->sampling)
+        : ModelSamplingSettings();
+}
+
+void HubSettingsState::setModelSamplingFor(
+    const QString &id,
+    const ModelSamplingSettings &sampling)
+{
+    mutableFunction(id)->sampling =
+        normalizeModelSamplingSettings(sampling);
     refreshCustomFunctions();
 }
 

@@ -7,7 +7,9 @@
 #include <QAbstractItemModel>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -943,6 +945,94 @@ void FunctionCanvasInspector::addModelFields()
         QString::fromUtf8("提示词"),
         prompt
     ));
+
+    auto addSamplingControl = [this](
+        const QString &labelText,
+        const QString &enabledObjectName,
+        const QString &spinObjectName,
+        bool initialEnabled,
+        double initialValue,
+        double maximum,
+        bool temperatureSetting) {
+        auto *control = new QWidget(this);
+        auto *layout = new QHBoxLayout(control);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(8);
+        auto *enabled = new QCheckBox(
+            QString::fromUtf8("自定义"),
+            control
+        );
+        enabled->setObjectName(enabledObjectName);
+        enabled->setChecked(initialEnabled);
+        auto *spin = new QDoubleSpinBox(control);
+        spin->setObjectName(spinObjectName);
+        spin->setRange(0.0, maximum);
+        spin->setDecimals(2);
+        spin->setSingleStep(0.05);
+        spin->setValue(qBound(0.0, initialValue, maximum));
+        spin->setEnabled(initialEnabled);
+        spin->setMinimumHeight(qMax(34, spin->sizeHint().height()));
+        layout->addWidget(enabled);
+        layout->addWidget(spin, 1);
+        connect(
+            enabled,
+            &QCheckBox::toggled,
+            this,
+            [this, spin, temperatureSetting](bool checked) {
+                spin->setEnabled(checked);
+                if (temperatureSetting) {
+                    m_node.config.model.sampling.temperatureEnabled = checked;
+                } else {
+                    m_node.config.model.sampling.topPEnabled = checked;
+                }
+                emitNodeChange();
+            }
+        );
+        connect(
+            spin,
+            static_cast<void (QDoubleSpinBox::*)(double)>(
+                &QDoubleSpinBox::valueChanged
+            ),
+            this,
+            [this, temperatureSetting](double value) {
+                if (temperatureSetting) {
+                    m_node.config.model.sampling.temperature = value;
+                } else {
+                    m_node.config.model.sampling.topP = value;
+                }
+                emitNodeChange();
+            }
+        );
+        m_layout->addWidget(field(labelText, control));
+    };
+    addSamplingControl(
+        QString::fromUtf8("温度（Temperature）"),
+        QStringLiteral("flowTemperatureEnabled"),
+        QStringLiteral("flowTemperatureSpin"),
+        m_node.config.model.sampling.temperatureEnabled,
+        m_node.config.model.sampling.temperature,
+        2.0,
+        true
+    );
+    addSamplingControl(
+        QString::fromUtf8("Top P"),
+        QStringLiteral("flowTopPEnabled"),
+        QStringLiteral("flowTopPSpin"),
+        m_node.config.model.sampling.topPEnabled,
+        m_node.config.model.sampling.topP,
+        1.0,
+        false
+    );
+    auto *samplingHint = new QLabel(
+        QString::fromUtf8(
+            "默认关闭并继承大模型设置；一般只需调整其中一个。"
+        ),
+        this
+    );
+    samplingHint->setObjectName(QStringLiteral("flowSamplingHint"));
+    samplingHint->setWordWrap(true);
+    samplingHint->setStyleSheet(QStringLiteral("color: #667085;"));
+    m_layout->addWidget(samplingHint);
 
     auto *stream = new QCheckBox(QString::fromUtf8("流式输出"));
     stream->setObjectName(QStringLiteral("flowModelStream"));

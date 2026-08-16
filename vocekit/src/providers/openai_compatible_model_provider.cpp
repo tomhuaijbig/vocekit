@@ -224,15 +224,26 @@ QJsonObject requestBody(
         requestModelName(providerId, request, config)
     );
     body.insert(QStringLiteral("messages"), messages);
+    const ModelSamplingSettings sampling =
+        normalizeModelSamplingSettings(request.sampling);
     if (isCustomProvider(providerId)) {
-        if (config.temperatureEnabled) {
+        if (sampling.temperatureEnabled) {
+            body.insert(QStringLiteral("temperature"), sampling.temperature);
+        } else if (config.temperatureEnabled) {
             body.insert(QStringLiteral("temperature"), config.temperature);
         }
-        if (config.topPEnabled) {
+        if (sampling.topPEnabled) {
+            body.insert(QStringLiteral("top_p"), sampling.topP);
+        } else if (config.topPEnabled) {
             body.insert(QStringLiteral("top_p"), config.topP);
         }
     } else {
-        body.insert(QStringLiteral("temperature"), 0.2);
+        if (sampling.temperatureEnabled) {
+            body.insert(QStringLiteral("temperature"), sampling.temperature);
+        }
+        if (sampling.topPEnabled) {
+            body.insert(QStringLiteral("top_p"), sampling.topP);
+        }
     }
     body.insert(QStringLiteral("max_tokens"), 1024);
     body.insert(QStringLiteral("stream"), request.stream);

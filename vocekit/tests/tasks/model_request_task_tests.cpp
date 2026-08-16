@@ -62,6 +62,10 @@ private slots:
         request.stream = true;
         request.useSystemProxy = true;
         request.networkPolicy = QStringLiteral("direct");
+        request.sampling.temperatureEnabled = true;
+        request.sampling.temperature = 0.9;
+        request.sampling.topPEnabled = true;
+        request.sampling.topP = 0.55;
 
         QString delta;
         const ModelRequestTaskResult result = runModelRequestTask(
@@ -83,6 +87,10 @@ private slots:
         QCOMPARE(provider->lastRequest.stream, true);
         QCOMPARE(provider->lastRequest.network.globalUseSystemProxy, true);
         QCOMPARE(provider->lastRequest.network.networkPolicy, QStringLiteral("direct"));
+        QVERIFY(provider->lastRequest.sampling.temperatureEnabled);
+        QCOMPARE(provider->lastRequest.sampling.temperature, 0.9);
+        QVERIFY(provider->lastRequest.sampling.topPEnabled);
+        QCOMPARE(provider->lastRequest.sampling.topP, 0.55);
         QVERIFY(provider->lastRequest.executionId.isValid());
         QVERIFY(provider->lastCancellationWasValid);
     }

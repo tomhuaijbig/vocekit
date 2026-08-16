@@ -64,6 +64,7 @@ VoiceModelProcessingResult runModel(
     taskRequest.modelId = model;
     taskRequest.systemPrompt = prompt;
     taskRequest.userPrompt = userText;
+    taskRequest.sampling = request.runtime.sampling;
     taskRequest.stream = static_cast<bool>(request.onDelta);
     taskRequest.useSystemProxy = request.runtime.useSystemProxy;
     taskRequest.networkPolicy = QStringLiteral("inherit");

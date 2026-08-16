@@ -162,7 +162,48 @@ private slots:
             body.value(QStringLiteral("model")).toString(),
             QStringLiteral("gpt-5.6-terra")
         );
+        QVERIFY(!body.contains(QStringLiteral("temperature")));
+        QVERIFY(!body.contains(QStringLiteral("top_p")));
         QVERIFY(!body.value(QStringLiteral("stream")).toBool());
+    }
+
+    void officialProviderUsesFunctionSamplingOverrides()
+    {
+        const QSharedPointer<FakeOpenAiTransport> transport =
+            fakeTransport();
+        transport->jsonResponse.statusCode = 200;
+        transport->jsonResponse.body = QByteArrayLiteral(
+            "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"
+        );
+        OpenAiCompatibleModelProvider provider(
+            QStringLiteral("openai"),
+            transport,
+            []() { return openAiSecrets(); }
+        );
+        CancellationSource cancellation;
+        ModelRequest request;
+        request.modelId = QStringLiteral("openai:gpt-5.6-terra");
+        request.stream = false;
+        request.sampling.temperatureEnabled = true;
+        request.sampling.temperature = 1.25;
+        request.sampling.topPEnabled = true;
+        request.sampling.topP = 0.5;
+
+        const ModelResult result = provider.complete(
+            request,
+            ModelDeltaCallback(),
+            cancellation.token()
+        );
+
+        QVERIFY2(
+            result.error.isEmpty(),
+            qPrintable(result.error.code + QStringLiteral(": ")
+                       + result.error.message)
+        );
+        const QJsonObject body =
+            QJsonDocument::fromJson(transport->lastBody).object();
+        QCOMPARE(body.value(QStringLiteral("temperature")).toDouble(), 1.25);
+        QCOMPARE(body.value(QStringLiteral("top_p")).toDouble(), 0.5);
     }
 
     void officialProviderUsesConfiguredBaseUrl_data()
@@ -290,6 +331,10 @@ private slots:
         request.systemPrompt = QStringLiteral("system");
         request.userPrompt = QStringLiteral("user");
         request.stream = false;
+        request.sampling.temperatureEnabled = true;
+        request.sampling.temperature = 1.15;
+        request.sampling.topPEnabled = true;
+        request.sampling.topP = 0.45;
 
         const ModelResult result = provider.complete(
             request,
@@ -317,9 +362,9 @@ private slots:
         );
         QCOMPARE(
             body.value(QStringLiteral("temperature")).toDouble(),
-            0.85
+            1.15
         );
-        QCOMPARE(body.value(QStringLiteral("top_p")).toDouble(), 0.65);
+        QCOMPARE(body.value(QStringLiteral("top_p")).toDouble(), 0.45);
     }
 
     void customProviderOmitsDisabledSamplingParameters()

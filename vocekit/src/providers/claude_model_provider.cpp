@@ -62,7 +62,8 @@ QJsonObject requestBody(const ModelRequest &request)
     body.insert(QStringLiteral("model"), requestModelName(request));
     body.insert(QStringLiteral("system"), request.systemPrompt);
     body.insert(QStringLiteral("messages"), messages);
-    body.insert(QStringLiteral("temperature"), 0.2);
+    // Current Claude 5 models reject temperature/top_p, so omit function
+    // sampling overrides instead of turning a valid request into HTTP 400.
     body.insert(QStringLiteral("max_tokens"), 1024);
     body.insert(QStringLiteral("stream"), request.stream);
     return body;

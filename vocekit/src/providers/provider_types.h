@@ -2,6 +2,7 @@
 #define VOCEKIT_PROVIDER_TYPES_H
 
 #include "../domain/execution_types.h"
+#include "../domain/model_sampling_settings.h"
 #include "../domain/operation_error.h"
 
 #include <QByteArray>
@@ -78,6 +79,7 @@ struct ModelRequest
     QString userPrompt;
     QStringList contextMessages;
     QJsonObject extra;
+    ModelSamplingSettings sampling;
     NetworkRequestOptions network;
     bool stream = true;
 };

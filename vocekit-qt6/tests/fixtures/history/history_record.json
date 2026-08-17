@@ -1,0 +1,44 @@
+{
+    "id": "record-20260623-001",
+    "modeId": "dictate",
+    "mode": "听写",
+    "time": "2026-06-23 10:20:30",
+    "input": "语音识别原文",
+    "recognizedText": "语音识别原文",
+    "output": "整理后的文字",
+    "error": "",
+    "model": "deepseek-v4-flash",
+    "promptVersion": "dictate:1",
+    "elapsedMs": 2450,
+    "speechElapsedMs": 820,
+    "modelElapsedMs": 1520,
+    "audio": "历史记录/听写/2026-06-23/录音记录/sample.wav",
+    "favorite": true,
+    "favoriteFolders": [
+        "工作"
+    ],
+    "draft": false,
+    "recordingTriggerMode": "toggle",
+    "longRecording": true,
+    "segmentCount": 2,
+    "failedSegmentCount": 0,
+    "failedSegments": [],
+    "segments": [
+        {
+            "index": 1,
+            "audio": "segment-1.wav",
+            "text": "第一段",
+            "error": "",
+            "recognitionElapsedMs": 400,
+            "attempts": 1
+        },
+        {
+            "index": 2,
+            "audio": "segment-2.wav",
+            "text": "第二段",
+            "error": "",
+            "recognitionElapsedMs": 420,
+            "attempts": 1
+        }
+    ]
+}

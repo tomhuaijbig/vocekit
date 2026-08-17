@@ -3,6 +3,8 @@ debug/
 release/
 dist/
 build-*/
+.qt6-build/
+.qt6-deploy/
 *.zip
 *.7z
 *.rar
@@ -21,6 +23,8 @@ Makefile.Debug
 Makefile.Release
 Makefile.*
 object_script.*
+**/.qt6-*
+**/target_wrapper.sh
 *.pro.user
 *.pro.user.*
 
@@ -62,4 +66,4 @@ desktop.ini
 **/helpers/bin/
 
 # Downloaded third-party OCR SDK (about 810 MB)
-vocekit/Project_RapidOcrOnnx-1.2.2/
+**/Project_RapidOcrOnnx-1.2.2/

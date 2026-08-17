@@ -1,0 +1,14 @@
+{
+    "entries": [
+        {
+            "id": "vocab_1",
+            "source": "deepseep",
+            "target": "DeepSeek",
+            "aliases": "deep seek, Deepseek",
+            "scopeId": "__global",
+            "matchMode": "caseInsensitive",
+            "note": "示例：把常见错写统一成正式名称。",
+            "enabled": true
+        }
+    ]
+}

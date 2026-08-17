@@ -1,0 +1,27 @@
+{
+    "version": 1,
+    "entries": [
+        {
+            "id": "term-1",
+            "source": "deepseep",
+            "target": "DeepSeek",
+            "aliases": [
+                "deep seek"
+            ],
+            "scopeId": "__global",
+            "matchMode": "caseInsensitive",
+            "note": "项目名称",
+            "enabled": true
+        },
+        {
+            "id": "term-2",
+            "source": "语音帮手",
+            "target": "vocekit",
+            "aliases": [],
+            "scopeId": "dictate",
+            "matchMode": "exact",
+            "note": "听写功能专用",
+            "enabled": true
+        }
+    ]
+}

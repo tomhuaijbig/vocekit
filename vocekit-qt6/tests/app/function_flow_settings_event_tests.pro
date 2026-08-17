@@ -1,0 +1,24 @@
+QT += core testlib
+
+CONFIG += c++17 console testcase
+CONFIG -= app_bundle
+
+TEMPLATE = app
+TARGET = function_flow_settings_event_tests
+
+INCLUDEPATH += ../..
+
+SOURCES += \
+    function_flow_settings_event_tests.cpp \
+    ../../src/app/application_events.cpp \
+    ../../src/ui/hub_application_event_coordinator.cpp \
+    ../../src/ui/hub_content_refresh_coordinator.cpp \
+    ../../src/ui/hub_refresh_coordinator_bundle.cpp \
+    ../../src/ui/hub_settings_refresh_coordinator.cpp
+
+HEADERS += \
+    ../../src/app/application_events.h \
+    ../../src/ui/hub_application_event_coordinator.h \
+    ../../src/ui/hub_content_refresh_coordinator.h \
+    ../../src/ui/hub_refresh_coordinator_bundle.h \
+    ../../src/ui/hub_settings_refresh_coordinator.h

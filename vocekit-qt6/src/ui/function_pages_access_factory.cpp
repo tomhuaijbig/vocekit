@@ -9,6 +9,8 @@ FunctionPagesAccessAssembly createFunctionPagesAccess(
     commandDependencies.prompts = dependencies.prompts;
     commandDependencies.flows = dependencies.flows;
     commandDependencies.saveSettings = dependencies.saveSettings;
+    commandDependencies.functionRenamed = dependencies.functionRenamed;
+    commandDependencies.functionRemoved = dependencies.functionRemoved;
     commandDependencies.operationFailed =
         dependencies.operationFailed;
 

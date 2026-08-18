@@ -19,6 +19,7 @@ void FunctionCommandPageAccessFactoryTests::buildsTypedPageAccess()
 {
     HubSettingsState settings;
     bool saved = false;
+    QStringList functionActions;
 
     PromptSettingsAccess prompts;
     prompts.snapshotProvider = []() {
@@ -40,6 +41,12 @@ void FunctionCommandPageAccessFactoryTests::buildsTypedPageAccess()
     dependencies.saveSettings = [&saved]() {
         saved = true;
     };
+    dependencies.functionRenamed = [&functionActions](const QString &id) {
+        functionActions.append(QStringLiteral("renamed:") + id);
+    };
+    dependencies.functionRemoved = [&functionActions](const QString &id) {
+        functionActions.append(QStringLiteral("removed:") + id);
+    };
 
     const FunctionCommandPageAccess access =
         createFunctionCommandPageAccess(dependencies);
@@ -49,8 +56,18 @@ void FunctionCommandPageAccessFactoryTests::buildsTypedPageAccess()
     QVERIFY(access.prompts.snapshotProvider().settings.promptLocked);
     QVERIFY(access.flows.readState);
     QVERIFY(access.saveSettings);
+    QVERIFY(access.functionRenamed);
+    QVERIFY(access.functionRemoved);
     access.saveSettings();
+    access.functionRenamed(QStringLiteral("custom_1"));
+    access.functionRemoved(QStringLiteral("custom_2"));
     QVERIFY(saved);
+    QCOMPARE(
+        functionActions,
+        QStringList()
+            << QStringLiteral("renamed:custom_1")
+            << QStringLiteral("removed:custom_2")
+    );
 }
 
 void FunctionCommandPageAccessFactoryTests::handlesMissingDependencies()

@@ -16,6 +16,8 @@ public:
             access.prompts = this->access.prompts;
             access.flows = this->access.flows;
             access.saveSettings = this->access.saveSettings;
+            access.functionRenamed = this->access.functionRenamed;
+            access.functionRemoved = this->access.functionRemoved;
             access.operationFailed =
                 this->access.operationFailed;
             workspace.reset(

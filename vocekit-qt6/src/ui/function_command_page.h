@@ -31,6 +31,8 @@ struct FunctionCommandPageAccess
     PromptSettingsAccess prompts;
     FunctionFlowSettingsAccess flows;
     std::function<void()> saveSettings;
+    std::function<void(const QString &)> functionRenamed;
+    std::function<void(const QString &)> functionRemoved;
     std::function<void(const OperationError &)> operationFailed;
 };
 

@@ -189,6 +189,13 @@ FunctionPagesAccessAssembly FunctionWorkspaceController::buildPagesAccess()
     dependencies.prompts = m_access.prompts;
     dependencies.flows = m_access.flows;
     dependencies.saveSettings = m_access.saveSettings;
+    dependencies.functionRenamed = m_access.functionRenamed;
+    dependencies.functionRemoved = [this](const QString &id) {
+        pagesController()->clearCurrentFunction();
+        if (m_access.functionRemoved) {
+            m_access.functionRemoved(id);
+        }
+    };
     dependencies.summaryProvider = [this](
         const QString &id,
         const QString &shortcut

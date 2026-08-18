@@ -423,6 +423,17 @@ int runVocekitApplication(int argc, char *argv[])
             error
         );
     };
+    functionFlows.renameCustomFunction = [&publicationService](
+        const QString &functionId,
+        const QString &name,
+        OperationError *error
+    ) {
+        return publicationService.renameCustomFunction(
+            functionId,
+            name,
+            error
+        );
+    };
     functionFlows.removeCustomFunction = [&publicationService](
         const QString &functionId,
         OperationError *error

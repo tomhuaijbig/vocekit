@@ -79,6 +79,12 @@ public:
         OperationError *error
     );
 
+    bool renameCustomFunction(
+        const QString &functionId,
+        const QString &name,
+        OperationError *error
+    );
+
     bool removeCustomFunction(
         const QString &functionId,
         OperationError *error

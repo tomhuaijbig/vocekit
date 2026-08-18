@@ -11,6 +11,8 @@ struct FunctionPagesAccessDependencies
     PromptSettingsAccess prompts;
     FunctionFlowSettingsAccess flows;
     std::function<void()> saveSettings;
+    std::function<void(const QString &)> functionRenamed;
+    std::function<void(const QString &)> functionRemoved;
     std::function<QString(const QString &, const QString &)> summaryProvider;
     std::function<void()> addFunction;
     std::function<void(

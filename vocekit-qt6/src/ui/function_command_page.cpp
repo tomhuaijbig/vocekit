@@ -774,6 +774,109 @@ void FunctionCommandPage::refresh()
     modeLayout->addWidget(modeLabel);
     modeLayout->addWidget(classicMode);
     modeLayout->addWidget(canvasMode);
+    if (custom) {
+        auto *rename = new QPushButton(text8("重命名"), header);
+        rename->setObjectName(QStringLiteral("functionRenameButton"));
+        rename->setMinimumSize(88, 38);
+        rename->setCursor(Qt::PointingHandCursor);
+        rename->setStyleSheet(
+            buttonStyle(QStringLiteral("#ffffff"), QStringLiteral("#111827"))
+        );
+        connect(rename, &QPushButton::clicked, header, [this, id, title]() {
+            if (!flushPendingFlowDraft()) {
+                return;
+            }
+            bool accepted = false;
+            const QString renamed = QInputDialog::getText(
+                this,
+                text8("重命名自定义功能"),
+                text8("功能名称"),
+                QLineEdit::Normal,
+                title,
+                &accepted
+            ).trimmed();
+            if (!accepted) {
+                return;
+            }
+            if (renamed.isEmpty()) {
+                showAttentionWarning(
+                    this,
+                    text8("名称不能为空"),
+                    text8("请输入自定义功能名称。")
+                );
+                return;
+            }
+            OperationError error;
+            if (!m_access.flows.renameCustomFunction
+                || !m_access.flows.renameCustomFunction(
+                    id,
+                    renamed,
+                    &error
+                )) {
+                if (error.isEmpty()) {
+                    error.code = QStringLiteral(
+                        "flow_function_rename_failed"
+                    );
+                    error.message = text8("自定义功能重命名失败。");
+                }
+                reportFlowFailure(error);
+                return;
+            }
+            if (m_access.settings) {
+                m_access.settings->load();
+            }
+            if (m_access.functionRenamed) {
+                m_access.functionRenamed(id);
+            }
+            refresh();
+        });
+
+        auto *remove = new QPushButton(text8("删除"), header);
+        remove->setObjectName(QStringLiteral("functionDeleteButton"));
+        remove->setMinimumSize(88, 38);
+        remove->setCursor(Qt::PointingHandCursor);
+        remove->setStyleSheet(
+            buttonStyle(QStringLiteral("#ffffff"), QStringLiteral("#b42318"))
+        );
+        connect(remove, &QPushButton::clicked, header, [this, id, title]() {
+            if (!flushPendingFlowDraft()) {
+                return;
+            }
+            const QString message = text8("确定删除“") + title
+                + text8("”？\n\n该功能的快捷键和流程配置也会删除，")
+                + text8("已有历史记录不会删除。");
+            if (QMessageBox::question(
+                    this,
+                    text8("删除自定义功能"),
+                    message,
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No
+                ) != QMessageBox::Yes) {
+                return;
+            }
+            OperationError error;
+            if (!m_access.flows.removeCustomFunction
+                || !m_access.flows.removeCustomFunction(id, &error)) {
+                if (error.isEmpty()) {
+                    error.code = QStringLiteral(
+                        "flow_function_remove_failed"
+                    );
+                    error.message = text8("自定义功能删除失败。");
+                }
+                reportFlowFailure(error);
+                return;
+            }
+            if (m_access.settings) {
+                m_access.settings->load();
+            }
+            setFunctionId(QString());
+            if (m_access.functionRemoved) {
+                m_access.functionRemoved(id);
+            }
+        });
+        actionLayout->addWidget(rename);
+        actionLayout->addWidget(remove);
+    }
     actionLayout->addStretch();
     actionLayout->addWidget(modeSelector);
 
@@ -807,8 +910,10 @@ void FunctionCommandPage::refresh()
     headerLayout->addLayout(actionLayout);
     const int titleRowHeight =
         qMax(name->maximumHeight(), shortcutBadge->maximumHeight());
-    const int actionRowHeight =
-        qMax(modeSelector->sizeHint().height(), canvas->minimumHeight());
+    const int actionRowHeight = qMax(
+        actionLayout->sizeHint().height(),
+        canvas->minimumHeight()
+    );
     header->setSizePolicy(
         QSizePolicy::Preferred,
         QSizePolicy::Fixed
@@ -1380,48 +1485,46 @@ void FunctionCommandPage::refresh()
 
     const QString currentOutput = m_access.settings->outputModeFor(id);
 
-    if (custom) {
-        auto *styleCard = new QFrame;
-        styleCard->setObjectName(
-            QStringLiteral("functionFloatingBarStyleCard")
-        );
-        styleCard->setStyleSheet(commandCenterSectionStyle());
-        auto *styleLayout = new QVBoxLayout(styleCard);
-        styleLayout->setContentsMargins(18, 14, 18, 16);
-        styleLayout->setSpacing(10);
-        auto *styleTitle = new QLabel(text8("漂浮窗样式"));
-        styleTitle->setFont(appFont(11, QFont::DemiBold));
-        auto *styleHint = new QLabel(
-            text8("仅覆盖当前自定义功能；跟随全局时使用语音录音设置中的样式。")
-        );
-        styleHint->setWordWrap(true);
-        styleHint->setObjectName(QStringLiteral("commandMuted"));
-        FloatingBarStyleSelector::Options options;
-        options.allowInherit = true;
-        auto *styleSelector = new FloatingBarStyleSelector(
-            options,
-            styleCard
-        );
-        styleSelector->setObjectName(
-            QStringLiteral("functionFloatingBarStyleSelector")
-        );
-        styleSelector->setCurrentStyle(
-            m_access.settings->floatingBarStyleOverrideFor(id)
-        );
-        styleSelector->setStyleChangedCallback(
-            [this, id](const QString &style) {
-                m_access.settings->setFloatingBarStyleOverrideFor(
-                    id,
-                    style
-                );
-                saveSettings();
-            }
-        );
-        styleLayout->addWidget(styleTitle);
-        styleLayout->addWidget(styleHint);
-        styleLayout->addWidget(styleSelector);
-        m_contentLayout->addWidget(styleCard);
-    }
+    auto *styleCard = new QFrame;
+    styleCard->setObjectName(
+        QStringLiteral("functionFloatingBarStyleCard")
+    );
+    styleCard->setStyleSheet(commandCenterSectionStyle());
+    auto *styleLayout = new QVBoxLayout(styleCard);
+    styleLayout->setContentsMargins(18, 14, 18, 16);
+    styleLayout->setSpacing(10);
+    auto *styleTitle = new QLabel(text8("漂浮窗样式"));
+    styleTitle->setFont(appFont(11, QFont::DemiBold));
+    auto *styleHint = new QLabel(
+        text8("仅覆盖当前功能；跟随全局时使用语音录音设置中的样式。")
+    );
+    styleHint->setWordWrap(true);
+    styleHint->setObjectName(QStringLiteral("commandMuted"));
+    FloatingBarStyleSelector::Options options;
+    options.allowInherit = true;
+    auto *styleSelector = new FloatingBarStyleSelector(
+        options,
+        styleCard
+    );
+    styleSelector->setObjectName(
+        QStringLiteral("functionFloatingBarStyleSelector")
+    );
+    styleSelector->setCurrentStyle(
+        m_access.settings->floatingBarStyleOverrideFor(id)
+    );
+    styleSelector->setStyleChangedCallback(
+        [this, id](const QString &style) {
+            m_access.settings->setFloatingBarStyleOverrideFor(
+                id,
+                style
+            );
+            saveSettings();
+        }
+    );
+    styleLayout->addWidget(styleTitle);
+    styleLayout->addWidget(styleHint);
+    styleLayout->addWidget(styleSelector);
+    m_contentLayout->addWidget(styleCard);
 
     QHash<QString, QWidget *> outputCards;
     outputCards.insert(

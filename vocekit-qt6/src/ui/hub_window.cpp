@@ -631,6 +631,17 @@ private:
             workspaceAccess.flows = m_functionFlows;
             workspaceAccess.pageParent = this;
             workspaceAccess.saveSettings = [this]() { saveHubSettings(); };
+            workspaceAccess.functionRenamed = [this](const QString &) {
+                navigationController()->refreshFunctions();
+                refreshModeGrid();
+                refreshCustomFunctionsPage();
+            };
+            workspaceAccess.functionRemoved = [this](const QString &) {
+                navigationController()->refreshFunctions();
+                refreshModeGrid();
+                refreshCustomFunctionsPage();
+                navigationController()->selectPage(QStringLiteral("home"));
+            };
             workspaceAccess.operationFailed = [this](
                 const OperationError &error
             ) {

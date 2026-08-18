@@ -246,6 +246,7 @@ private slots:
     void sameCanvasModeClearsRetainedUnknownExecutionMode();
     void emitsModeEventsOnlyAfterSuccessfulSave();
     void rejectsPublicationRevisionOverflow();
+    void renamesOnlyCustomFunctionsAndPreservesState();
     void createsAndRemovesOnlyCustomFunctions();
     void emitsEventsOnlyAfterSuccessfulSave();
 };
@@ -950,6 +951,81 @@ rejectsPublicationRevisionOverflow()
     );
     QCOMPARE(function.flow.published.revision, INT_MAX);
     QCOMPARE(function.flow.published.graphHash, publishedHash);
+    QCOMPARE(harness.saveCalls, 0);
+    QVERIFY(harness.events.isEmpty());
+}
+
+void FunctionFlowPublicationServiceTests::
+renamesOnlyCustomFunctionsAndPreservesState()
+{
+    ServiceHarness harness;
+    FunctionSettings &custom =
+        harness.function(QStringLiteral("custom_1"));
+    custom.executionMode = FunctionExecutionMode::Canvas;
+    custom.sampling.temperatureEnabled = true;
+    custom.sampling.temperature = 0.7;
+    const FunctionFlowState flowBefore = custom.flow;
+    OperationError error;
+
+    QVERIFY(harness.service.renameCustomFunction(
+        QStringLiteral("custom_1"),
+        QStringLiteral("  会议纪要  "),
+        &error
+    ));
+    const FunctionSettings renamed =
+        harness.function(QStringLiteral("custom_1"));
+    QCOMPARE(renamed.name, QString::fromUtf8("会议纪要"));
+    QCOMPARE(renamed.executionMode, FunctionExecutionMode::Canvas);
+    QVERIFY(renamed.sampling.temperatureEnabled);
+    QCOMPARE(renamed.sampling.temperature, 0.7);
+    QCOMPARE(renamed.flow.draft.revision, flowBefore.draft.revision);
+    QCOMPARE(renamed.flow.published.revision, flowBefore.published.revision);
+    QCOMPARE(harness.saveCalls, 1);
+    QCOMPARE(harness.events.size(), 1);
+    QCOMPARE(harness.events.constFirst().key,
+             functionDefinitionsSettingsKey());
+
+    harness.clearActivity();
+    QVERIFY(harness.service.renameCustomFunction(
+        QStringLiteral("custom_1"),
+        QString::fromUtf8("会议纪要"),
+        &error
+    ));
+    QCOMPARE(harness.saveCalls, 0);
+    QVERIFY(harness.events.isEmpty());
+
+    QVERIFY(!harness.service.renameCustomFunction(
+        QStringLiteral("custom_1"),
+        QStringLiteral("   "),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("flow_function_name_empty"));
+
+    harness.clearActivity();
+    harness.saveSucceeds = false;
+    QVERIFY(!harness.service.renameCustomFunction(
+        QStringLiteral("custom_1"),
+        QString::fromUtf8("保存失败后的名称"),
+        &error
+    ));
+    QCOMPARE(error.code, QStringLiteral("test_save_failed"));
+    QCOMPARE(
+        harness.function(QStringLiteral("custom_1")).name,
+        QString::fromUtf8("会议纪要")
+    );
+    QCOMPARE(harness.saveCalls, 1);
+    QVERIFY(harness.events.isEmpty());
+
+    harness.saveSucceeds = true;
+    harness.clearActivity();
+    harness.function(QStringLiteral("custom_1")).builtIn = true;
+    QVERIFY(!harness.service.renameCustomFunction(
+        QStringLiteral("custom_1"),
+        QStringLiteral("Built in"),
+        &error
+    ));
+    QCOMPARE(error.code,
+             QStringLiteral("flow_builtin_function_immutable"));
     QCOMPARE(harness.saveCalls, 0);
     QVERIFY(harness.events.isEmpty());
 }

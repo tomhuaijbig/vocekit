@@ -32,6 +32,12 @@ void FunctionPagesAccessFactoryTests::buildsCommandPageAccessFromSharedActions()
     dependencies.saveSettings = [&actions]() {
         actions.append(QStringLiteral("save"));
     };
+    dependencies.functionRenamed = [&actions](const QString &id) {
+        actions.append(QStringLiteral("renamed:") + id);
+    };
+    dependencies.functionRemoved = [&actions](const QString &id) {
+        actions.append(QStringLiteral("removed:") + id);
+    };
     dependencies.flows.readState = [](
         const QString &,
         FunctionFlowState *,
@@ -48,7 +54,17 @@ void FunctionPagesAccessFactoryTests::buildsCommandPageAccessFromSharedActions()
     QVERIFY(assembly.command.prompts.snapshotProvider().settings.promptLocked);
     QVERIFY(assembly.command.flows.readState);
     assembly.command.saveSettings();
-    QCOMPARE(actions, QStringList() << QStringLiteral("save"));
+    QVERIFY(assembly.command.functionRenamed);
+    QVERIFY(assembly.command.functionRemoved);
+    assembly.command.functionRenamed(QStringLiteral("custom_1"));
+    assembly.command.functionRemoved(QStringLiteral("custom_2"));
+    QCOMPARE(
+        actions,
+        QStringList()
+            << QStringLiteral("save")
+            << QStringLiteral("renamed:custom_1")
+            << QStringLiteral("removed:custom_2")
+    );
 }
 
 void FunctionPagesAccessFactoryTests::buildsManagementPageAccessFromSharedActions()

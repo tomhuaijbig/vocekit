@@ -54,6 +54,12 @@ void HubFunctionWorkspaceControllerTests::hubWindowDelegatesWorkspaceOwnership()
     QVERIFY(controllerContents.contains(
         "access.flows = this->access.flows"
     ));
+    QVERIFY(controllerContents.contains(
+        "access.functionRenamed = this->access.functionRenamed"
+    ));
+    QVERIFY(controllerContents.contains(
+        "access.functionRemoved = this->access.functionRemoved"
+    ));
     QVERIFY(controllerContents.contains("!m_impl->workspace"));
     QVERIFY(controllerContents.contains("flushAllPendingFlowDrafts"));
     QVERIFY(controllerContents.contains("discardAllPendingFlowDrafts"));

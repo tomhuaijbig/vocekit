@@ -782,6 +782,59 @@ bool FunctionFlowPublicationService::setExecutionMode(
     return true;
 }
 
+bool FunctionFlowPublicationService::renameCustomFunction(
+    const QString &functionId,
+    const QString &name,
+    OperationError *error)
+{
+    clearError(error);
+    const QString normalizedName = name.trimmed();
+    if (normalizedName.isEmpty()) {
+        setError(
+            error,
+            QStringLiteral("flow_function_name_empty"),
+            QStringLiteral("自定义功能名称不能为空。")
+        );
+        return false;
+    }
+
+    AppSettingsData settings =
+        m_access.settingsSnapshotProvider
+            ? m_access.settingsSnapshotProvider()
+            : AppSettingsData();
+    const int index = settings.functionIndex(functionId);
+    if (index < 0) {
+        setError(
+            error,
+            QStringLiteral("flow_function_not_found"),
+            QStringLiteral("功能不存在。")
+        );
+        return false;
+    }
+    if (settings.functions.at(index).builtIn) {
+        setError(
+            error,
+            QStringLiteral("flow_builtin_function_immutable"),
+            QStringLiteral("不能重命名内置功能。")
+        );
+        return false;
+    }
+    if (settings.functions.at(index).name == normalizedName) {
+        return true;
+    }
+
+    settings.functions[index].name = normalizedName;
+    if (!saveSnapshot(m_access, settings, error)) {
+        return false;
+    }
+    publishChange(
+        m_access,
+        functionDefinitionsSettingsKey(),
+        functionId
+    );
+    return true;
+}
+
 bool FunctionFlowPublicationService::removeCustomFunction(
     const QString &functionId,
     OperationError *error)

@@ -46,6 +46,11 @@ struct FunctionFlowSettingsAccess
     )> setExecutionMode;
     std::function<bool(
         const QString &,
+        const QString &,
+        OperationError *
+    )> renameCustomFunction;
+    std::function<bool(
+        const QString &,
         OperationError *
     )> removeCustomFunction;
 };

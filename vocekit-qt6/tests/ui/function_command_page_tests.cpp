@@ -18,9 +18,12 @@
 #include <QFontMetrics>
 #include <QRawFont>
 #include <QLabel>
+#include <QInputDialog>
+#include <QMessageBox>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QWheelEvent>
 #include <QtTest>
 
@@ -52,6 +55,8 @@ struct FakePageFlows
     int draftSaves = 0;
     int editorSaves = 0;
     int modeChanges = 0;
+    int renames = 0;
+    int removals = 0;
     bool failDraftSave = false;
     bool failEditorSave = false;
     bool failModeChange = false;
@@ -160,6 +165,40 @@ struct FakePageFlows
             }
             return true;
         };
+        result.renameCustomFunction = [this](
+            const QString &id,
+            const QString &name,
+            OperationError *error
+        ) {
+            Q_UNUSED(error);
+            ++renames;
+            if (!settingsData) {
+                return false;
+            }
+            const int index = settingsData->functionIndex(id);
+            if (index < 0 || settingsData->functions.at(index).builtIn) {
+                return false;
+            }
+            settingsData->functions[index].name = name.trimmed();
+            return true;
+        };
+        result.removeCustomFunction = [this](
+            const QString &id,
+            OperationError *error
+        ) {
+            Q_UNUSED(error);
+            ++removals;
+            if (!settingsData) {
+                return false;
+            }
+            const int index = settingsData->functionIndex(id);
+            if (index < 0 || settingsData->functions.at(index).builtIn) {
+                return false;
+            }
+            settingsData->functions.remove(index);
+            settingsData->functionOrder.removeAll(id);
+            return true;
+        };
         return result;
     }
 };
@@ -173,6 +212,8 @@ struct PageEnvironment
     FunctionCommandPageAccess pageAccess;
     int reportedErrors = 0;
     int saves = 0;
+    QStringList renamedFunctions;
+    QStringList removedFunctions;
 
     PageEnvironment()
     {
@@ -201,6 +242,12 @@ struct PageEnvironment
             ++reportedErrors;
         };
         pageAccess.saveSettings = [this]() { ++saves; };
+        pageAccess.functionRenamed = [this](const QString &id) {
+            renamedFunctions.append(id);
+        };
+        pageAccess.functionRemoved = [this](const QString &id) {
+            removedFunctions.append(id);
+        };
     }
 };
 
@@ -321,7 +368,9 @@ private slots:
     void failedFunctionSwitchKeepsPageAndEditorIdsAligned();
     void canvasOnlyRefreshDoesNotRebuildTheSettingsForm();
     void customFunctionPersistsFloatingBarStyleOverride();
-    void builtInFunctionHasNoFloatingBarStyleOverride();
+    void builtInFunctionPersistsFloatingBarStyleOverride();
+    void customFunctionCanBeRenamedAndDeleted();
+    void functionStyleAndCustomActionsDoNotClipAt100_125_150Percent();
     void speechSelectorsContainCatalogProvidersExactlyOnce();
     void classicAiSectionEditsFunctionSamplingOverrides();
     void classicAiSamplingControlsDoNotClipAt100_125_150Percent();
@@ -564,7 +613,7 @@ customFunctionPersistsFloatingBarStyleOverride()
 }
 
 void FunctionCommandPageTests::
-builtInFunctionHasNoFloatingBarStyleOverride()
+builtInFunctionPersistsFloatingBarStyleOverride()
 {
     PageEnvironment environment;
     FunctionSettings builtIn = pageFunction(
@@ -577,9 +626,217 @@ builtInFunctionHasNoFloatingBarStyleOverride()
     FunctionCommandPage page(environment.pageAccess);
     QVERIFY(page.setFunctionId(QStringLiteral("dictate")));
     showPage(&page);
-    QVERIFY(!page.findChild<FloatingBarStyleSelector *>(
+    auto *selector = page.findChild<FloatingBarStyleSelector *>(
         QStringLiteral("functionFloatingBarStyleSelector")
-    ));
+    );
+    QVERIFY(selector);
+    QAbstractButton *card = selector->findChild<QAbstractButton *>(
+        QStringLiteral("floatingBarStyleCard_liveTranscriptCard")
+    );
+    QVERIFY(card);
+    card->click();
+    QCOMPARE(
+        environment.settings->floatingBarStyleOverrideFor(
+            QStringLiteral("dictate")
+        ),
+        QStringLiteral("liveTranscriptCard")
+    );
+    QCOMPARE(environment.saves, 1);
+}
+
+void FunctionCommandPageTests::customFunctionCanBeRenamedAndDeleted()
+{
+    PageEnvironment environment;
+    FunctionCommandPage page(environment.pageAccess);
+    QVERIFY(page.setFunctionId(QStringLiteral("custom_1")));
+    showPage(&page);
+
+    QPushButton *rename = page.findChild<QPushButton *>(
+        QStringLiteral("functionRenameButton")
+    );
+    QPushButton *remove = page.findChild<QPushButton *>(
+        QStringLiteral("functionDeleteButton")
+    );
+    QVERIFY(rename);
+    QVERIFY(remove);
+
+    QTimer::singleShot(0, []() {
+        auto *dialog = qobject_cast<QInputDialog *>(
+            QApplication::activeModalWidget()
+        );
+        QVERIFY(dialog);
+        dialog->setTextValue(QString::fromUtf8("会议纪要"));
+        dialog->accept();
+    });
+    rename->click();
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+    QCOMPARE(environment.flows.renames, 1);
+    QCOMPARE(environment.renamedFunctions,
+             QStringList() << QStringLiteral("custom_1"));
+    QCOMPARE(
+        environment.settings->customFunctions().constFirst().name,
+        QString::fromUtf8("会议纪要")
+    );
+    QLabel *title = page.findChild<QLabel *>(
+        QStringLiteral("functionCommandTitleLabel")
+    );
+    QVERIFY(title);
+    QCOMPARE(title->text(), QString::fromUtf8("会议纪要"));
+
+    remove = page.findChild<QPushButton *>(
+        QStringLiteral("functionDeleteButton")
+    );
+    QVERIFY(remove);
+    QTimer::singleShot(0, []() {
+        auto *message = qobject_cast<QMessageBox *>(
+            QApplication::activeModalWidget()
+        );
+        QVERIFY(message);
+        QAbstractButton *yes = message->button(QMessageBox::Yes);
+        QVERIFY(yes);
+        yes->click();
+    });
+    remove->click();
+    QCoreApplication::processEvents();
+    QCOMPARE(environment.flows.removals, 1);
+    QCOMPARE(environment.removedFunctions,
+             QStringList() << QStringLiteral("custom_1"));
+    QVERIFY(environment.settings->customFunctions().size() == 1);
+    QVERIFY(page.functionId().isEmpty());
+}
+
+void FunctionCommandPageTests::
+functionStyleAndCustomActionsDoNotClipAt100_125_150Percent()
+{
+    const QFont originalFont = QApplication::font();
+    const QVector<int> scales = QVector<int>() << 100 << 125 << 150;
+    const QVector<QSize> windowSizes = QVector<QSize>()
+        << QSize(760, 640)
+        << QSize(1280, 900);
+    const QString visualOutputDir = QString::fromLocal8Bit(
+        qgetenv("VOCEKIT_VISUAL_OUTPUT_DIR")
+    ).trimmed();
+
+    for (int scale : scales) {
+        QFont font(QStringLiteral("Microsoft YaHei UI"));
+        font.setPixelSize(qMax(12, (14 * scale) / 100));
+        QApplication::setFont(font);
+
+        for (const QSize &windowSize : windowSizes) {
+            PageEnvironment environment;
+            const int index = environment.data.functionIndex(
+                QStringLiteral("custom_1")
+            );
+            QVERIFY(index >= 0);
+            environment.data.functions[index].name = QString::fromUtf8(
+                "会议纪要与技术方案复盘自定义功能"
+            );
+            environment.settings->load();
+
+            FunctionCommandPage page(environment.pageAccess);
+            QVERIFY(page.setFunctionId(QStringLiteral("custom_1")));
+            page.resize(windowSize);
+            page.show();
+            QCoreApplication::processEvents();
+
+            QPushButton *rename = page.findChild<QPushButton *>(
+                QStringLiteral("functionRenameButton")
+            );
+            QPushButton *remove = page.findChild<QPushButton *>(
+                QStringLiteral("functionDeleteButton")
+            );
+            QPushButton *canvas = canvasToggle(&page);
+            QWidget *modeSelector = executionModeSelector(&page);
+            QLabel *title = page.findChild<QLabel *>(
+                QStringLiteral("functionCommandTitleLabel")
+            );
+            QVERIFY(rename);
+            QVERIFY(remove);
+            QVERIFY(canvas);
+            QVERIFY(modeSelector);
+            QVERIFY(title);
+
+            const QList<QWidget *> headerControls = QList<QWidget *>()
+                << rename << remove << canvas << modeSelector << title;
+            for (QWidget *control : headerControls) {
+                QVERIFY(control->isVisibleTo(&page));
+                QVERIFY2(
+                    control->height() >= control->sizeHint().height(),
+                    qPrintable(QStringLiteral(
+                        "scale=%1 size=%2x%3 control=%4 height=%5 hint=%6"
+                    ).arg(scale)
+                     .arg(windowSize.width())
+                     .arg(windowSize.height())
+                     .arg(control->objectName())
+                     .arg(control->height())
+                     .arg(control->sizeHint().height()))
+                );
+                const QRect bounds(
+                    control->mapTo(&page, QPoint(0, 0)),
+                    control->size()
+                );
+                QVERIFY2(
+                    page.rect().contains(bounds),
+                    qPrintable(QStringLiteral(
+                        "scale=%1 size=%2x%3 control=%4 bounds=%5,%6 %7x%8"
+                    ).arg(scale)
+                     .arg(windowSize.width())
+                     .arg(windowSize.height())
+                     .arg(control->objectName())
+                     .arg(bounds.x()).arg(bounds.y())
+                     .arg(bounds.width()).arg(bounds.height()))
+                );
+            }
+
+            if (!visualOutputDir.isEmpty()) {
+                QVERIFY(QDir().mkpath(visualOutputDir));
+                const QString imagePath = QDir(visualOutputDir).filePath(
+                    QStringLiteral("function-actions-%1-%2x%3.png")
+                        .arg(scale)
+                        .arg(windowSize.width())
+                        .arg(windowSize.height())
+                );
+                QVERIFY(page.grab().save(imagePath));
+            }
+
+            QScrollArea *scroll = page.findChild<QScrollArea *>();
+            auto *styleSelector =
+                page.findChild<FloatingBarStyleSelector *>(
+                    QStringLiteral("functionFloatingBarStyleSelector")
+                );
+            QVERIFY(scroll);
+            QVERIFY(styleSelector);
+            scroll->ensureWidgetVisible(styleSelector, 0, 24);
+            QCoreApplication::processEvents();
+            QVERIFY(styleSelector->isVisibleTo(&page));
+            const QList<QAbstractButton *> styleCards =
+                styleSelector->findChildren<QAbstractButton *>();
+            QCOMPARE(styleCards.size(), 3);
+            for (QAbstractButton *card : styleCards) {
+                QVERIFY(card->isVisibleTo(&page));
+                QVERIFY(card->height() >= card->minimumHeight());
+                QVERIFY(card->width() >= 120);
+                const QRect cardBounds(
+                    card->mapTo(&page, QPoint(0, 0)),
+                    card->size()
+                );
+                QVERIFY(page.rect().contains(cardBounds));
+            }
+
+            if (!visualOutputDir.isEmpty()) {
+                const QString imagePath = QDir(visualOutputDir).filePath(
+                    QStringLiteral("function-style-%1-%2x%3.png")
+                        .arg(scale)
+                        .arg(windowSize.width())
+                        .arg(windowSize.height())
+                );
+                QVERIFY(page.grab().save(imagePath));
+            }
+        }
+    }
+    QApplication::setFont(originalFont);
 }
 
 void FunctionCommandPageTests::

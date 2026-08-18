@@ -126,10 +126,22 @@ protected:
             return;
         }
         painter.setPen(QColor("#ffffff"));
+        const QString fullDetail = QString::fromUtf8(
+            "已确认文字  临时文字"
+        );
+        const QString compactDetail = QString::fromUtf8(
+            "已确认  临时"
+        );
+        const QRectF transcriptRect = preview.adjusted(10, 4, -10, -4);
+        const QString detail = painter.fontMetrics().horizontalAdvance(
+            fullDetail
+        ) <= transcriptRect.width()
+            ? fullDetail
+            : compactDetail;
         painter.drawText(
-            preview.adjusted(10, 4, -10, -4),
-            Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-            QString::fromUtf8("正在转录\n已确认文字  临时文字")
+            transcriptRect,
+            Qt::AlignLeft | Qt::AlignTop,
+            QString::fromUtf8("正在转录\n") + detail
         );
     }
 

@@ -63,6 +63,10 @@ Release：
 .qt6-build/release/vocekit.exe
 ```
 
+上述文件是供开发和链接检查使用的裸构建产物，不包含 Qt DLL 与插件。不要把其中的
+`vocekit.exe` 单独复制或直接当作便携程序分发；普通运行请使用下文生成的
+`.qt6-deploy/vocekit.exe`，对外发送请使用 `dist/` 中的完整目录或 ZIP。
+
 脚本已有当前机器的默认路径。换电脑时可以传入自己的 Qt 6 和 MinGW 目录：
 
 ```powershell
@@ -98,7 +102,8 @@ Release：
 & .\scripts\deploy.ps1
 ```
 
-部署结果位于 `.qt6-deploy/`。脚本会调用 `windeployqt`，并加入：
+部署结果位于 `.qt6-deploy/`，可双击其中的 `vocekit.exe`。脚本会调用
+`windeployqt`，并加入：
 
 - Qt 6 与 MinGW 运行库及插件。
 - Qt 中文翻译。

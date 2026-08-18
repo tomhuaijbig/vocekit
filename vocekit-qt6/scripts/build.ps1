@@ -54,6 +54,9 @@ try {
     }
 
     Write-Host "VoceKit Qt $qtVersion $Configuration build succeeded: $executable"
+    if ($Configuration -eq "release") {
+        Write-Host "This is a non-portable build output. Run scripts\deploy.ps1 before launching it outside the Qt development environment."
+    }
     if ($Run) {
         & $executable
     }

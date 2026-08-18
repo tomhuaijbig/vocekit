@@ -1,5 +1,7 @@
 #include "voice_run_session.h"
 
+#include "../tasks/voice_model_processing_task.h"
+
 QString VoiceRunSessionSnapshot::sourceAudioPath(
     const QString &fallbackAudioPath
 ) const
@@ -78,6 +80,14 @@ void VoiceRunSession::setModelResult(
     m_state.promptVersion = promptVersion;
 }
 
+void VoiceRunSession::setModelResult(
+    const VoiceModelProcessingResult &result)
+{
+    setModelResult(result.durationMs, result.promptVersion);
+    m_state.rawModelResponse = result.rawResponse;
+    m_state.modelTelemetry = result.telemetry;
+}
+
 void VoiceRunSession::setRecordingAudioPath(const QString &path)
 {
     m_state.recordingAudioPath = path;
@@ -124,6 +134,8 @@ void VoiceRunSession::resetModelState()
 {
     m_state.modelElapsedMs = -1;
     m_state.promptVersion.clear();
+    m_state.rawModelResponse.clear();
+    m_state.modelTelemetry = ModelRequestTelemetry();
 }
 
 void VoiceRunSession::resetRecordingState()

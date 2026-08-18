@@ -115,6 +115,13 @@ QString VoiceRunLifecycleController::runModel(
             );
         }
     };
+    handlers.modelDetailsRecorded = [this](
+        const VoiceModelProcessingResult &result
+    ) {
+        if (m_runSession) {
+            m_runSession->setModelResult(result);
+        }
+    };
 
     const QString output = VoiceRunExecutor::run(
         request,

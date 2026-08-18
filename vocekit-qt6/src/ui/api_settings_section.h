@@ -70,6 +70,7 @@ private:
     QString customModelSummaryText() const;
     void refreshCustomModelSummary();
     QWidget *customModelConfigCard();
+    QWidget *advancedApiConfigCard();
     QWidget *customModelEditorRow(
         const CustomModelProfile &profile,
         QLineEdit **nameEdit,

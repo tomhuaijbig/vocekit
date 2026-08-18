@@ -6,7 +6,10 @@
 
 #include <QComboBox>
 #include <QDialog>
+#include <QDir>
 #include <QPushButton>
+#include <QStackedWidget>
+#include <QTextBrowser>
 #include <QTimer>
 
 #include <type_traits>
@@ -38,6 +41,9 @@ private slots:
     void reportsTheResolvedActionOnce();
     void closingBusyPopupRequestsCancellation();
     void retryDialogSelectsTheMigratedCurrentModel();
+    void rendersMarkdownAndKeepsEditableSource();
+    void acceptsRawResponseAndTelemetryDetails();
+    void rendersDenseRichResponseAtLargeFont();
 };
 
 void ResultChoicePopupHeaderTests::exposesWidgetType()
@@ -211,6 +217,110 @@ retryDialogSelectsTheMigratedCurrentModel()
     QCOMPARE(selectedModel, QStringLiteral("openai:gpt-5.6-terra"));
     QVERIFY(selectedModel != QStringLiteral("deepseek-v4-flash"));
     QCOMPARE(oldModelIndex, -1);
+}
+
+void ResultChoicePopupHeaderTests::rendersMarkdownAndKeepsEditableSource()
+{
+    ResultChoicePopup popup(
+        ResultPopupWindowPreferences(),
+        QStringLiteral("test"),
+        QStringLiteral("# 标题\n\n**粗体** [OpenAI](https://openai.com)\n\n```cpp\nint x = 1;\n```"),
+        nullptr,
+        false,
+        0
+    );
+    popup.setAttribute(Qt::WA_DeleteOnClose, false);
+
+    QVERIFY(popup.m_rendered);
+    QVERIFY(popup.m_resultStack);
+    QCOMPARE(popup.m_resultStack->currentWidget(), popup.m_rendered);
+    QVERIFY(popup.m_rendered->toPlainText().contains(QStringLiteral("标题")));
+    QVERIFY(popup.m_rendered->toPlainText().contains(QStringLiteral("int x = 1;")));
+    QVERIFY(!popup.m_rendered->openExternalLinks());
+    QVERIFY(!popup.m_rendered->openLinks());
+    QVERIFY(popup.resultText().contains(QStringLiteral("**粗体**")));
+}
+
+void ResultChoicePopupHeaderTests::acceptsRawResponseAndTelemetryDetails()
+{
+    ResultChoicePopup popup(
+        ResultPopupWindowPreferences(),
+        QStringLiteral("test"),
+        QStringLiteral("answer"),
+        nullptr,
+        false,
+        0
+    );
+    popup.setAttribute(Qt::WA_DeleteOnClose, false);
+    ModelRequestTelemetry telemetry;
+    telemetry.requestedAtUtc = QDateTime::currentDateTimeUtc();
+    telemetry.providerId = QStringLiteral("openai");
+    telemetry.modelId = QStringLiteral("vendor-model");
+    telemetry.actualRequest.insert(QStringLiteral("temperature"), 0.7);
+    telemetry.httpStatusCode = 200;
+    telemetry.usage.inputTokens = 10;
+    telemetry.usage.outputTokens = 5;
+    telemetry.usage.totalTokens = 15;
+    telemetry.finishReason = QStringLiteral("stop");
+    telemetry.totalDurationMs = 321;
+
+    popup.setModelResponseDetails(
+        QByteArrayLiteral("{\"ok\":true}"),
+        telemetry
+    );
+
+    QCOMPARE(popup.m_rawResponse, QByteArrayLiteral("{\"ok\":true}"));
+    QCOMPARE(popup.m_telemetry.httpStatusCode, 200);
+    QCOMPARE(popup.m_conversationTotalTokens, qint64(15));
+    QVERIFY(popup.m_detailsButton->isEnabled());
+}
+
+void ResultChoicePopupHeaderTests::rendersDenseRichResponseAtLargeFont()
+{
+    const QString markdown = QString::fromUtf8(
+        "# 富文本回答\n\n"
+        "这里有 **粗体**、*斜体*、`inline code` 和 [OpenAI](https://openai.com)。\n\n"
+        "> 这是一段引用，用于确认长中文在放大字体下仍然完整。\n\n"
+        "1. 有序项目\n2. 第二项\n\n- 无序项目\n- 另一项\n\n"
+        "| 字段 | 数值 |\n|---|---:|\n| Input Tokens | 120 |\n| Output Tokens | 80 |\n\n"
+        "公式：$E = mc^2$\n\n$$\\int_0^1 x^2 dx = \\frac{1}{3}$$\n\n"
+        "```cpp\nconst int answer = 42; // highlighted\n```"
+    );
+    ResultChoicePopup popup(
+        ResultPopupWindowPreferences(),
+        QString::fromUtf8("模型回答"),
+        markdown,
+        nullptr,
+        false,
+        0
+    );
+    popup.setAttribute(Qt::WA_DeleteOnClose, false);
+    QFont largeFont = popup.font();
+    largeFont.setPointSize(qMax(12, largeFont.pointSize() + 2));
+    popup.setFont(largeFont);
+    popup.resize(820, 680);
+    popup.show();
+    QApplication::processEvents();
+
+    const QString html = popup.m_rendered->document()->toHtml();
+    QVERIFY(html.contains(QStringLiteral("https://openai.com")));
+    QVERIFY(html.contains(QStringLiteral("<table")));
+    QVERIFY(popup.m_rendered->toPlainText().contains(QStringLiteral("E = mc²")));
+    QVERIFY(popup.m_rendered->document()
+        ->property("vocekitMarkdownHighlighter").toBool());
+
+    const QString visualOutputDir = QString::fromLocal8Bit(
+        qgetenv("VOCEKIT_VISUAL_OUTPUT_DIR")
+    ).trimmed();
+    if (!visualOutputDir.isEmpty()) {
+        QVERIFY(QDir().mkpath(visualOutputDir));
+        QVERIFY(popup.grab().save(
+            QDir(visualOutputDir).filePath(
+                QStringLiteral("rich-model-response-large-font.png")
+            )
+        ));
+    }
+    popup.close();
 }
 
 QTEST_MAIN(ResultChoicePopupHeaderTests)

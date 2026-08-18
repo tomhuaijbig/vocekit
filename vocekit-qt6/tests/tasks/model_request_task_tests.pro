@@ -10,6 +10,8 @@ SOURCES += \
     model_request_task_tests.cpp \
     ../../src/api/api_client_utils.cpp \
     ../../src/config/app_settings_defaults.cpp \
+    ../../src/config/app_paths.cpp \
+    ../../src/config/model_advanced_settings.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
     ../../src/file_utils.cpp \
@@ -33,6 +35,7 @@ SOURCES += \
     ../../src/providers/xfyun_speech_provider.cpp \
     ../../src/result_flow_config.cpp \
     ../../src/runtime_log.cpp \
+    ../../src/storage/model_request_log.cpp \
     ../../src/tasks/cancellation_token.cpp \
     ../../src/tasks/diagnostic_helpers.cpp \
     ../../src/tasks/model_provider_request_task.cpp \
@@ -41,6 +44,8 @@ SOURCES += \
 HEADERS += \
     ../../src/api/api_client_utils.h \
     ../../src/config/app_settings_defaults.h \
+    ../../src/config/app_paths.h \
+    ../../src/config/model_advanced_settings.h \
     ../../src/config/secret_config.h \
     ../../src/config/secret_store.h \
     ../../src/domain/app_legacy_types.h \
@@ -54,6 +59,8 @@ HEADERS += \
     ../../src/providers/deepseek_model_provider.h \
     ../../src/providers/model_catalog.h \
     ../../src/providers/model_provider.h \
+    ../../src/providers/model_request_customization.h \
+    ../../src/providers/model_response_metadata.h \
     ../../src/providers/network_error_messages.h \
     ../../src/providers/network_request_executor.h \
     ../../src/providers/openai_compatible_model_provider.h \
@@ -70,6 +77,7 @@ HEADERS += \
     ../../src/providers/xfyun_speech_provider.h \
     ../../src/result_flow_config.h \
     ../../src/runtime_log.h \
+    ../../src/storage/model_request_log.h \
     ../../src/tasks/cancellation_token.h \
     ../../src/tasks/diagnostic_helpers.h \
     ../../src/tasks/model_request_task.h

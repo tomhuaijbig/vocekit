@@ -20,6 +20,7 @@ SOURCES += \
     src/config/app_settings_defaults.cpp \
     src/config/selection_context_action_customization.cpp \
     src/config/app_settings_store.cpp \
+    src/config/model_advanced_settings.cpp \
     src/config/app_paths.cpp \
     src/config/baidu_sample_parser.cpp \
     src/config/function_flow_json.cpp \
@@ -154,6 +155,7 @@ SOURCES += \
     src/storage/history_favorites.cpp \
     src/storage/history_record_service.cpp \
     src/storage/history_store.cpp \
+    src/storage/model_request_log.cpp \
     src/storage/prompt_library_store.cpp \
     src/storage/vocabulary_store.cpp \
     src/tasks/cancellation_token.cpp \
@@ -163,6 +165,7 @@ SOURCES += \
     src/tasks/history_segment_retry_task.cpp \
     src/tasks/interface_self_check_task.cpp \
     src/tasks/microphone_diagnostic_task.cpp \
+    src/tasks/model_api_diagnostics_task.cpp \
     src/tasks/model_request_task.cpp \
     src/tasks/model_provider_request_task.cpp \
     src/tasks/network_diagnostics_task.cpp \
@@ -227,6 +230,7 @@ SOURCES += \
     src/ui/history_page_access_factory.cpp \
     src/ui/history_page_controller.cpp \
     src/ui/api_settings_section.cpp \
+    src/ui/advanced_api_dialog.cpp \
     src/ui/windows_speech_settings_card.cpp \
     src/ui/custom_model_dialog_support.cpp \
     src/ui/history_settings_section.cpp \
@@ -305,6 +309,7 @@ HEADERS += \
     src/config/app_settings_defaults.h \
     src/config/app_settings_json.h \
     src/config/app_settings_store.h \
+    src/config/model_advanced_settings.h \
     src/config/selection_context_action_customization.h \
     src/config/app_paths.h \
     src/config/baidu_sample_parser.h \
@@ -412,6 +417,8 @@ HEADERS += \
     src/providers/network_request_executor.h \
     src/providers/network_error_messages.h \
     src/providers/model_provider.h \
+    src/providers/model_request_customization.h \
+    src/providers/model_response_metadata.h \
     src/providers/openai_compatible_model_provider.h \
     src/providers/provider_configuration.h \
     src/providers/provider_network_transport.h \
@@ -447,6 +454,7 @@ HEADERS += \
     src/storage/history_favorites.h \
     src/storage/history_record_service.h \
     src/storage/history_store.h \
+    src/storage/model_request_log.h \
     src/storage/prompt_library_store.h \
     src/storage/vocabulary_store.h \
     src/tasks/cancellation_token.h \
@@ -456,6 +464,7 @@ HEADERS += \
     src/tasks/history_segment_retry_task.h \
     src/tasks/interface_self_check_task.h \
     src/tasks/microphone_diagnostic_task.h \
+    src/tasks/model_api_diagnostics_task.h \
     src/tasks/model_request_task.h \
     src/tasks/network_diagnostics_task.h \
     src/tasks/processing_guard.h \
@@ -524,6 +533,7 @@ HEADERS += \
     src/ui/history_page_access_factory.h \
     src/ui/history_page_controller.h \
     src/ui/api_settings_section.h \
+    src/ui/advanced_api_dialog.h \
     src/ui/windows_speech_settings_card.h \
     src/ui/custom_model_dialog_support.h \
     src/ui/history_settings_section.h \

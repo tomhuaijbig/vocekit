@@ -13,6 +13,7 @@ SOURCES += \
     ../../src/capture/screenshot_types.cpp \
     ../../src/config/app_paths.cpp \
     ../../src/config/app_settings_defaults.cpp \
+    ../../src/config/model_advanced_settings.cpp \
     ../../src/config/baidu_sample_parser.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
@@ -24,6 +25,8 @@ SOURCES += \
     ../../src/platform/windows_autostart.cpp \
     ../../src/providers/network_error_messages.cpp \
     ../../src/providers/network_request_executor.cpp \
+    ../../src/providers/claude_model_provider.cpp \
+    ../../src/providers/deepseek_model_provider.cpp \
     ../../src/providers/model_catalog.cpp \
     ../../src/providers/openai_compatible_model_provider.cpp \
     ../../src/providers/provider_network_transport.cpp \
@@ -33,8 +36,11 @@ SOURCES += \
     ../../src/runtime_log.cpp \
     ../../src/storage/history_paths.cpp \
     ../../src/storage/history_store.cpp \
+    ../../src/storage/model_request_log.cpp \
     ../../src/tasks/cancellation_token.cpp \
     ../../src/tasks/diagnostic_task_runner.cpp \
+    ../../src/tasks/model_api_diagnostics_task.cpp \
+    ../../src/ui/advanced_api_dialog.cpp \
     ../../src/ui/api_settings_section.cpp \
     ../../src/ui/app_dialogs.cpp \
     ../../src/ui/attention_message.cpp \
@@ -54,6 +60,7 @@ SOURCES += \
     ../../src/ui/windows_speech_settings_card.cpp
 
 HEADERS += \
+    ../../src/config/model_advanced_settings.h \
     ../../src/capture/screenshot_types.h \
     ../../src/config/app_settings_data.h \
     ../../src/config/selection_context_action_customization.h \

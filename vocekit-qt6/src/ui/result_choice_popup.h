@@ -2,6 +2,7 @@
 #define VOCEKIT_RESULT_CHOICE_POPUP_H
 
 #include "../output/clipboard_writer.h"
+#include "../providers/provider_types.h"
 
 #include <QMap>
 #include <QRect>
@@ -16,6 +17,8 @@ class QHBoxLayout;
 class QLabel;
 class QPushButton;
 class QTextEdit;
+class QTextBrowser;
+class QStackedWidget;
 
 struct ResultPopupWindowPreferences
 {
@@ -76,6 +79,10 @@ public:
     void setHasSelection(bool hasSelection);
     void setResultText(const QString &result, bool resetDraftState = true);
     void appendResultText(const QString &text);
+    void setModelResponseDetails(
+        const QByteArray &rawResponse,
+        const ModelRequestTelemetry &telemetry
+    );
     QString resultText() const;
     void setBusy(bool busy, const QString &hint = QString());
     void setAutoCloseMsec(int autoCloseMsec);
@@ -90,6 +97,8 @@ private:
     void chooseModelAndRetry();
     void askFollowUp();
     void showExpandedResult();
+    void showModelDetails();
+    void updateRenderedResult();
     void syncResultFromEditor();
     bool shouldSaveDraft() const;
     void saveDraftIfNeeded();
@@ -109,6 +118,8 @@ private:
     bool m_draftSaved = false;
     QString m_currentModel;
     QTextEdit *m_editor = nullptr;
+    QTextBrowser *m_rendered = nullptr;
+    QStackedWidget *m_resultStack = nullptr;
     QLabel *m_hint = nullptr;
     QPushButton *m_copyButton = nullptr;
     QPushButton *m_writeButton = nullptr;
@@ -119,11 +130,22 @@ private:
     QPushButton *m_expandButton = nullptr;
     QPushButton *m_vocabularyButton = nullptr;
     QPushButton *m_closeButton = nullptr;
+    QPushButton *m_renderedViewButton = nullptr;
+    QPushButton *m_editViewButton = nullptr;
+    QPushButton *m_detailsButton = nullptr;
     QHBoxLayout *m_advancedLayout = nullptr;
     QHBoxLayout *m_resultLayout = nullptr;
     QMap<QString, QPushButton *> m_actionButtons;
     bool m_resolved = false;
     quint64 m_autoCloseGeneration = 0;
+    QByteArray m_rawResponse;
+    ModelRequestTelemetry m_telemetry;
+    QString m_lastTelemetryKey;
+    qint64 m_conversationInputTokens = 0;
+    qint64 m_conversationOutputTokens = 0;
+    qint64 m_conversationTotalTokens = 0;
+    double m_conversationEstimatedCost = 0.0;
+    bool m_conversationHasEstimatedCost = false;
     std::function<void()> m_onRegenerate;
     std::function<void(const QString &)> m_onRetryModel;
     std::function<void(const QString &)> m_onFollowUp;

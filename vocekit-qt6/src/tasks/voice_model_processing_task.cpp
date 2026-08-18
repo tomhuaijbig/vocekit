@@ -73,9 +73,11 @@ VoiceModelProcessingResult runModel(
     const ModelRequestTaskResult taskResult =
         runModelProviderRequestTask(taskRequest, request.onDelta);
     result.text = taskResult.text;
+    result.rawResponse = taskResult.rawResponse;
     result.errorMessage = taskResult.errorMessage;
     result.promptVersion = taskResult.promptVersion;
     result.durationMs = taskResult.durationMs;
+    result.telemetry = taskResult.telemetry;
     result.cancelled = taskResult.cancelled;
     return result;
 }

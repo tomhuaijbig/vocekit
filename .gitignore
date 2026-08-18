@@ -33,6 +33,7 @@ object_script.*
 **/config/secrets.json
 **/config/settings.json
 **/config/prompts.json
+**/config/model_advanced.json
 **/config/lexicon/entries.json
 **/config/runtime/
 .env

@@ -206,6 +206,61 @@ private slots:
         QCOMPARE(body.value(QStringLiteral("top_p")).toDouble(), 0.5);
     }
 
+    void appliesRawJsonLastAndCapturesActualTelemetry()
+    {
+        const QSharedPointer<FakeOpenAiTransport> transport = fakeTransport();
+        transport->jsonResponse.statusCode = 200;
+        transport->jsonResponse.durationMs = 123;
+        transport->jsonResponse.body = QByteArrayLiteral(
+            "{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":\"ok\",\"annotations\":[{\"url\":\"https://example.test\",\"title\":\"Source\"}]}}],"
+            "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}"
+        );
+        OpenAiCompatibleModelProvider provider(
+            QStringLiteral("openai"),
+            transport,
+            []() { return openAiSecrets(); }
+        );
+        CancellationSource cancellation;
+        ModelRequest request;
+        request.modelId = QStringLiteral("openai:gpt-5.6-terra");
+        request.stream = true;
+        QJsonObject parameters;
+        parameters.insert(QStringLiteral("temperature"), 0.4);
+        parameters.insert(QStringLiteral("max_tokens"), 4096);
+        QJsonObject raw;
+        raw.insert(QStringLiteral("temperature"), 1.1);
+        raw.insert(QStringLiteral("max_tokens"), QJsonValue::Null);
+        raw.insert(QStringLiteral("stream"), QJsonValue::Null);
+        raw.insert(QStringLiteral("future_parameter"), true);
+        QJsonObject advanced;
+        advanced.insert(QStringLiteral("enabled"), true);
+        advanced.insert(QStringLiteral("parameters"), parameters);
+        advanced.insert(QStringLiteral("raw_json"), raw);
+        request.extra.insert(QStringLiteral("vocekit_advanced"), advanced);
+
+        const ModelResult result = provider.complete(
+            request,
+            ModelDeltaCallback(),
+            cancellation.token()
+        );
+
+        QVERIFY(result.error.isEmpty());
+        const QJsonObject body = QJsonDocument::fromJson(transport->lastBody).object();
+        QCOMPARE(body.value(QStringLiteral("temperature")).toDouble(), 1.1);
+        QVERIFY(!body.contains(QStringLiteral("max_tokens")));
+        QVERIFY(!body.contains(QStringLiteral("stream")));
+        QCOMPARE(transport->postJsonCount, 1);
+        QCOMPARE(transport->postStreamCount, 0);
+        QVERIFY(body.value(QStringLiteral("future_parameter")).toBool());
+        QCOMPARE(result.telemetry.actualRequest, body);
+        QCOMPARE(result.telemetry.httpStatusCode, 200);
+        QCOMPARE(result.telemetry.totalDurationMs, qint64(123));
+        QCOMPARE(result.telemetry.usage.inputTokens, qint64(10));
+        QCOMPARE(result.telemetry.usage.outputTokens, qint64(5));
+        QCOMPARE(result.telemetry.finishReason, QStringLiteral("length"));
+        QCOMPARE(result.telemetry.citations.size(), 1);
+    }
+
     void officialProviderUsesConfiguredBaseUrl_data()
     {
         QTest::addColumn<QString>("baseUrl");

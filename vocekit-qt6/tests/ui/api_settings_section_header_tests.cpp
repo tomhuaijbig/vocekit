@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "../../src/ui/api_settings_section.h"
+#include "../../src/ui/advanced_api_dialog.h"
 #include "../../src/ui/attention_message.h"
 
 #include <QFile>
@@ -11,7 +12,9 @@
 #include <QDir>
 #include <QPushButton>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QTimer>
+#include <QTabWidget>
 #include <type_traits>
 
 namespace {
@@ -73,6 +76,8 @@ private slots:
     void carriesAndPersistsWindowsSpeechLanguage();
     void savesThreeRuntimeValuesAndRollsBackOnFailure();
     void customModelDialogOffersOptionalSamplingParameters();
+    void exposesSeparateFutureProofAdvancedApiConsole();
+    void advancedConsoleFitsNormalMaximizedAndLargeText();
 };
 
 void ApiSettingsSectionHeaderTests::constructsFromCallbacksOnly()
@@ -400,6 +405,99 @@ customModelDialogOffersOptionalSamplingParameters()
     });
 
     configure->click();
+    QVERIFY(inspected);
+}
+
+void ApiSettingsSectionHeaderTests::
+exposesSeparateFutureProofAdvancedApiConsole()
+{
+    const QString settingsSource = sourceText(
+        "../../src/ui/api_settings_section.cpp"
+    );
+    const QString advancedSource = sourceText(
+        "../../src/ui/advanced_api_dialog.cpp"
+    );
+    QVERIFY(settingsSource.contains(QString::fromUtf8("打开高级控制台")));
+    QVERIFY(advancedSource.contains(QStringLiteral("advancedRawJsonEditor")));
+    QVERIFY(advancedSource.contains(QStringLiteral("future"))
+        || advancedSource.contains(QString::fromUtf8("尚不认识的新字段")));
+    QVERIFY(advancedSource.contains(QStringLiteral("Fetch Models")));
+    QVERIFY(advancedSource.contains(QStringLiteral("API Key Test")));
+    QVERIFY(advancedSource.contains(QStringLiteral("Connection Test")));
+    QVERIFY(advancedSource.contains(QString::fromUtf8("查询余额")));
+    QVERIFY(advancedSource.contains(QStringLiteral("Request Log")));
+    QVERIFY(advancedSource.contains(QStringLiteral("Raw JSON")));
+    QVERIFY(advancedSource.contains(QStringLiteral("System Prompt")));
+}
+
+void ApiSettingsSectionHeaderTests::
+advancedConsoleFitsNormalMaximizedAndLargeText()
+{
+    bool inspected = false;
+    QTimer::singleShot(0, [&]() {
+        QDialog *advanced = nullptr;
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            QDialog *candidate = qobject_cast<QDialog *>(widget);
+            if (candidate && candidate->windowTitle()
+                == QString::fromUtf8("高级 API 控制台")) {
+                advanced = candidate;
+                break;
+            }
+        }
+        QVERIFY(advanced);
+        QFont largeFont = advanced->font();
+        largeFont.setPointSize(qMax(13, largeFont.pointSize() + 3));
+        advanced->setFont(largeFont);
+        advanced->resize(980, 760);
+
+        QTabWidget *tabs = advanced->findChild<QTabWidget *>();
+        QPlainTextEdit *raw = advanced->findChild<QPlainTextEdit *>(
+            QStringLiteral("advancedRawJsonEditor")
+        );
+        QVERIFY(tabs);
+        QVERIFY(raw);
+        QCOMPARE(tabs->count(), 5);
+        tabs->setCurrentIndex(1);
+        raw->setPlainText(QStringLiteral(
+            "{\n  \"future_vendor_parameter\": \"这是一段很长的中文字段，用于检查放大字体和密集内容下的布局\",\n"
+            "  \"reasoning\": {\"effort\": \"high\"},\n  \"stream\": true\n}"
+        ));
+        QApplication::processEvents();
+
+        const QList<QPushButton *> buttons = advanced->findChildren<QPushButton *>();
+        QVERIFY(buttons.size() >= 10);
+        for (QPushButton *button : buttons) {
+            if (button->isVisible()) {
+                QVERIFY2(
+                    button->height() >= button->fontMetrics().height() + 6,
+                    qPrintable(button->text())
+                );
+            }
+        }
+
+        const QString visualOutputDir = QString::fromLocal8Bit(
+            qgetenv("VOCEKIT_VISUAL_OUTPUT_DIR")
+        ).trimmed();
+        if (!visualOutputDir.isEmpty()) {
+            QVERIFY(QDir().mkpath(visualOutputDir));
+            QVERIFY(advanced->grab().save(
+                QDir(visualOutputDir).filePath(
+                    QStringLiteral("advanced-api-normal-large-font.png")
+                )
+            ));
+            advanced->showMaximized();
+            QApplication::processEvents();
+            QVERIFY(advanced->grab().save(
+                QDir(visualOutputDir).filePath(
+                    QStringLiteral("advanced-api-maximized-large-font.png")
+                )
+            ));
+        }
+        inspected = true;
+        advanced->reject();
+    });
+
+    showAdvancedApiDialog(false, nullptr);
     QVERIFY(inspected);
 }
 

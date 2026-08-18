@@ -1,5 +1,7 @@
 #include "api_settings_section.h"
 
+#include "advanced_api_dialog.h"
+
 #include "app_dialogs.h"
 #include "attention_message.h"
 #include "custom_model_dialog_support.h"
@@ -343,6 +345,7 @@ void ApiSettingsSection::buildUi()
         );
         modelRows.append(m_anthropicBaseUrlRow);
         modelRows.append(customModelConfigCard());
+        modelRows.append(advancedApiConfigCard());
 
         connect(m_openaiBaseUrlEdit, &QLineEdit::textChanged, this, [this]() {
             attachSettingDetail(
@@ -799,6 +802,51 @@ QWidget *ApiSettingsSection::customModelConfigCard()
 
         auto openDialog = [this]() {
             showCustomModelConfigDialog();
+        };
+        frame->setClickCallback(openDialog);
+        connect(button, &QPushButton::clicked, this, openDialog);
+        return frame;
+    }
+
+QWidget *ApiSettingsSection::advancedApiConfigCard()
+    {
+        auto *frame = new HistoryRowFrame;
+        frame->setObjectName(QStringLiteral("advancedApiRow"));
+        frame->setStyleSheet(QStringLiteral(
+            "QFrame#advancedApiRow {"
+            "  background: #f5f7ff;"
+            "  border: 1px solid #d8def8;"
+            "  border-radius: 6px;"
+            "}"
+        ));
+        auto *layout = new QHBoxLayout(frame);
+        layout->setContentsMargins(16, 12, 16, 12);
+        layout->setSpacing(12);
+
+        auto *labels = new QVBoxLayout;
+        auto *name = new QLabel(apiTr8("高级 API 自定义"));
+        name->setFont(appFont(11, QFont::DemiBold));
+        auto *summary = new QLabel(apiTr8(
+            "Raw JSON、System Prompt、模型获取、余额与连接检测、请求日志和费用估算"
+        ));
+        summary->setWordWrap(true);
+        summary->setStyleSheet(QStringLiteral("color:#4b5563;"));
+        labels->addWidget(name);
+        labels->addWidget(summary);
+
+        auto *button = new QPushButton(apiTr8("打开高级控制台"));
+        button->setMinimumHeight(36);
+        button->setStyleSheet(buttonStyle(QStringLiteral("#3448a5")));
+        layout->addLayout(labels, 1);
+        layout->addWidget(button);
+
+        auto openDialog = [this]() {
+            // 先把用户刚填写但尚未点击底部保存的 Key 写入本地，
+            // 这样高级控制台的检测操作使用的就是当前界面值。
+            if (!saveSecretsFromUi(false)) {
+                return;
+            }
+            showAdvancedApiDialog(snapshot().useSystemProxy, this);
         };
         frame->setClickCallback(openDialog);
         connect(button, &QPushButton::clicked, this, openDialog);

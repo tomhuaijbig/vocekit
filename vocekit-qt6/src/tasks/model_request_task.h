@@ -22,10 +22,12 @@ struct ModelRequestTaskRequest
 struct ModelRequestTaskResult
 {
     QString text;
+    QByteArray rawResponse;
     QString errorMessage;
     qint64 durationMs = -1;
     QString promptVersion;
     ExecutionId executionId;
+    ModelRequestTelemetry telemetry;
     bool cancelled = false;
 };
 

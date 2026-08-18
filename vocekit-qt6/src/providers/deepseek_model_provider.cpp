@@ -1,6 +1,8 @@
 #include "deepseek_model_provider.h"
 
 #include "../runtime_log.h"
+#include "model_request_customization.h"
+#include "model_response_metadata.h"
 
 #include <QElapsedTimer>
 #include <QJsonArray>
@@ -262,6 +264,8 @@ ModelResult DeepSeekModelProvider::execute(
     result.executionId = request.executionId.isValid()
         ? request.executionId
         : cancellation.executionId();
+    result.telemetry.providerId = QStringLiteral("deepseek");
+    result.telemetry.requestedAtUtc = QDateTime::currentDateTimeUtc();
     if (cancellation.isCancellationRequested()) {
         result.error = cancelledError();
         return result;
@@ -289,18 +293,28 @@ ModelResult DeepSeekModelProvider::execute(
         QByteArrayLiteral("Bearer ")
             + m_secrets.deepseekApiKey.trimmed().toUtf8()
     );
-    if (request.stream) {
+    QJsonObject bodyObject = customizedModelRequestBody(
+        requestBody(request, request.stream),
+        advancedModelSettings(request.extra)
+    );
+    const bool effectiveStream = bodyObject
+        .value(QStringLiteral("stream"))
+        .toBool(false);
+    result.telemetry.actualRequest = bodyObject;
+    result.telemetry.modelId = bodyObject
+        .value(QStringLiteral("model"))
+        .toString(request.modelId);
+    if (effectiveStream) {
         networkRequest.setRawHeader("Accept", "text/event-stream");
     }
-    const QByteArray body = QJsonDocument(
-        requestBody(request, request.stream)
-    ).toJson(QJsonDocument::Compact);
+    const QByteArray body = QJsonDocument(bodyObject)
+        .toJson(QJsonDocument::Compact);
 
     QElapsedTimer timer;
     timer.start();
     logRuntimeEvent(
         tr8("DeepSeek"),
-        request.stream ? tr8("流式开始") : tr8("开始"),
+        effectiveStream ? tr8("流式开始") : tr8("开始"),
         QStringLiteral("模型=") + request.modelId
             + QStringLiteral("，输入字数=")
             + QString::number(request.userPrompt.size())
@@ -330,12 +344,16 @@ ModelResult DeepSeekModelProvider::execute(
                 continue;
             }
             const QJsonObject root = document.object();
+            updateModelMetadataFromJson(root, &result.telemetry);
             if (root.contains(QStringLiteral("error"))) {
                 streamApiError = apiErrorMessage(root);
                 continue;
             }
             const QString delta = streamDelta(root);
             if (!delta.isEmpty()) {
+                if (result.telemetry.firstTokenMs < 0) {
+                    result.telemetry.firstTokenMs = timer.elapsed();
+                }
                 text += delta;
                 if (onDelta) {
                     onDelta(delta);
@@ -349,12 +367,15 @@ ModelResult DeepSeekModelProvider::execute(
         request,
         m_useSystemProxy
     );
-    if (request.stream) {
+    if (effectiveStream) {
         response = m_transport->postEventStream(
             networkRequest,
             body,
             options,
             [&](const QByteArray &chunk) {
+                if (result.telemetry.firstResponseMs < 0) {
+                    result.telemetry.firstResponseMs = timer.elapsed();
+                }
                 streamBuffer += chunk;
                 processStreamBuffer();
             },
@@ -374,12 +395,14 @@ ModelResult DeepSeekModelProvider::execute(
     }
 
     result.rawResponse = response.body;
+    result.telemetry.httpStatusCode = response.statusCode;
     result.durationMs = response.durationMs >= 0
         ? response.durationMs
         : timer.elapsed();
+    result.telemetry.totalDurationMs = result.durationMs;
     if (!response.isSuccess()) {
         result.error = networkOperationError(response);
-    } else if (request.stream) {
+    } else if (effectiveStream) {
         if (!streamApiError.trimmed().isEmpty()) {
             result.error = operationError(
                 QStringLiteral("model.api"),
@@ -402,6 +425,7 @@ ModelResult DeepSeekModelProvider::execute(
             );
         } else {
             const QJsonObject root = document.object();
+            updateModelMetadataFromJson(root, &result.telemetry);
             if (root.contains(QStringLiteral("error"))) {
                 const QString apiError = apiErrorMessage(root);
                 result.error = operationError(

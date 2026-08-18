@@ -30,6 +30,9 @@ struct VoiceRunExecutionHandlers
         qint64 durationMs,
         const QString &promptVersion
     )> modelResultRecorded;
+    std::function<void(
+        const VoiceModelProcessingResult &result
+    )> modelDetailsRecorded;
 };
 
 // 模型执行管线：把功能上下文转换为统一模型任务，并记录模型阶段结果。

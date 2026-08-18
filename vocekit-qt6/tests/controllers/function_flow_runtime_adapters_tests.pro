@@ -11,6 +11,7 @@ SOURCES += \
     ../../src/api/api_client_utils.cpp \
     ../../src/config/app_paths.cpp \
     ../../src/config/app_settings_defaults.cpp \
+    ../../src/config/model_advanced_settings.cpp \
     ../../src/config/secret_config.cpp \
     ../../src/config/secret_store.cpp \
     ../../src/controllers/function_flow_runtime_adapters.cpp \
@@ -40,6 +41,7 @@ SOURCES += \
     ../../src/providers/xfyun_speech_provider.cpp \
     ../../src/result_flow_config.cpp \
     ../../src/runtime_log.cpp \
+    ../../src/storage/model_request_log.cpp \
     ../../src/tasks/function_flow_model_task_runner.cpp \
     ../../src/tasks/cancellation_token.cpp \
     ../../src/tasks/diagnostic_helpers.cpp \
@@ -48,6 +50,7 @@ SOURCES += \
 
 HEADERS += \
     ../../src/config/app_settings_data.h \
+    ../../src/config/model_advanced_settings.h \
     ../../src/config/secret_config.h \
     ../../src/config/secret_store.h \
     ../../src/controllers/function_flow_runtime_adapters.h \
@@ -61,6 +64,8 @@ HEADERS += \
     ../../src/domain/operation_error.h \
     ../../src/file_utils.h \
     ../../src/providers/model_catalog.h \
+    ../../src/providers/model_request_customization.h \
+    ../../src/providers/model_response_metadata.h \
     ../../src/providers/windows_speech_helper_client.h \
     ../../src/providers/windows_speech_helper_protocol.h \
     ../../src/providers/windows_speech_provider.h \

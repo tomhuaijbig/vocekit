@@ -81,6 +81,9 @@ QString VoiceRunExecutor::run(
             result.promptVersion
         );
     }
+    if (handlers.modelDetailsRecorded) {
+        handlers.modelDetailsRecorded(result);
+    }
     if (!result.errorMessage.isEmpty()) {
         setError(error, result.errorMessage);
     }

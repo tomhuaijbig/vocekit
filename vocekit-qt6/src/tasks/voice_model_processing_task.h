@@ -33,9 +33,11 @@ struct VoiceModelProcessingRequest
 struct VoiceModelProcessingResult
 {
     QString text;
+    QByteArray rawResponse;
     QString errorMessage;
     QString promptVersion;
     qint64 durationMs = -1;
+    ModelRequestTelemetry telemetry;
     bool modelSkipped = false;
     bool cancelled = false;
 };

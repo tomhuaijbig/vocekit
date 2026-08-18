@@ -185,6 +185,7 @@ public:
             guardedPopup->setResultText(
                 popupPresentation(context, result.finalOutput).text
             );
+            applyLatestModelDetails(guardedPopup);
             guardedPopup->setBusy(false, text8("已生成"));
         }
         saveHistory(context, result.finalOutput, QString());
@@ -581,6 +582,7 @@ private:
 
         QPointer<ResultChoicePopup> guardedPopup(popup);
         popup->setCurrentModel(modelFor(context.modeId));
+        applyLatestModelDetails(popup);
         popup->setActionOrder(
             functionSettings(context.modeId).output.resultActions
         );
@@ -752,6 +754,7 @@ private:
                     result.finalModel
                 ).text
             );
+            applyLatestModelDetails(popup);
             popup->setBusy(false, text8("已生成"));
         }
         saveHistory(
@@ -985,6 +988,18 @@ private:
         );
         configurePopupActions(popup, context);
         popup->showNearBottom();
+    }
+
+    void applyLatestModelDetails(ResultChoicePopup *popup) const
+    {
+        if (!popup || !m_runSession) {
+            return;
+        }
+        const VoiceRunSessionSnapshot snapshot = m_runSession->snapshot();
+        popup->setModelResponseDetails(
+            snapshot.rawModelResponse,
+            snapshot.modelTelemetry
+        );
     }
 
     VoiceResultPresentationAccess m_access;

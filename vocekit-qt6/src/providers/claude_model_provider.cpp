@@ -2,6 +2,8 @@
 
 #include "../api/api_client_utils.h"
 #include "../runtime_log.h"
+#include "model_request_customization.h"
+#include "model_response_metadata.h"
 
 #include <QElapsedTimer>
 #include <QJsonArray>
@@ -262,6 +264,8 @@ ModelResult ClaudeModelProvider::execute(
     result.executionId = request.executionId.isValid()
         ? request.executionId
         : cancellation.executionId();
+    result.telemetry.providerId = QStringLiteral("claude");
+    result.telemetry.requestedAtUtc = QDateTime::currentDateTimeUtc();
     if (cancellation.isCancellationRequested()) {
         result.error = cancelledError();
         return result;
@@ -307,18 +311,28 @@ ModelResult ClaudeModelProvider::execute(
         "anthropic-version",
         QByteArrayLiteral("2023-06-01")
     );
-    if (request.stream) {
+    QJsonObject bodyObject = customizedModelRequestBody(
+        requestBody(request),
+        advancedModelSettings(request.extra)
+    );
+    const bool effectiveStream = bodyObject
+        .value(QStringLiteral("stream"))
+        .toBool(false);
+    result.telemetry.actualRequest = bodyObject;
+    result.telemetry.modelId = bodyObject
+        .value(QStringLiteral("model"))
+        .toString(requestModelName(request));
+    if (effectiveStream) {
         networkRequest.setRawHeader("Accept", "text/event-stream");
     }
-    const QByteArray body = QJsonDocument(
-        requestBody(request)
-    ).toJson(QJsonDocument::Compact);
+    const QByteArray body = QJsonDocument(bodyObject)
+        .toJson(QJsonDocument::Compact);
 
     QElapsedTimer timer;
     timer.start();
     logRuntimeEvent(
         tr8("Claude"),
-        request.stream ? tr8("流式开始") : tr8("开始"),
+        effectiveStream ? tr8("流式开始") : tr8("开始"),
         QStringLiteral("模型=") + requestModelName(request)
             + QStringLiteral("，输入字数=")
             + QString::number(request.userPrompt.size())
@@ -347,12 +361,16 @@ ModelResult ClaudeModelProvider::execute(
                 continue;
             }
             const QJsonObject root = document.object();
+            updateModelMetadataFromJson(root, &result.telemetry);
             if (root.contains(QStringLiteral("error"))) {
                 streamApiError = apiErrorMessage(root);
                 continue;
             }
             const QString delta = streamDelta(root);
             if (!delta.isEmpty()) {
+                if (result.telemetry.firstTokenMs < 0) {
+                    result.telemetry.firstTokenMs = timer.elapsed();
+                }
                 text += delta;
                 if (onDelta) {
                     onDelta(delta);
@@ -366,12 +384,15 @@ ModelResult ClaudeModelProvider::execute(
         request,
         m_useSystemProxy
     );
-    if (request.stream) {
+    if (effectiveStream) {
         response = m_transport->postEventStream(
             networkRequest,
             body,
             options,
             [&](const QByteArray &chunk) {
+                if (result.telemetry.firstResponseMs < 0) {
+                    result.telemetry.firstResponseMs = timer.elapsed();
+                }
                 streamBuffer += chunk;
                 processStreamBuffer();
             },
@@ -391,12 +412,14 @@ ModelResult ClaudeModelProvider::execute(
     }
 
     result.rawResponse = response.body;
+    result.telemetry.httpStatusCode = response.statusCode;
     result.durationMs = response.durationMs >= 0
         ? response.durationMs
         : timer.elapsed();
+    result.telemetry.totalDurationMs = result.durationMs;
     if (!response.isSuccess()) {
         result.error = networkOperationError(response);
-    } else if (request.stream) {
+    } else if (effectiveStream) {
         if (!streamApiError.trimmed().isEmpty()) {
             result.error = operationError(
                 QStringLiteral("model.api"),
@@ -419,6 +442,7 @@ ModelResult ClaudeModelProvider::execute(
             );
         } else {
             const QJsonObject root = document.object();
+            updateModelMetadataFromJson(root, &result.telemetry);
             if (root.contains(QStringLiteral("error"))) {
                 const QString apiError = apiErrorMessage(root);
                 result.error = operationError(

@@ -15,12 +15,12 @@ jobs:
     env:
       CANDIDATE_NAME: vocekit-${{ github.run_id }}-unsigned-candidate
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Install Qt 6.10.3 compatibility SDK and MinGW 13.1
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:
           version: 6.10.3
           arch: win64_mingw
@@ -51,6 +51,12 @@ jobs:
             -SkipAcceptance `
             -SkipAuthenticode
 
+      - name: Restore pinned RapidOCR SDK cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vocekit-qt6/Project_RapidOcrOnnx-1.2.2
+          key: rapidocr-sdk-${{ runner.os }}-${{ hashFiles('vocekit-qt6/third_party/rapidocr/rapidocr-lock.json') }}
+
       - name: Prepare pinned RapidOCR SDK and runtime helpers
         shell: pwsh
         run: |
@@ -74,7 +80,7 @@ jobs:
           & .\vocekit-qt6\scripts\package-test.ps1 -PackageName $env:CANDIDATE_NAME
 
       - name: Upload unsigned candidate for controlled testing only
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.CANDIDATE_NAME }}
           path: vocekit-qt6/dist/${{ env.CANDIDATE_NAME }}.zip

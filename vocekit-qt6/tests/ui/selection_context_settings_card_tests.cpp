@@ -4,6 +4,7 @@
 #include "../../src/ui/selection_context_action_editor.h"
 #include "../../src/ui/selection_context_settings_card.h"
 
+#include <QAbstractSpinBox>
 #include <QAbstractButton>
 #include <QAbstractItemModel>
 #include <QCheckBox>
@@ -122,6 +123,10 @@ QString visibleControlHeightError(QWidget *root, int percent)
     for (QComboBox *widget : root->findChildren<QComboBox *>()) {
         controls.append(widget);
     }
+    for (QAbstractSpinBox *widget :
+         root->findChildren<QAbstractSpinBox *>()) {
+        controls.append(widget);
+    }
     for (QLineEdit *widget : root->findChildren<QLineEdit *>()) {
         controls.append(widget);
     }
@@ -136,11 +141,15 @@ QString visibleControlHeightError(QWidget *root, int percent)
             || !widget->isVisibleTo(root)) {
             continue;
         }
-        // An editable combo owns a private line edit inside its style frame.
-        // The combo is the independently laid-out control checked by this gate.
-        if (qobject_cast<QLineEdit *>(widget)
-            && qobject_cast<QComboBox *>(widget->parentWidget())) {
-            continue;
+        // Editable combos and spin boxes own private line edits whose geometry
+        // is controlled by the surrounding style frame. The outer widget is
+        // the independently laid-out control checked by this gate.
+        if (qobject_cast<QLineEdit *>(widget)) {
+            QWidget *owner = widget->parentWidget();
+            if (qobject_cast<QComboBox *>(owner)
+                || qobject_cast<QAbstractSpinBox *>(owner)) {
+                continue;
+            }
         }
         checked.insert(widget);
         const QSize hint = widget->sizeHint();

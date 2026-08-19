@@ -65,6 +65,33 @@ foreach ($required in @(
     }
 }
 
+$qtCiWorkflowPath = Join-Path $repositoryRoot ".github\workflows\qt6-ci.yml"
+if (Test-Path -LiteralPath $qtCiWorkflowPath -PathType Leaf) {
+    $qtCiWorkflow = Get-Content `
+        -LiteralPath $qtCiWorkflowPath `
+        -Raw `
+        -Encoding UTF8
+    $fetchRapidOcrCommand = [regex]::Match(
+        $qtCiWorkflow,
+        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\fetch-rapidocr\.ps1(?:\s|$)'
+    )
+    $buildOcrHelpersCommand = [regex]::Match(
+        $qtCiWorkflow,
+        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\build-ocr-helpers\.ps1(?:\s|$)'
+    )
+    $runTestsCommand = [regex]::Match(
+        $qtCiWorkflow,
+        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\run-all-tests\.ps1(?:\s|$)'
+    )
+    if (-not $fetchRapidOcrCommand.Success -or
+        -not $buildOcrHelpersCommand.Success -or
+        -not $runTestsCommand.Success -or
+        $fetchRapidOcrCommand.Index -ge $buildOcrHelpersCommand.Index -or
+        $buildOcrHelpersCommand.Index -ge $runTestsCommand.Index) {
+        Add-Failure "Qt 6 CI must verify the pinned RapidOCR SDK and build OCR helpers before running integration tests."
+    }
+}
+
 $releaseWorkflowPath = Join-Path $repositoryRoot ".github\workflows\release.yml"
 if (Test-Path -LiteralPath $releaseWorkflowPath -PathType Leaf) {
     $releaseWorkflow = Get-Content -LiteralPath $releaseWorkflowPath -Raw -Encoding UTF8

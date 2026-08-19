@@ -2,6 +2,7 @@
 #define VOCEKIT_MODEL_CATALOG_H
 
 #include "../config/secret_config.h"
+#include "../config/model_advanced_settings.h"
 #include "../domain/app_legacy_types.h"
 
 #include <QString>
@@ -10,6 +11,10 @@
 // Central catalog for built-in and custom model options.
 QVector<ModelOption> modelOptions();
 QVector<ModelOption> modelOptionsForSecrets(const SecretConfig &secrets);
+QVector<ModelOption> modelOptionsForSecretsAndProfiles(
+    const SecretConfig &secrets,
+    const QVector<ModelAdvancedProfile> &advancedProfiles
+);
 QString modelTitle(const QString &id);
 QString modelDisplayText(const QString &id);
 QString normalizeModelId(const QString &value, const QString &fallback = QString());

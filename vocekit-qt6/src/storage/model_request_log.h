@@ -8,7 +8,14 @@
 
 QJsonObject redactedModelRequestJson(const QJsonObject &object);
 QString redactedModelLogText(const QString &text);
-bool appendModelRequestLog(const ModelResult &result);
+QJsonObject modelRequestLogEntry(
+    const ModelResult &result,
+    bool includeRequestResponseContent = false
+);
+bool appendModelRequestLog(
+    const ModelResult &result,
+    bool includeRequestResponseContent = false
+);
 QVector<QJsonObject> recentModelRequestLogs(int maximumCount = 100);
 QString modelRequestLogPath();
 

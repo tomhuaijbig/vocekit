@@ -25,8 +25,10 @@ struct ModelAdvancedProfile
     QString activeSystemPromptId;
     bool systemPromptOverrideEnabled = false;
     QString modelsEndpoint;
-    QString balanceEndpoint;
     QStringList fetchedModels;
+    // Full prompts, tool definitions and raw responses may contain private
+    // user content. Persist them only after an explicit per-profile opt-in.
+    bool logRequestResponseContent = false;
     double inputPricePerMillion = -1.0;
     double outputPricePerMillion = -1.0;
     double reasoningPricePerMillion = -1.0;

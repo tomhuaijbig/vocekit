@@ -185,13 +185,13 @@ completeNormalizerMigratesModelsAndPreservesOtherFields()
              selectionContextActionTranslate());
     QCOMPARE(normalized.actionCustomizations.value(
         selectionContextActionAiSearch()).modelId,
-        QStringLiteral("openai:gpt-5.6-terra"));
+        QStringLiteral("openai:gpt-4o"));
     QCOMPARE(normalized.actionCustomizations.value(
         selectionContextActionTranslate()).modelId,
-        QStringLiteral("openai:gpt-5.6-sol"));
+        QStringLiteral("openai:gpt-5.5"));
     QCOMPARE(normalized.actionCustomizations.value(
         selectionContextActionExplain()).modelId,
-        QStringLiteral("claude:claude-sonnet-5"));
+        QStringLiteral("claude:claude-3-7-sonnet"));
     QCOMPARE(normalized.actionCustomizations.value(
         selectionContextActionSave()).modelId,
         QStringLiteral("openai:future"));

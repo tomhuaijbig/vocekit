@@ -18,7 +18,7 @@ private slots:
 
 void UpdateSettingsSectionTests::exposesSafeIdleStateWithoutClippingNotice()
 {
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.2.0"));
     UpdateSettingsSection section([]() { return false; });
     section.resize(980, 720);
     section.show();
@@ -29,6 +29,9 @@ void UpdateSettingsSectionTests::exposesSafeIdleStateWithoutClippingNotice()
     );
     auto *status = section.findChild<QLabel *>(
         QStringLiteral("updateStatusLabel")
+    );
+    auto *channel = section.findChild<QLabel *>(
+        QStringLiteral("updateChannelLabel")
     );
     auto *security = section.findChild<QLabel *>(
         QStringLiteral("updateSecurityNotice")
@@ -47,7 +50,7 @@ void UpdateSettingsSectionTests::exposesSafeIdleStateWithoutClippingNotice()
     );
 
     QVERIFY(version);
-    QVERIFY(version->text().contains(QStringLiteral("0.1.0")));
+    QVERIFY(version->text().contains(QStringLiteral("0.2.0")));
     QVERIFY(status);
     QVERIFY(status->wordWrap());
     QVERIFY(security);
@@ -55,7 +58,10 @@ void UpdateSettingsSectionTests::exposesSafeIdleStateWithoutClippingNotice()
     QVERIFY(section.findChild<QScrollArea *>(
         QStringLiteral("updateSettingsScrollArea")
     ));
-    QVERIFY(check && check->isEnabled());
+    QVERIFY(channel && channel->text().contains(QStringLiteral("未配置")));
+    QVERIFY(status->text().contains(QStringLiteral("测试构建")));
+    QVERIFY(check && !check->isEnabled());
+    QVERIFY(check->styleSheet().contains(QStringLiteral("QPushButton:disabled")));
     QVERIFY(install && !install->isEnabled());
     QVERIFY(install->styleSheet().contains(QStringLiteral("QPushButton:disabled")));
     QVERIFY(notes && notes->toPlainText().contains(QStringLiteral("检查")));

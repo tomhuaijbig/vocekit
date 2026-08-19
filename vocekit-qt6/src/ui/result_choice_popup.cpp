@@ -841,6 +841,13 @@ void ResultChoicePopup::chooseModelAndRetry()
     const int currentIndex = models->findData(displayedModelId);
     if (currentIndex >= 0) {
         models->setCurrentIndex(currentIndex);
+    } else if (!displayedModelId.trimmed().isEmpty()) {
+        models->insertItem(
+            0,
+            displayedModelId,
+            displayedModelId
+        );
+        models->setCurrentIndex(0);
     }
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();

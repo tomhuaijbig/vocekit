@@ -10,7 +10,7 @@
 class QComboBox;
 class QLabel;
 class QLineEdit;
-class QPushButton;
+class QScrollArea;
 class QVBoxLayout;
 
 class FaqPanel : public QWidget
@@ -29,6 +29,7 @@ private:
     QString faqDiagnosticKeyword(const QString &category, const QString &title) const;
     void openDiagnosticForFaq(const QString &category, const QString &title);
     void applyFaqSearch();
+    void loadMoreIfNearBottom();
     void ensureFaqCardMaterialized(QWidget *card);
     void addLatestFeatureFaqItems(QVBoxLayout *items);
     void addRecentWorkflowFaqItems(QVBoxLayout *items);
@@ -44,8 +45,9 @@ private:
     QComboBox *m_faqCategoryBox = nullptr;
     QVBoxLayout *m_faqItemsLayout = nullptr;
     QLabel *m_faqEmptyLabel = nullptr;
-    QPushButton *m_faqLoadMoreButton = nullptr;
+    QScrollArea *m_faqScroll = nullptr;
     int m_faqRenderLimit = 8;
+    bool m_loadingMore = false;
 };
 
 #endif // VOCEKIT_FAQ_PANEL_H

@@ -424,7 +424,8 @@ exposesSeparateFutureProofAdvancedApiConsole()
     QVERIFY(advancedSource.contains(QStringLiteral("Fetch Models")));
     QVERIFY(advancedSource.contains(QStringLiteral("API Key Test")));
     QVERIFY(advancedSource.contains(QStringLiteral("Connection Test")));
-    QVERIFY(advancedSource.contains(QString::fromUtf8("查询余额")));
+    QVERIFY(!advancedSource.contains(QString::fromUtf8("查询余额")));
+    QVERIFY(advancedSource.contains(QString::fromUtf8("记录请求与响应正文")));
     QVERIFY(advancedSource.contains(QStringLiteral("Request Log")));
     QVERIFY(advancedSource.contains(QStringLiteral("Raw JSON")));
     QVERIFY(advancedSource.contains(QStringLiteral("System Prompt")));

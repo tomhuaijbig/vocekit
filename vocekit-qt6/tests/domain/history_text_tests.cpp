@@ -34,6 +34,7 @@ private slots:
     void buildsExportObject();
     void searchMatchesAcrossImportantFields();
     void rowHeightStaysWithinExpectedBounds();
+    void shortRowsDoNotReserveThreePreviewLines();
 };
 
 void HistoryTextTests::formatsIsoTime()
@@ -177,9 +178,18 @@ void HistoryTextTests::rowHeightStaysWithinExpectedBounds()
     HistoryEntry entry = sampleEntry();
     entry.output = QString(220, QLatin1Char('A'));
     const int height = historyEntryRowHeight(entry, 520);
-    QVERIFY(height >= 150);
-    QVERIFY(height <= 300);
+    QVERIFY(height >= 86);
+    QVERIFY(height <= 240);
     QCOMPARE(historyTextDisplayUnits(QStringLiteral("ab中文")), 6);
+}
+
+void HistoryTextTests::shortRowsDoNotReserveThreePreviewLines()
+{
+    HistoryEntry entry = sampleEntry();
+    entry.output = QStringLiteral("短内容");
+    const int height = historyEntryRowHeight(entry, 720);
+    QVERIFY2(height < 150, qPrintable(QString::number(height)));
+    QVERIFY(height >= 86);
 }
 
 QTEST_MAIN(HistoryTextTests)

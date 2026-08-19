@@ -156,7 +156,7 @@ private slots:
         QVERIFY(result.cancelled);
     }
 
-    void normalizesLegacyModelBeforeProviderRequest()
+    void prefixesLegacyModelWithoutReplacingItsName()
     {
         QSharedPointer<FakeTaskModelProvider> provider(
             new FakeTaskModelProvider
@@ -172,23 +172,28 @@ private slots:
         QCOMPARE(result.text, QStringLiteral("completed"));
         QCOMPARE(
             provider->lastRequest.modelId,
-            QStringLiteral("openai:gpt-5.6-terra")
+            QStringLiteral("openai:gpt-5.4")
         );
         QCOMPARE(request.modelId, QStringLiteral("gpt-5.4"));
     }
 
-    void appliesDefaultFallbackBeforeProviderRequest_data()
+    void appliesDefaultFallbackOnlyToEmptyModel_data()
     {
         QTest::addColumn<QString>("configuredModelId");
+        QTest::addColumn<QString>("expectedModelId");
 
-        QTest::newRow("empty") << QString();
+        QTest::newRow("empty")
+            << QString()
+            << QStringLiteral("deepseek-v4-flash");
         QTest::newRow("unknown")
+            << QStringLiteral("unknown-model")
             << QStringLiteral("unknown-model");
     }
 
-    void appliesDefaultFallbackBeforeProviderRequest()
+    void appliesDefaultFallbackOnlyToEmptyModel()
     {
         QFETCH(QString, configuredModelId);
+        QFETCH(QString, expectedModelId);
         QSharedPointer<FakeTaskModelProvider> provider(
             new FakeTaskModelProvider
         );
@@ -199,7 +204,7 @@ private slots:
 
         QCOMPARE(
             provider->lastRequest.modelId,
-            QStringLiteral("deepseek-v4-flash")
+            expectedModelId
         );
     }
 
@@ -212,11 +217,11 @@ private slots:
         QTest::newRow("unprefixed legacy GPT")
             << QStringLiteral("gpt-5.4")
             << QStringLiteral("openai")
-            << QStringLiteral("openai:gpt-5.6-terra");
+            << QStringLiteral("openai:gpt-5.4");
         QTest::newRow("unprefixed legacy Claude")
             << QStringLiteral("claude-sonnet-4-6")
             << QStringLiteral("claude")
-            << QStringLiteral("claude:claude-sonnet-5");
+            << QStringLiteral("claude:claude-sonnet-4-6");
     }
 
     void providerTaskNormalizesBeforeSelectingProvider()
@@ -271,7 +276,7 @@ private slots:
         ));
         QCOMPARE(
             capturedModelId,
-            QStringLiteral("openai:gpt-5.6-terra")
+            QStringLiteral("openai:gpt-5.4")
         );
     }
 };

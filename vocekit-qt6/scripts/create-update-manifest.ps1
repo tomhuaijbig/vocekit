@@ -3,8 +3,10 @@ param(
     [string]$ArchivePath,
     [string]$VersionFile = "",
     [string]$OutputPath = "",
-    [string]$ReleaseBaseUrl = "https://github.com/tomhuaijbig/vocekit/releases/download",
-    [string]$ReleasePageBaseUrl = "https://github.com/tomhuaijbig/vocekit/releases/tag",
+    [Parameter(Mandatory = $true)]
+    [string]$ReleaseBaseUrl,
+    [Parameter(Mandatory = $true)]
+    [string]$ReleasePageBaseUrl,
     [ValidateSet("stable", "preview")]
     [string]$Channel = "stable",
     [string]$ReleaseNotes = ""

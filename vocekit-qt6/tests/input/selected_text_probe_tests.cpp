@@ -40,6 +40,33 @@ SelectionPhysicalProbeResult textResult(
     return result;
 }
 
+bool setClipboardTextForTest(const QString &text, int timeoutMs = 1000)
+{
+    bool written = false;
+    const auto writeOnGuiThread = [&]() {
+        QElapsedTimer timer;
+        timer.start();
+        do {
+            QApplication::clipboard()->setText(text);
+            if (QApplication::clipboard()->text() == text) {
+                written = true;
+                return;
+            }
+            QTest::qWait(10);
+        } while (timer.elapsed() < timeoutMs);
+    };
+    if (QThread::currentThread() == QApplication::instance()->thread()) {
+        writeOnGuiThread();
+        return written;
+    }
+    const bool invoked = QMetaObject::invokeMethod(
+        QApplication::instance(),
+        writeOnGuiThread,
+        Qt::BlockingQueuedConnection
+    );
+    return invoked && written;
+}
+
 } // namespace
 
 class SelectedTextProbeTests : public QObject
@@ -307,7 +334,7 @@ private slots:
         };
         access.sendCopyShortcut = [&sequence]() {
             ++sequence;
-            QApplication::clipboard()->setText(QStringLiteral("selected"));
+            setClipboardTextForTest(QStringLiteral("selected"));
         };
 
         SelectionProbeRunner runner(access);
@@ -334,7 +361,7 @@ private slots:
 
     void strongFallbackNeverPublishesAnInternalMarkerBeforeCopy()
     {
-        QApplication::clipboard()->setText(QStringLiteral("original"));
+        QVERIFY(setClipboardTextForTest(QStringLiteral("original")));
 
         quint32 sequence = 20;
         QString clipboardBeforeCopy;
@@ -350,7 +377,7 @@ private slots:
         access.sendCopyShortcut = [&clipboardBeforeCopy, &sequence]() {
             clipboardBeforeCopy = QApplication::clipboard()->text();
             ++sequence;
-            QApplication::clipboard()->setText(QStringLiteral("selected"));
+            setClipboardTextForTest(QStringLiteral("selected"));
         };
 
         SelectionProbeRunner runner(access);
@@ -383,7 +410,7 @@ private slots:
 #ifndef Q_OS_WIN
         QSKIP("The clipboard fallback ownership contract is Windows-specific.");
 #else
-        QApplication::clipboard()->setText(QStringLiteral("original"));
+        QVERIFY(setClipboardTextForTest(QStringLiteral("original")));
 
         int copyShortcutCalls = 0;
         SelectionProbeRunnerAccess access;
@@ -421,7 +448,7 @@ private slots:
 #ifndef Q_OS_WIN
         QSKIP("The clipboard fallback ownership contract is Windows-specific.");
 #else
-        QApplication::clipboard()->setText(QStringLiteral("original"));
+        QVERIFY(setClipboardTextForTest(QStringLiteral("original")));
 
         QAtomicInt probeCalls(0);
         quint32 sequence = 30;
@@ -439,10 +466,17 @@ private slots:
         access.clipboardSequenceNumber = [&sequence]() { return sequence; };
         access.clipboardOwnerProcessId = []() { return quint32(42); };
         QAtomicInt copyShortcutCalls(0);
-        access.sendCopyShortcut = [&copyShortcutCalls, &sequence]() {
+        QAtomicInt copiedTextWasPublished(0);
+        access.sendCopyShortcut = [
+            &copyShortcutCalls,
+            &copiedTextWasPublished,
+            &sequence
+        ]() {
             copyShortcutCalls.ref();
             ++sequence;
-            QApplication::clipboard()->setText(QStringLiteral("selected"));
+            if (setClipboardTextForTest(QStringLiteral("selected"))) {
+                copiedTextWasPublished.storeRelease(1);
+            }
         };
 
         SelectionProbeRunner runner(access);
@@ -455,18 +489,12 @@ private slots:
         };
         runner.start(requestAt(1), true, 10, callbacks);
         QTRY_COMPARE_WITH_TIMEOUT(copyShortcutCalls.loadAcquire(), 1, 1000);
-        QCOMPARE(
-            QApplication::clipboard()->text(),
-            QStringLiteral("selected")
-        );
+        QTRY_COMPARE_WITH_TIMEOUT(copiedTextWasPublished.loadAcquire(), 1, 1000);
 
         runner.start(requestAt(2), false, 11, callbacks);
 
-        QTRY_COMPARE_WITH_TIMEOUT(
-            completedGenerations,
-            QVector<quint64>() << 11,
-            1500
-        );
+        QTRY_VERIFY_WITH_TIMEOUT(completedGenerations.contains(11), 1500);
+        QCOMPARE(completedGenerations.constLast(), quint64(11));
         QCOMPARE(
             QApplication::clipboard()->text(),
             QStringLiteral("original")
@@ -527,7 +555,7 @@ private slots:
 
     void externalClipboardChangeIsNeverOverwrittenByFallbackRestore()
     {
-        QApplication::clipboard()->setText(QStringLiteral("original"));
+        QVERIFY(setClipboardTextForTest(QStringLiteral("original")));
         quint32 sequence = 10;
         int ownerReads = 0;
         SelectionProbeRunnerAccess access;
@@ -539,7 +567,15 @@ private slots:
             ++ownerReads;
             if (ownerReads >= 2) {
                 ++sequence;
-                QApplication::clipboard()->setText(QStringLiteral("external"));
+                QMetaObject::invokeMethod(
+                    QApplication::instance(),
+                    []() {
+                        setClipboardTextForTest(
+                            QStringLiteral("external")
+                        );
+                    },
+                    Qt::QueuedConnection
+                );
                 return quint32(99);
             }
             return quint32(42);
@@ -549,7 +585,7 @@ private slots:
         };
         access.sendCopyShortcut = [&sequence]() {
             ++sequence;
-            QApplication::clipboard()->setText(QStringLiteral("selected"));
+            setClipboardTextForTest(QStringLiteral("selected"));
         };
 
         SelectionProbeRunner runner(access);

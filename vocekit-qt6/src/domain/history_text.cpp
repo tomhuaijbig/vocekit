@@ -309,11 +309,10 @@ int historyEntryRowHeight(const HistoryEntry &entry, int viewportWidth)
         2
     );
     const int previewLines = qBound(
-        3,
+        1,
         (historyTextDisplayUnits(historyEntryPreviewText(entry)) + previewUnitsPerLine - 1)
-            / previewUnitsPerLine
-            + 1,
-        7
+            / previewUnitsPerLine,
+        6
     );
-    return qBound(150, 46 + titleLines * 24 + previewLines * 24, 300);
+    return qBound(86, 38 + titleLines * 22 + previewLines * 22, 240);
 }

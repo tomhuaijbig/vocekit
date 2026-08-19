@@ -1,0 +1,46 @@
+name: Qt 6 CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows-qt6:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.11.1 and MinGW 13.1
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.1
+          arch: win64_mingw
+          tools: tools_mingw1310
+          cache: true
+
+      - name: Resolve toolchain
+        shell: pwsh
+        run: |
+          $qmake = (Get-Command qmake.exe -ErrorAction Stop).Source
+          $make = (Get-Command mingw32-make.exe -ErrorAction Stop).Source
+          "QT_BIN=$([IO.Path]::GetDirectoryName($qmake))" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MINGW_BIN=$([IO.Path]::GetDirectoryName($make))" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build Debug
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\build.ps1 -Configuration debug -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN -Jobs 2
+
+      - name: Run all Debug tests
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\run-all-tests.ps1 -Configuration debug -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\build.ps1 -Configuration release -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN -Jobs 2

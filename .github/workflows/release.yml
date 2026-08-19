@@ -1,0 +1,109 @@
+name: Signed Qt 6 Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  signed-release-package:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt 6.11.1 and MinGW 13.1
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.1
+          arch: win64_mingw
+          tools: tools_mingw1310
+          cache: true
+
+      - name: Resolve toolchain and release URLs
+        shell: pwsh
+        run: |
+          $qmake = (Get-Command qmake.exe -ErrorAction Stop).Source
+          $make = (Get-Command mingw32-make.exe -ErrorAction Stop).Source
+          "QT_BIN=$([IO.Path]::GetDirectoryName($qmake))" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "MINGW_BIN=$([IO.Path]::GetDirectoryName($make))" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "UPDATE_FEED=https://api.github.com/repos/${{ github.repository }}/releases/latest" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_DOWNLOADS=https://github.com/${{ github.repository }}/releases/download" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_PAGES=https://github.com/${{ github.repository }}/releases/tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Verify source release gates
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\verify-release-readiness.ps1 `
+            -UpdateFeedUrl $env:UPDATE_FEED `
+            -ExpectedTag "${{ github.ref_name }}" `
+            -SkipAuthenticode
+
+      - name: Run all Release tests
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\run-all-tests.ps1 -Configuration release -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN
+
+      - name: Build and deploy release
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\build.ps1 `
+            -Configuration release `
+            -QtBin $env:QT_BIN `
+            -MingwBin $env:MINGW_BIN `
+            -UpdateFeedUrl $env:UPDATE_FEED
+          & .\vocekit-qt6\scripts\deploy.ps1 -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN
+
+      - name: Import signing certificate
+        id: signing
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.VOCEKIT_SIGNING_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.VOCEKIT_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CERTIFICATE_BASE64) -or [string]::IsNullOrWhiteSpace($env:CERTIFICATE_PASSWORD)) {
+            throw "Signing certificate secrets are required; unsigned public releases are forbidden."
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "vocekit-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:CERTIFICATE_BASE64))
+          $password = ConvertTo-SecureString $env:CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password -Exportable:$false
+          if (-not $certificate) { throw "Signing certificate import failed." }
+          "thumbprint=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Sign, verify, and package
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\sign-release.ps1 -CertificateThumbprint "${{ steps.signing.outputs.thumbprint }}"
+          & .\vocekit-qt6\scripts\create-release-package.ps1 `
+            -UpdateFeedUrl $env:UPDATE_FEED `
+            -ReleaseBaseUrl $env:RELEASE_DOWNLOADS `
+            -ReleasePageBaseUrl $env:RELEASE_PAGES `
+            -ExpectedTag "${{ github.ref_name }}"
+
+      - name: Upload signed package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocekit-${{ github.ref_name }}-signed
+          path: |
+            vocekit-qt6/dist/vocekit-qt6-portable.zip
+            vocekit-qt6/dist/vocekit-qt6-portable.zip.sha256
+            vocekit-qt6/dist/update-manifest.json
+          if-no-files-found: error
+
+      - name: Publish signed GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            .\vocekit-qt6\dist\vocekit-qt6-portable.zip `
+            .\vocekit-qt6\dist\vocekit-qt6-portable.zip.sha256 `
+            .\vocekit-qt6\dist\update-manifest.json `
+            --verify-tag `
+            --title "VoceKit ${{ github.ref_name }}" `
+            --generate-notes

@@ -12,6 +12,12 @@
 #include <QStringList>
 #include <QTextStream>
 
+namespace {
+
+QString g_runtimeLogSessionId;
+
+}
+
 static QString runtimeAppBasePath()
 {
     QDir dir(QCoreApplication::applicationDirPath());
@@ -49,14 +55,33 @@ static bool writeRuntimeBytesAtomically(const QString &path, const QByteArray &d
 
 QString runtimeLogDirectory()
 {
+    if (qEnvironmentVariable("VOCEKIT_ENABLE_TEST_HOOKS") == QStringLiteral("1")) {
+        const QString overridePath = qEnvironmentVariable("VOCEKIT_RUNTIME_LOG_DIR_FOR_TESTS").trimmed();
+        if (!overridePath.isEmpty()) {
+            return QDir(overridePath).absolutePath();
+        }
+    }
     return QDir(runtimeAppBasePath()).filePath(QStringLiteral("logs"));
+}
+
+void setRuntimeLogSessionId(const QString &sessionId)
+{
+    g_runtimeLogSessionId = compactRuntimeLogText(sessionId, 80);
+}
+
+QString runtimeLogSessionId()
+{
+    return g_runtimeLogSessionId;
 }
 
 static QString runtimeLogLine(const QString &category, const QString &action, const QString &detail, qint64 elapsedMs)
 {
     QStringList parts;
-    parts << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)
-          << compactRuntimeLogText(category, 80)
+    parts << QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    if (!g_runtimeLogSessionId.isEmpty()) {
+        parts << (QStringLiteral("会话=") + g_runtimeLogSessionId);
+    }
+    parts << compactRuntimeLogText(category, 80)
           << compactRuntimeLogText(action, 140);
     if (elapsedMs >= 0) {
         parts << (QStringLiteral("耗时=") + QString::number(elapsedMs) + QStringLiteral("ms"));

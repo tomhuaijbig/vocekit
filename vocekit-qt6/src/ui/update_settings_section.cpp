@@ -60,13 +60,21 @@ UpdateSettingsSection::UpdateSettingsSection(
     versionLayout->addWidget(version);
 
     auto *channel = new QLabel(
-        updateTr8("更新通道：稳定版（GitHub Releases）"),
+        UpdateService::updatesConfigured()
+            ? updateTr8("更新通道：稳定版（已配置公开更新源）")
+            : updateTr8("更新通道：未配置（当前构建不可联网更新）"),
         versionCard
     );
+    channel->setObjectName(QStringLiteral("updateChannelLabel"));
     channel->setStyleSheet(QStringLiteral("color: #667085;"));
     versionLayout->addWidget(channel);
 
-    m_status = new QLabel(updateTr8("尚未检查更新。"), versionCard);
+    m_status = new QLabel(
+        UpdateService::updatesConfigured()
+            ? updateTr8("尚未检查更新。")
+            : updateTr8("这是开发或内部测试构建，发布者尚未配置公开更新源。"),
+        versionCard
+    );
     m_status->setObjectName(QStringLiteral("updateStatusLabel"));
     m_status->setWordWrap(true);
     m_status->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -81,7 +89,16 @@ UpdateSettingsSection::UpdateSettingsSection(
     auto *actions = new QHBoxLayout;
     m_checkButton = new QPushButton(updateTr8("检查更新"), versionCard);
     m_checkButton->setObjectName(QStringLiteral("checkForUpdatesButton"));
-    m_checkButton->setStyleSheet(buttonStyle(QStringLiteral("#111827")));
+    m_checkButton->setStyleSheet(
+        buttonStyle(QStringLiteral("#111827"))
+        + QStringLiteral(
+            "QPushButton:disabled {"
+            "  background: #d0d5dd;"
+            "  color: #667085;"
+            "}"
+        )
+    );
+    m_checkButton->setEnabled(UpdateService::updatesConfigured());
     m_installButton = new QPushButton(updateTr8("下载并安装"), versionCard);
     m_installButton->setObjectName(QStringLiteral("downloadAndInstallButton"));
     m_installButton->setStyleSheet(
@@ -226,7 +243,7 @@ UpdateSettingsSection::UpdateSettingsSection(
 
 void UpdateSettingsSection::setBusy(bool busy)
 {
-    m_checkButton->setEnabled(!busy);
+    m_checkButton->setEnabled(!busy && UpdateService::updatesConfigured());
     m_installButton->setEnabled(
         !busy && !m_availableManifest.version.isEmpty()
     );

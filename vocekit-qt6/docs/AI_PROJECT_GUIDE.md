@@ -250,15 +250,21 @@ UI 不应该直接发送 HTTP 请求，也不应直接依赖具体提供商。
 ```text
 logs/vocekit-YYYY-MM-DD.log
 logs/last_action.txt
+logs/session-last.json
+logs/runtime-health.json
+logs/crashes/*.dmp
+logs/crashes/crash-*.json
 ```
 
 日志格式大致为：
 
 ```text
-时间 | 分类 | 动作 | 耗时=123ms | 详细信息
+时间 | 会话=UUID | 分类 | 动作 | 耗时=123ms | 详细信息
 ```
 
 日志不得写入完整 API Key、Secret、用户完整隐私文本或完整请求体。
+
+`runtime_session.*` 负责会话生命周期、重复崩溃判定和安全模式恢复标记；`runtime_crash_handler.*` 在 Windows 未处理异常或 `std::terminate` 时写入 minidump。自动安全模式只关闭全局快捷键、选中文字监控和悬浮条，主窗口仍可打开用于检查配置。崩溃元数据只允许记录版本、会话、异常码、地址、时间和转储文件名，不得记录命令行、提示词或用户正文。
 
 ### `config/secrets.example.json`
 

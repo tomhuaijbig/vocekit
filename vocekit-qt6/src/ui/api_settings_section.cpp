@@ -827,7 +827,7 @@ QWidget *ApiSettingsSection::advancedApiConfigCard()
         auto *name = new QLabel(apiTr8("高级 API 自定义"));
         name->setFont(appFont(11, QFont::DemiBold));
         auto *summary = new QLabel(apiTr8(
-            "Raw JSON、System Prompt、模型获取、余额与连接检测、请求日志和费用估算"
+            "Raw JSON、System Prompt、模型获取、密钥与连接检测、请求日志和费用估算"
         ));
         summary->setWordWrap(true);
         summary->setStyleSheet(QStringLiteral("color:#4b5563;"));

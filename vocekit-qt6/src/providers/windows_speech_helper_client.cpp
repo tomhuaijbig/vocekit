@@ -309,10 +309,16 @@ WindowsSpeechHelperResult execute(
         );
     }
     const QFileInfo program(programPath);
-    if (!program.exists() || !program.isFile()) {
+    if (!program.isAbsolute()
+        || !program.exists()
+        || !program.isFile()
+        || program.suffix().compare(
+            QStringLiteral("exe"),
+            Qt::CaseInsensitive
+        ) != 0) {
         return failedResult(
             QStringLiteral("PROGRAM_MISSING"),
-            QStringLiteral("The Windows speech helper is missing.")
+            QStringLiteral("The Windows speech helper must be an existing absolute .exe path.")
         );
     }
 

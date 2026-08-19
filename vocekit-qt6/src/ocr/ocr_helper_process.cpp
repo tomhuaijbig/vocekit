@@ -134,11 +134,17 @@ OcrResult OcrHelperProcess::recognize(
 
     const QFileInfo programInfo(program);
     if (program.trimmed().isEmpty()
-        || (programInfo.isAbsolute() && !programInfo.exists())) {
+        || !programInfo.isAbsolute()
+        || !programInfo.exists()
+        || !programInfo.isFile()
+        || programInfo.suffix().compare(
+            QStringLiteral("exe"),
+            Qt::CaseInsensitive
+        ) != 0) {
         return helperError(
             request.engine,
             QStringLiteral("PROGRAM_MISSING"),
-            QStringLiteral("OCR 助手程序不存在。")
+            QStringLiteral("OCR 助手必须是存在的绝对路径 .exe 文件。")
         );
     }
 

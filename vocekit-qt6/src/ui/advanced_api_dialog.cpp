@@ -314,22 +314,16 @@ void showAdvancedApiDialog(bool useSystemProxy, QWidget *parent)
     auto *endpointGrid = new QGridLayout;
     auto *modelsEndpoint = new QLineEdit;
     modelsEndpoint->setPlaceholderText(tr8("留空使用服务商默认 Models API；也可填写完整地址"));
-    auto *balanceEndpoint = new QLineEdit;
-    balanceEndpoint->setPlaceholderText(tr8("服务商支持时填写完整 Balance API 地址"));
     endpointGrid->addWidget(new QLabel(tr8("Models API")), 0, 0);
     endpointGrid->addWidget(modelsEndpoint, 0, 1);
-    endpointGrid->addWidget(new QLabel(tr8("Balance API")), 1, 0);
-    endpointGrid->addWidget(balanceEndpoint, 1, 1);
     statusRoot->addLayout(endpointGrid);
     auto *diagnosticButtons = new QHBoxLayout;
     auto *keyTest = new QPushButton(tr8("API Key Test"));
     auto *connectionTest = new QPushButton(tr8("Connection Test"));
     auto *fetchModels = new QPushButton(tr8("Fetch Models"));
-    auto *queryBalance = new QPushButton(tr8("查询余额"));
     diagnosticButtons->addWidget(keyTest);
     diagnosticButtons->addWidget(connectionTest);
     diagnosticButtons->addWidget(fetchModels);
-    diagnosticButtons->addWidget(queryBalance);
     diagnosticButtons->addStretch();
     statusRoot->addLayout(diagnosticButtons);
     auto *diagnosticHint = new QLabel(tr8(
@@ -374,11 +368,19 @@ void showAdvancedApiDialog(bool useSystemProxy, QWidget *parent)
 
     auto *logsPage = new QWidget;
     auto *logsRoot = new QVBoxLayout(logsPage);
-    auto *logsInfo = new QLabel(tr8("日志显示实际请求、HTTP 状态、Token、耗时、停止原因和错误。认证 Header 不写入日志，敏感字段自动脱敏。"));
+    auto *logContent = new QCheckBox(tr8(
+        "记录请求与响应正文（包含问题、系统提示词、工具定义和模型回答）"
+    ));
+    logContent->setObjectName(QStringLiteral("modelRequestContentLogging"));
+    auto *logsInfo = new QLabel(tr8(
+        "默认只保存模型、参数名、HTTP 状态、Token、耗时、停止原因和错误码。"
+        "只有主动勾选后，后续请求才会保存脱敏后的完整请求与原始响应；历史日志不会自动补写。"
+    ));
     logsInfo->setWordWrap(true);
     auto *logsView = new QPlainTextEdit;
     logsView->setReadOnly(true);
     auto *reloadLogs = new QPushButton(tr8("刷新请求日志"));
+    logsRoot->addWidget(logContent);
     logsRoot->addWidget(logsInfo);
     logsRoot->addWidget(logsView, 1);
     logsRoot->addWidget(reloadLogs, 0, Qt::AlignRight);
@@ -477,9 +479,12 @@ void showAdvancedApiDialog(bool useSystemProxy, QWidget *parent)
         }
         logsView->setPlainText(prettyJson(array));
         if (!entries.isEmpty()) {
-            actualRequest->setPlainText(prettyJson(
-                entries.constLast().value(QStringLiteral("actual_request"))
-            ));
+            const QJsonObject latest = entries.constLast();
+            const QJsonValue requestView = latest.contains(
+                QStringLiteral("actual_request")
+            ) ? latest.value(QStringLiteral("actual_request"))
+              : latest.value(QStringLiteral("request_metadata"));
+            actualRequest->setPlainText(prettyJson(requestView));
         } else {
             actualRequest->clear();
         }
@@ -512,8 +517,8 @@ void showAdvancedApiDialog(bool useSystemProxy, QWidget *parent)
         promptOverride->setChecked(profile.systemPromptOverrideEnabled);
         rebuildPromptSelector();
         modelsEndpoint->setText(profile.modelsEndpoint);
-        balanceEndpoint->setText(profile.balanceEndpoint);
         fetchedModelsCache = profile.fetchedModels;
+        logContent->setChecked(profile.logRequestResponseContent);
         fetchedModelSelector->clear();
         fetchedModelSelector->addItems(fetchedModelsCache);
         inputPrice->setValue(profile.inputPricePerMillion);
@@ -537,9 +542,9 @@ void showAdvancedApiDialog(bool useSystemProxy, QWidget *parent)
         request.useSystemProxy = useSystemProxy;
         request.endpointOverride = kind == 2
             ? modelsEndpoint->text().trimmed()
-            : kind == 3 ? balanceEndpoint->text().trimmed() : QString();
+            : QString();
         const QList<QPushButton *> buttons = {
-            keyTest, connectionTest, fetchModels, queryBalance
+            keyTest, connectionTest, fetchModels
         };
         for (QPushButton *button : buttons) {
             button->setEnabled(false);
@@ -566,16 +571,12 @@ void showAdvancedApiDialog(bool useSystemProxy, QWidget *parent)
             if (kind == 1) {
                 return testModelConnection(request);
             }
-            if (kind == 2) {
-                return fetchModelApiModels(request);
-            }
-            return queryModelApiBalance(request);
+            return fetchModelApiModels(request);
         }));
     };
     QObject::connect(keyTest, &QPushButton::clicked, &dialog, [&]() { runDiagnostic(0); });
     QObject::connect(connectionTest, &QPushButton::clicked, &dialog, [&]() { runDiagnostic(1); });
     QObject::connect(fetchModels, &QPushButton::clicked, &dialog, [&]() { runDiagnostic(2); });
-    QObject::connect(queryBalance, &QPushButton::clicked, &dialog, [&]() { runDiagnostic(3); });
 
     auto *bottom = new QHBoxLayout;
     auto *pathHint = new QLabel(tr8("配置保存到本机 config/model_advanced.json"));
@@ -681,8 +682,8 @@ void showAdvancedApiDialog(bool useSystemProxy, QWidget *parent)
         profile.activeSystemPromptId = activePromptId;
         profile.systemPromptOverrideEnabled = promptOverride->isChecked();
         profile.modelsEndpoint = modelsEndpoint->text().trimmed();
-        profile.balanceEndpoint = balanceEndpoint->text().trimmed();
         profile.fetchedModels = fetchedModelsCache;
+        profile.logRequestResponseContent = logContent->isChecked();
         profile.inputPricePerMillion = inputPrice->value();
         profile.outputPricePerMillion = outputPrice->value();
         profile.reasoningPricePerMillion = reasoningPrice->value();

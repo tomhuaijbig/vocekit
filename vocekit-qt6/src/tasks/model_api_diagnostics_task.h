@@ -37,8 +37,5 @@ ModelApiDiagnosticsResult testModelConnection(
 ModelApiDiagnosticsResult fetchModelApiModels(
     const ModelApiDiagnosticsRequest &request
 );
-ModelApiDiagnosticsResult queryModelApiBalance(
-    const ModelApiDiagnosticsRequest &request
-);
 
 #endif // VOCEKIT_MODEL_API_DIAGNOSTICS_TASK_H

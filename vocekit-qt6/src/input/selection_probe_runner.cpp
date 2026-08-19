@@ -82,6 +82,37 @@ QMimeData *mimeDataFromClipboardSnapshot(const ClipboardSnapshot &snapshot)
     return data;
 }
 
+bool clipboardMatchesSnapshot(
+    const QMimeData *current,
+    const ClipboardSnapshot &snapshot)
+{
+    if (!current) {
+        return snapshot.formats.isEmpty()
+            && !snapshot.hasText
+            && !snapshot.hasHtml
+            && !snapshot.hasUrls
+            && !snapshot.hasImage;
+    }
+    if (snapshot.formats.isEmpty()
+        && !snapshot.hasText
+        && !snapshot.hasHtml
+        && !snapshot.hasUrls
+        && !snapshot.hasImage) {
+        return current->formats().isEmpty();
+    }
+    for (auto it = snapshot.formats.constBegin();
+         it != snapshot.formats.constEnd();
+         ++it) {
+        if (current->data(it.key()) != it.value()) {
+            return false;
+        }
+    }
+    return (!snapshot.hasText || current->text() == snapshot.text)
+        && (!snapshot.hasHtml || current->html() == snapshot.html)
+        && (!snapshot.hasUrls || current->urls() == snapshot.urls)
+        && (!snapshot.hasImage || current->hasImage());
+}
+
 #ifdef Q_OS_WIN
 void sendCtrlC()
 {
@@ -417,10 +448,45 @@ public:
             && fallbackSnapshot.targetProcessId == ownerProcess;
         copyShortcutDispatched = false;
         clipboardSequenceAfterCopy = 0;
-        if (copiedClipboardStillOwned) {
-            QApplication::clipboard()->setMimeData(
+        if (!copiedClipboardStillOwned) {
+            return;
+        }
+
+        QClipboard *clipboard = QApplication::clipboard();
+        quint32 safeSequence = sequence;
+        for (int attempt = 0; attempt < 4; ++attempt) {
+            if (attempt > 0) {
+                QThread::msleep(8 * attempt);
+                QApplication::processEvents();
+                const quint32 currentSequence =
+                    access.clipboardSequenceNumber();
+                const quint32 currentOwner =
+                    access.clipboardOwnerProcessId();
+#ifdef Q_OS_WIN
+                const quint32 ownProcess = quint32(GetCurrentProcessId());
+#else
+                const quint32 ownProcess = 0;
+#endif
+                const bool stillSafeToRetry =
+                    currentSequence == safeSequence
+                    && (currentOwner == fallbackSnapshot.targetProcessId
+                        || currentOwner == ownProcess
+                        || currentOwner == 0);
+                if (!stillSafeToRetry) {
+                    return;
+                }
+            }
+
+            clipboard->setMimeData(
                 mimeDataFromClipboardSnapshot(clipboardOriginal)
             );
+            QApplication::processEvents();
+            if (clipboardMatchesSnapshot(
+                    clipboard->mimeData(),
+                    clipboardOriginal)) {
+                return;
+            }
+            safeSequence = access.clipboardSequenceNumber();
         }
     }
 

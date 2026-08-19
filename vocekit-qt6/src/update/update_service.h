@@ -20,6 +20,7 @@ public:
     explicit UpdateService(QObject *parent = nullptr);
 
     static QUrl defaultFeedUrl();
+    static bool updatesConfigured();
     static QString currentVersion();
 
     void checkForUpdates(bool useSystemProxy);

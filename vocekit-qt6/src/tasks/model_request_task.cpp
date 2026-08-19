@@ -140,6 +140,9 @@ ModelRequestTaskResult runModelRequestTask(
     ModelResult loggedResult = result;
     loggedResult.durationMs = taskResult.durationMs;
     loggedResult.telemetry = taskResult.telemetry;
-    appendModelRequestLog(loggedResult);
+    appendModelRequestLog(
+        loggedResult,
+        advanced.logRequestResponseContent
+    );
     return taskResult;
 }

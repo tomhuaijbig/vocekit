@@ -1,6 +1,11 @@
 ﻿#include "model_catalog.h"
 
+#include "../config/app_paths.h"
 #include "../config/app_settings_defaults.h"
+
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
 
 namespace {
 
@@ -26,106 +31,25 @@ QVector<ModelOption> builtInModelOptions()
 
 QString canonicalCurrentOrRetiredModelId(const QString &value)
 {
-    if (value == QStringLiteral("deepseek-v4-flash")
-        || value == QStringLiteral("deepseek-v4-pro")) {
-        return value;
+    const QString trimmed = value.trimmed();
+    if (trimmed.startsWith(QStringLiteral("openai:"))
+        || trimmed.startsWith(QStringLiteral("claude:"))
+        || trimmed.startsWith(QStringLiteral("custom:"))
+        || trimmed.startsWith(QStringLiteral("deepseek-"))) {
+        return trimmed;
     }
-    if (value == QStringLiteral("gpt-5.6-sol")
-        || value == QStringLiteral("openai:gpt-5.6-sol")) {
-        return QStringLiteral("openai:gpt-5.6-sol");
+    if (trimmed.startsWith(QStringLiteral("gpt-"))) {
+        return QStringLiteral("openai:") + trimmed;
     }
-    if (value == QStringLiteral("gpt-5.6-terra")
-        || value == QStringLiteral("openai:gpt-5.6-terra")) {
-        return QStringLiteral("openai:gpt-5.6-terra");
-    }
-    if (value == QStringLiteral("gpt-5.6-luna")
-        || value == QStringLiteral("openai:gpt-5.6-luna")) {
-        return QStringLiteral("openai:gpt-5.6-luna");
-    }
-    if (value == QStringLiteral("gpt-5.5")
-        || value == QStringLiteral("openai:gpt-5.5")) {
-        return QStringLiteral("openai:gpt-5.6-sol");
-    }
-    if (value == QStringLiteral("gpt-5.4-mini")
-        || value == QStringLiteral("openai:gpt-5.4-mini")) {
-        return QStringLiteral("openai:gpt-5.6-luna");
-    }
-    if (value == QStringLiteral("gpt-5.4")
-        || value == QStringLiteral("openai:gpt-5.4")
-        || value == QStringLiteral("gpt-4o")
-        || value == QStringLiteral("openai:gpt-4o")
-        || value == QStringLiteral("gpt-4.1")
-        || value == QStringLiteral("openai:gpt-4.1")) {
-        return QStringLiteral("openai:gpt-5.6-terra");
-    }
-    if (value == QStringLiteral("claude-fable-5")
-        || value == QStringLiteral("claude:claude-fable-5")) {
-        return QStringLiteral("claude:claude-fable-5");
-    }
-    if (value == QStringLiteral("claude-opus-5")
-        || value == QStringLiteral("claude:claude-opus-5")) {
-        return QStringLiteral("claude:claude-opus-5");
-    }
-    if (value == QStringLiteral("claude-sonnet-5")
-        || value == QStringLiteral("claude:claude-sonnet-5")) {
-        return QStringLiteral("claude:claude-sonnet-5");
-    }
-    if (value == QStringLiteral("claude-haiku-4-5")
-        || value == QStringLiteral("claude:claude-haiku-4-5")) {
-        return QStringLiteral("claude:claude-haiku-4-5");
-    }
-    if (value == QStringLiteral("opus-4-8")
-        || value == QStringLiteral("claude-opus-4-8")
-        || value == QStringLiteral("claude:opus-4-8")
-        || value == QStringLiteral("claude:claude-opus-4-8")
-        || value == QStringLiteral("opus-4-7")
-        || value == QStringLiteral("claude-opus-4-7")
-        || value == QStringLiteral("claude:opus-4-7")
-        || value == QStringLiteral("claude:claude-opus-4-7")) {
-        return QStringLiteral("claude:claude-opus-5");
-    }
-    if (value == QStringLiteral("sonnet-4-6")
-        || value == QStringLiteral("claude-sonnet-4-6")
-        || value == QStringLiteral("claude:sonnet-4-6")
-        || value == QStringLiteral("claude:claude-sonnet-4-6")
-        || value == QStringLiteral("claude-3-7-sonnet")
-        || value == QStringLiteral("claude:claude-3-7-sonnet")
-        || value == QStringLiteral("claude-3-5-haiku")
-        || value == QStringLiteral("claude:claude-3-5-haiku")) {
-        return QStringLiteral("claude:claude-sonnet-5");
+    if (trimmed.startsWith(QStringLiteral("claude-"))) {
+        return QStringLiteral("claude:") + trimmed;
     }
     return QString();
 }
 
 QString migratedBuiltInModelId(const QString &value)
 {
-    const QString knownId = canonicalCurrentOrRetiredModelId(value);
-    if (!knownId.isEmpty()) {
-        return knownId;
-    }
-
-    QString modelId = value;
-    bool isOpenAi = false;
-    if (modelId.startsWith(QStringLiteral("openai:"))) {
-        isOpenAi = true;
-        modelId = modelId.mid(QStringLiteral("openai:").size());
-    }
-    if (modelId.startsWith(QStringLiteral("gpt-")) || isOpenAi) {
-        return QStringLiteral("openai:gpt-5.6-terra");
-    }
-
-    bool isClaude = false;
-    if (modelId.startsWith(QStringLiteral("claude:"))) {
-        isClaude = true;
-        modelId = modelId.mid(QStringLiteral("claude:").size());
-    }
-    if (modelId.startsWith(QStringLiteral("claude-3"))
-        || modelId.startsWith(QStringLiteral("3."))
-        || modelId.startsWith(QStringLiteral("claude-"))
-        || isClaude) {
-        return QStringLiteral("claude:claude-sonnet-5");
-    }
-    return QString();
+    return canonicalCurrentOrRetiredModelId(value);
 }
 
 const ModelOption *modelOptionForId(const QVector<ModelOption> &options, const QString &id)
@@ -159,6 +83,79 @@ QString customModelIdForTitle(const QString &title, const QVector<ModelOption> &
     return QString();
 }
 
+QString fetchedModelOptionId(
+    const QString &profileKey,
+    const QString &fetchedModel)
+{
+    const QString model = fetchedModel.trimmed();
+    if (model.isEmpty()) {
+        return QString();
+    }
+    const QString provider = modelProvider(profileKey);
+    if (provider == QStringLiteral("openai")) {
+        return model.startsWith(QStringLiteral("openai:"))
+            ? model
+            : QStringLiteral("openai:") + model;
+    }
+    if (provider == QStringLiteral("claude")) {
+        return model.startsWith(QStringLiteral("claude:"))
+            ? model
+            : QStringLiteral("claude:") + model;
+    }
+    if (provider == QStringLiteral("deepseek")) {
+        return model;
+    }
+    // A custom profile ID identifies the endpoint and credentials, while the
+    // fetched model name belongs in that profile's advanced Model override.
+    // Creating a new custom:<model> ID here would lose the endpoint binding.
+    return QString();
+}
+
+QVector<ModelAdvancedProfile> cachedModelProfiles()
+{
+    QVector<ModelAdvancedProfile> result;
+    QFile file(appConfigFilePath(QStringLiteral("model_advanced.json")));
+    if (!file.open(QIODevice::ReadOnly)) {
+        return result;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(
+        file.readAll(),
+        &parseError
+    );
+    if (parseError.error != QJsonParseError::NoError
+        || !document.isObject()) {
+        return result;
+    }
+    const QJsonObject profiles = document.object()
+        .value(QStringLiteral("profiles"))
+        .toObject();
+    for (auto it = profiles.constBegin(); it != profiles.constEnd(); ++it) {
+        if (!it.value().isObject()) {
+            continue;
+        }
+        ModelAdvancedProfile profile;
+        profile.key = it.key();
+        const QJsonArray models = it.value()
+            .toObject()
+            .value(QStringLiteral("diagnostics"))
+            .toObject()
+            .value(QStringLiteral("fetched_models"))
+            .toArray();
+        for (const QJsonValue &value : models) {
+            const QString model = value.toString().trimmed();
+            if (!model.isEmpty()
+                && !profile.fetchedModels.contains(model)) {
+                profile.fetchedModels.append(model);
+            }
+        }
+        if (!profile.fetchedModels.isEmpty()) {
+            result.append(profile);
+        }
+    }
+    return result;
+}
+
 } // namespace
 
 QVector<ModelOption> modelOptionsForSecrets(const SecretConfig &secrets)
@@ -188,9 +185,37 @@ QVector<ModelOption> modelOptionsForSecrets(const SecretConfig &secrets)
     return options;
 }
 
+QVector<ModelOption> modelOptionsForSecretsAndProfiles(
+    const SecretConfig &secrets,
+    const QVector<ModelAdvancedProfile> &advancedProfiles)
+{
+    QVector<ModelOption> options = modelOptionsForSecrets(secrets);
+    for (const ModelAdvancedProfile &profile : advancedProfiles) {
+        const QString provider = modelProvider(profile.key);
+        for (const QString &fetchedModel : profile.fetchedModels) {
+            const QString id = fetchedModelOptionId(
+                profile.key,
+                fetchedModel
+            );
+            if (id.isEmpty() || modelOptionForId(options, id)) {
+                continue;
+            }
+            ModelOption option;
+            option.id = id;
+            option.title = fetchedModel.trimmed();
+            option.hint = provider + mcTr8("（接口缓存）");
+            options.append(option);
+        }
+    }
+    return options;
+}
+
 QVector<ModelOption> modelOptions()
 {
-    return modelOptionsForSecrets(loadSecrets());
+    return modelOptionsForSecretsAndProfiles(
+        loadSecrets(),
+        cachedModelProfiles()
+    );
 }
 
 QString modelTitle(const QString &id)
@@ -204,6 +229,9 @@ QString modelTitle(const QString &id)
     const QString migratedId = migratedBuiltInModelId(trimmed);
     if (const ModelOption *option = modelOptionForId(options, migratedId)) {
         return option->title;
+    }
+    if (!migratedId.isEmpty()) {
+        return migratedId;
     }
 
     if (!trimmed.isEmpty()) {
@@ -232,7 +260,7 @@ QString modelDisplayText(const QString &id)
     if (const ModelOption *option = modelOptionForId(options, migratedId)) {
         return displayTextForOption(*option, trimmed);
     }
-    return trimmed;
+    return migratedId.isEmpty() ? trimmed : migratedId;
 }
 
 QString normalizeModelId(const QString &value, const QString &fallback)
@@ -261,7 +289,12 @@ QString normalizeModelId(const QString &value, const QString &fallback)
         return trimmed;
     }
 
-    return fallback.trimmed().isEmpty() ? defaultModelForFunction(QString()) : fallback;
+    if (!trimmed.isEmpty()) {
+        return trimmed;
+    }
+    return fallback.trimmed().isEmpty()
+        ? defaultModelForFunction(QString())
+        : fallback;
 }
 
 QString normalizeExplicitModelId(const QString &value)

@@ -11,7 +11,6 @@ VOCEKIT_VERSION_LINES = $$cat($$PWD/APP_VERSION, lines)
 VERSION = $$first(VOCEKIT_VERSION_LINES)
 isEmpty(VERSION): error("APP_VERSION file is empty")
 DEFINES += VOCEKIT_VERSION=\\\"$$VERSION\\\"
-isEmpty(VOCEKIT_UPDATE_FEED_URL): VOCEKIT_UPDATE_FEED_URL = https://api.github.com/repos/tomhuaijbig/vocekit/releases/latest
 DEFINES += VOCEKIT_UPDATE_FEED_URL=\\\"$$VOCEKIT_UPDATE_FEED_URL\\\"
 QMAKE_TARGET_COMPANY = VoceKit
 QMAKE_TARGET_PRODUCT = VoceKit
@@ -158,6 +157,7 @@ SOURCES += \
     src/recording/voice_recording_lifecycle.cpp \
     src/result_flow_config.cpp \
     src/runtime_crash_handler.cpp \
+    src/runtime_session.cpp \
     src/runtime_log.cpp \
     src/runtime/function_flow_runtime_log.cpp \
     src/storage/history_archive.cpp \
@@ -461,6 +461,7 @@ HEADERS += \
     src/recording/voice_recording_lifecycle.h \
     src/result_flow_config.h \
     src/runtime_crash_handler.h \
+    src/runtime_session.h \
     src/runtime_log.h \
     src/runtime/function_flow_runtime_log.h \
     src/storage/history_archive.h \
@@ -618,4 +619,4 @@ HEADERS += \
     src/update/update_service.h \
     src/voiceassistant.h
 
-win32:LIBS += -luser32 -lwtsapi32 -lole32 -loleaut32 -luuid
+win32:LIBS += -luser32 -lwtsapi32 -lole32 -loleaut32 -luuid -ldbghelp

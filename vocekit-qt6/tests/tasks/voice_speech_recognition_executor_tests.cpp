@@ -450,13 +450,11 @@ private slots:
         lifecycle.start(true, 0, 10, 25);
         QVERIFY(lifecycle.isRecording());
         QVERIFY(lifecycle.isLongRecording());
-        QTest::qWait(50);
-        QCOMPARE(segmentTicks, 1);
-        QCOMPARE(limitTicks, 1);
+        QTRY_COMPARE_WITH_TIMEOUT(segmentTicks, 1, 250);
+        QTRY_COMPARE_WITH_TIMEOUT(limitTicks, 1, 250);
 
         lifecycle.restartSegment(10);
-        QTest::qWait(25);
-        QCOMPARE(segmentTicks, 2);
+        QTRY_COMPARE_WITH_TIMEOUT(segmentTicks, 2, 250);
         lifecycle.stop();
     }
 

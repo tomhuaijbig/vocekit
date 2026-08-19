@@ -6,7 +6,9 @@ param(
     [string]$ValidationHelperPath = "",
     [ValidateSet("", "after-directory-move", "after-first-backup-cleanup")]
     [string]$PublishFailureInjection = "",
-    [switch]$RequireSignedBinaries
+    [switch]$RequireSignedBinaries,
+    [string]$ReleaseBaseUrl = "",
+    [string]$ReleasePageBaseUrl = ""
 )
 
 Set-StrictMode -Version Latest
@@ -261,6 +263,12 @@ try {
         Copy-Item -LiteralPath (Join-Path $projectRoot "prompts\$name") -Destination (Join-Path $stagingDir "prompts\$name") -Force
     }
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\TESTING.md") -Destination (Join-Path $stagingDir "TESTING.md") -Force
+    if (-not $RequireSignedBinaries) {
+        Set-Content `
+            -LiteralPath (Join-Path $stagingDir "UNSIGNED_TEST_BUILD") `
+            -Value "This package is unsigned and is only for controlled testing." `
+            -Encoding Ascii
+    }
 
     Assert-PackagePrivacy -RootPath $stagingDir
     & $runtimeVerifier -Configuration release -RuntimeDir $stagingDir
@@ -333,9 +341,23 @@ try {
     Write-Host "  Archive: $zipPath"
     Write-Host "  Package bytes: $packageSize"
     Write-Host "  Archive bytes: $((Get-Item -LiteralPath $zipPath).Length)"
-    & (Join-Path $PSScriptRoot "create-update-manifest.ps1") `
-        -ArchivePath $zipPath `
-        -OutputPath (Join-Path $distDir "update-manifest.json")
+    if ([string]::IsNullOrWhiteSpace($ReleaseBaseUrl) -xor
+        [string]::IsNullOrWhiteSpace($ReleasePageBaseUrl)) {
+        throw "ReleaseBaseUrl and ReleasePageBaseUrl must be supplied together."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseBaseUrl)) {
+        & (Join-Path $PSScriptRoot "create-update-manifest.ps1") `
+            -ArchivePath $zipPath `
+            -OutputPath (Join-Path $distDir "update-manifest.json") `
+            -ReleaseBaseUrl $ReleaseBaseUrl `
+            -ReleasePageBaseUrl $ReleasePageBaseUrl
+    } else {
+        $staleManifestPath = Join-Path $distDir "update-manifest.json"
+        if (Test-Path -LiteralPath $staleManifestPath -PathType Leaf) {
+            Remove-Item -LiteralPath $staleManifestPath -Force
+        }
+        Write-Warning "Internal test package created without an update manifest."
+    }
 }
 finally {
     if ($createdStage -and [IO.Directory]::Exists($stagingDir)) { [IO.Directory]::Delete($stagingDir, $true) }

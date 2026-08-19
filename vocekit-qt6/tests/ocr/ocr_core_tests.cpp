@@ -44,6 +44,7 @@ private slots:
     void parsesHelperFailure();
     void rejectsMalformedHelperResponse();
     void runsHelperSuccess();
+    void rejectsNonExecutableHelperBeforeLaunch();
     void returnsHelperFailure();
     void rejectsMalformedHelperProcessOutput();
     void timesOutHelperProcess();
@@ -301,6 +302,28 @@ void OcrCoreTests::runsHelperSuccess()
 
     QVERIFY2(result.ok, qPrintable(result.errorMessage));
     QCOMPARE(result.text, QString::fromUtf8("测试 ABC"));
+}
+
+void OcrCoreTests::rejectsNonExecutableHelperBeforeLaunch()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("unexpected-helper.py"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QVERIFY(file.write("print('must never launch')\n") > 0);
+    file.close();
+
+    OcrHelperProcess helper;
+    const OcrResult result = helper.recognize(
+        path,
+        QStringList(),
+        helperRequest(),
+        1000
+    );
+    QVERIFY(!result.ok);
+    QCOMPARE(result.errorCode, QStringLiteral("PROGRAM_MISSING"));
+    QVERIFY(result.errorMessage.contains(QStringLiteral(".exe")));
 }
 
 void OcrCoreTests::returnsHelperFailure()

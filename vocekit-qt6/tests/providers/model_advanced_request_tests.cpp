@@ -18,6 +18,7 @@ private slots:
     void parsesUsageFinishReasonAndStructuredCitations();
     void mergesAnthropicStreamingMetadata();
     void redactsOnlySensitiveRequestFields();
+    void requestLogsDefaultToMetadataOnly();
 };
 
 void ModelAdvancedRequestTests::
@@ -71,8 +72,8 @@ storesIndependentSystemPromptAndDiagnosticsSettings()
         QString()
     });
     profile.modelsEndpoint = QStringLiteral("https://example.test/v1/models");
-    profile.balanceEndpoint = QStringLiteral("https://example.test/balance");
     profile.fetchedModels << QStringLiteral("vendor-new-model");
+    profile.logRequestResponseContent = true;
     profile.inputPricePerMillion = 1.25;
     profile.outputPricePerMillion = 3.5;
 
@@ -84,6 +85,7 @@ storesIndependentSystemPromptAndDiagnosticsSettings()
     QCOMPARE(loaded.systemPrompts.size(), 1);
     QVERIFY(loaded.systemPrompts.first().content.isEmpty());
     QCOMPARE(loaded.fetchedModels, QStringList() << QStringLiteral("vendor-new-model"));
+    QVERIFY(loaded.logRequestResponseContent);
     QCOMPARE(loaded.inputPricePerMillion, 1.25);
     QCOMPARE(loaded.outputPricePerMillion, 3.5);
 }
@@ -187,6 +189,53 @@ void ModelAdvancedRequestTests::redactsOnlySensitiveRequestFields()
     QVERIFY(!redactedModelLogText(QStringLiteral(
         "{\"error\":{\"api_key\":\"private-value\"}}"
     )).contains(QStringLiteral("private-value")));
+}
+
+void ModelAdvancedRequestTests::requestLogsDefaultToMetadataOnly()
+{
+    ModelResult result;
+    result.text = QStringLiteral("private answer");
+    result.rawResponse = QByteArrayLiteral(
+        "{\"answer\":\"private response\",\"api_key\":\"secret\"}"
+    );
+    result.telemetry.providerId = QStringLiteral("openai");
+    result.telemetry.modelId = QStringLiteral("openai:test-model");
+    result.telemetry.httpStatusCode = 200;
+    result.telemetry.actualRequest.insert(
+        QStringLiteral("model"),
+        QStringLiteral("test-model")
+    );
+    result.telemetry.actualRequest.insert(
+        QStringLiteral("temperature"),
+        0.4
+    );
+    QJsonObject message;
+    message.insert(QStringLiteral("role"), QStringLiteral("user"));
+    message.insert(QStringLiteral("content"), QStringLiteral("private question"));
+    result.telemetry.actualRequest.insert(
+        QStringLiteral("messages"),
+        QJsonArray() << message
+    );
+
+    const QJsonObject metadataOnly = modelRequestLogEntry(result, false);
+    QVERIFY(metadataOnly.contains(QStringLiteral("request_metadata")));
+    QVERIFY(!metadataOnly.contains(QStringLiteral("actual_request")));
+    QVERIFY(!metadataOnly.contains(QStringLiteral("raw_response")));
+    const QString metadataText = QString::fromUtf8(
+        QJsonDocument(metadataOnly).toJson(QJsonDocument::Compact)
+    );
+    QVERIFY(!metadataText.contains(QStringLiteral("private question")));
+    QVERIFY(!metadataText.contains(QStringLiteral("private response")));
+
+    const QJsonObject contentLog = modelRequestLogEntry(result, true);
+    QVERIFY(contentLog.contains(QStringLiteral("actual_request")));
+    QVERIFY(contentLog.contains(QStringLiteral("raw_response")));
+    const QString contentText = QString::fromUtf8(
+        QJsonDocument(contentLog).toJson(QJsonDocument::Compact)
+    );
+    QVERIFY(contentText.contains(QStringLiteral("private question")));
+    QVERIFY(contentText.contains(QStringLiteral("private response")));
+    QVERIFY(!contentText.contains(QStringLiteral("\"secret\"")));
 }
 
 QTEST_MAIN(ModelAdvancedRequestTests)

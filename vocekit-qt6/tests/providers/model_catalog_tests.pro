@@ -16,6 +16,7 @@ SOURCES += \
 
 HEADERS += \
     ../../src/config/app_settings_defaults.h \
+    ../../src/config/model_advanced_settings.h \
     ../../src/config/secret_config.h \
     ../../src/config/secret_store.h \
     ../../src/domain/app_legacy_types.h \

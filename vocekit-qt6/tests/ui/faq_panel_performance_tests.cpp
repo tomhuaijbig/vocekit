@@ -3,6 +3,8 @@
 #include "../../src/ui/faq_panel.h"
 
 #include <QElapsedTimer>
+#include <QLabel>
+#include <QPushButton>
 
 class FaqPanelPerformanceTests : public QObject
 {
@@ -11,6 +13,7 @@ class FaqPanelPerformanceTests : public QObject
 private slots:
     void constructsCompleteFaqWithoutBlockingTheUi();
     void keepsDeferredEntriesSearchableAndAddressable();
+    void hidesInternalIdsAndHasNoManualLoadMoreButton();
 };
 
 void FaqPanelPerformanceTests::constructsCompleteFaqWithoutBlockingTheUi()
@@ -59,6 +62,25 @@ void FaqPanelPerformanceTests::keepsDeferredEntriesSearchableAndAddressable()
 
     QCOMPARE(shownMatches, 1);
     QVERIFY2(materializedCards < 49, "FAQ search should not eagerly materialize every card");
+}
+
+void FaqPanelPerformanceTests::hidesInternalIdsAndHasNoManualLoadMoreButton()
+{
+    FaqPanel panel;
+    panel.showFaqId(QStringLiteral("function-flow-schema"));
+
+    for (QLabel *label : panel.findChildren<QLabel *>()) {
+        QVERIFY2(
+            label->text() != QStringLiteral("function-flow-schema"),
+            "Internal FAQ identifiers must stay searchable but not visible."
+        );
+    }
+    for (QPushButton *button : panel.findChildren<QPushButton *>()) {
+        QVERIFY2(
+            !button->text().contains(QString::fromUtf8("显示更多")),
+            "FAQ pagination must load automatically while scrolling."
+        );
+    }
 }
 
 QTEST_MAIN(FaqPanelPerformanceTests)

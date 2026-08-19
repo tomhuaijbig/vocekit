@@ -132,8 +132,8 @@ private slots:
         ));
 
         input.modelOptions = QVector<ModelOption>()
-            << ModelOption{QStringLiteral("openai:gpt-5.6-luna"),
-                           QStringLiteral("GPT-5.6 Luna"),
+            << ModelOption{QStringLiteral("openai:gpt-5.4-mini"),
+                           QStringLiteral("gpt-5.4-mini"),
                            QStringLiteral("OpenAI")};
         input.actionId = QStringLiteral("ai-search");
         const SelectionContextModelRequest searched =
@@ -141,7 +141,7 @@ private slots:
         QVERIFY(searched.valid);
         QCOMPARE(
             searched.modelRequest.modelId,
-            QStringLiteral("openai:gpt-5.6-luna")
+            QStringLiteral("openai:gpt-5.4-mini")
         );
         QVERIFY(searched.modelRequest.userPrompt.contains(
             aiSearch.promptOverride

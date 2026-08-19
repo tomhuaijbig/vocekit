@@ -81,10 +81,6 @@ QJsonObject modelAdvancedProfileToJson(const ModelAdvancedProfile &profile)
         QStringLiteral("models_endpoint"),
         profile.modelsEndpoint.trimmed()
     );
-    diagnostics.insert(
-        QStringLiteral("balance_endpoint"),
-        profile.balanceEndpoint.trimmed()
-    );
     QJsonArray fetchedModels;
     for (const QString &model : profile.fetchedModels) {
         if (!model.trimmed().isEmpty()) {
@@ -93,6 +89,13 @@ QJsonObject modelAdvancedProfileToJson(const ModelAdvancedProfile &profile)
     }
     diagnostics.insert(QStringLiteral("fetched_models"), fetchedModels);
     object.insert(QStringLiteral("diagnostics"), diagnostics);
+
+    QJsonObject privacy;
+    privacy.insert(
+        QStringLiteral("log_request_response_content"),
+        profile.logRequestResponseContent
+    );
+    object.insert(QStringLiteral("privacy"), privacy);
 
     QJsonObject pricing;
     if (profile.inputPricePerMillion >= 0.0) {
@@ -164,10 +167,6 @@ ModelAdvancedProfile modelAdvancedProfileFromJson(
         .value(QStringLiteral("models_endpoint"))
         .toString()
         .trimmed();
-    profile.balanceEndpoint = diagnostics
-        .value(QStringLiteral("balance_endpoint"))
-        .toString()
-        .trimmed();
     for (const QJsonValue &value :
          diagnostics.value(QStringLiteral("fetched_models")).toArray()) {
         const QString model = value.toString().trimmed();
@@ -175,6 +174,12 @@ ModelAdvancedProfile modelAdvancedProfileFromJson(
             profile.fetchedModels.append(model);
         }
     }
+
+    profile.logRequestResponseContent = object
+        .value(QStringLiteral("privacy"))
+        .toObject()
+        .value(QStringLiteral("log_request_response_content"))
+        .toBool(false);
 
     const QJsonObject pricing = object.value(QStringLiteral("pricing")).toObject();
     profile.inputPricePerMillion = pricing.contains(

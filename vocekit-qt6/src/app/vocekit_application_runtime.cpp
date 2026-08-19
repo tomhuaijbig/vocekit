@@ -31,6 +31,7 @@
 #include "../runtime/function_flow_runtime_log.h"
 #include "../runtime_crash_handler.h"
 #include "../runtime_log.h"
+#include "../runtime_session.h"
 #include "../storage/history_paths.h"
 #include "../storage/history_record_service.h"
 #include "../storage/prompt_library_store.h"
@@ -279,12 +280,25 @@ HistoryRecordSaveRequest historyRequestForFunctionFlow(
 int runVocekitApplication(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    QApplication::setApplicationName(QStringLiteral("vocekit"));
+    QApplication::setApplicationVersion(QString::fromLatin1(VOCEKIT_VERSION));
+    QApplication::setOrganizationName(QStringLiteral("vocekit"));
     installRuntimeCrashHandlers();
+    const RuntimeSessionInfo runtimeSession = beginRuntimeSession(
+        QCoreApplication::arguments(),
+        QString::fromLatin1(VOCEKIT_VERSION)
+    );
+    const bool safeMode = runtimeSession.safeMode;
     const bool startedByAutoStart = isAutoStartLaunch();
     logRuntimeEvent(
         tr8("程序"),
         tr8("启动"),
-        QStringLiteral("版本=vocekit，开机自启动=") + (startedByAutoStart ? QStringLiteral("是") : QStringLiteral("否"))
+        QStringLiteral("版本=%1，Qt=%2，开机自启动=%3，安全模式=%4，可执行文件=%5")
+            .arg(QString::fromLatin1(VOCEKIT_VERSION))
+            .arg(QString::fromLatin1(qVersion()))
+            .arg(startedByAutoStart ? QStringLiteral("是") : QStringLiteral("否"))
+            .arg(safeMode ? QStringLiteral("是") : QStringLiteral("否"))
+            .arg(QCoreApplication::applicationFilePath())
     );
     QStyle *baseStyle = QStyleFactory::create(app.style()->objectName());
     if (!baseStyle) {
@@ -300,9 +314,6 @@ int runVocekitApplication(int argc, char *argv[])
     app.installTranslator(&qtChineseTranslator);
 
     QApplication::setQuitOnLastWindowClosed(false);
-    QApplication::setApplicationName(QStringLiteral("vocekit"));
-    QApplication::setApplicationVersion(QString::fromLatin1(VOCEKIT_VERSION));
-    QApplication::setOrganizationName(QStringLiteral("vocekit"));
     app.setFont(appFont());
     ChineseTextContextMenu chineseTextContextMenu(&app);
     app.installEventFilter(&chineseTextContextMenu);
@@ -639,7 +650,16 @@ int runVocekitApplication(int argc, char *argv[])
         };
     VoiceController voice(voiceAccess, &bar, hub.data());
     HotkeyRefreshCoordinator hotkeyRefreshCoordinator(
-        [&](const GlobalHotkeySettingsSnapshot &snapshot) {
+        [&, safeMode](const GlobalHotkeySettingsSnapshot &snapshot) {
+            if (safeMode) {
+                voice.setActiveHoldFunctions(QSet<QString>());
+                logRuntimeEvent(
+                    tr8("安全模式"),
+                    tr8("跳过全局快捷键注册"),
+                    QStringLiteral("reason=") + runtimeSession.safeModeReason
+                );
+                return;
+            }
             const QStringList hotkeyFailures =
                 hotkeys.registerFromSnapshot(snapshot);
             voice.setActiveHoldFunctions(
@@ -1300,7 +1320,9 @@ int runVocekitApplication(int argc, char *argv[])
             }
         }
     );
-    qApp->installNativeEventFilter(&hotkeys);
+    if (!safeMode) {
+        qApp->installNativeEventFilter(&hotkeys);
+    }
 
     refreshFunctionFlowRuntime =
         [&](const QStringList &functionIds) {
@@ -1361,11 +1383,15 @@ int runVocekitApplication(int argc, char *argv[])
     };
     settingsChanged = [&]() {
         settings.load();
-        setWindowsAutoStartEnabled(settings.autoStartEnabled());
+        if (!safeMode) {
+            setWindowsAutoStartEnabled(settings.autoStartEnabled());
+        }
         refreshFunctionFlowRuntime(QStringList());
         refreshFunctionFlowHotkeys(QStringList());
-        bar.setEnabledVisible(settings.floatingBarEnabled());
-        selectionContextFeature.refresh();
+        bar.setEnabledVisible(!safeMode && settings.floatingBarEnabled());
+        if (!safeMode) {
+            selectionContextFeature.refresh();
+        }
         SettingsChangeSet change;
         events.publishSettingsChanged(change);
         logRuntimeEvent(
@@ -1376,7 +1402,9 @@ int runVocekitApplication(int argc, char *argv[])
                 + QStringLiteral("，浮动条=") + (settings.floatingBarEnabled() ? QStringLiteral("开") : QStringLiteral("关"))
         );
     };
-    selectionContextFeature.start();
+    if (!safeMode) {
+        selectionContextFeature.start();
+    }
     settingsChanged();
 
     TrayController::Callbacks trayCallbacks;
@@ -1465,17 +1493,50 @@ int runVocekitApplication(int argc, char *argv[])
 
     const QRect screen = primaryAvailableScreenGeometry();
     hub->move(screen.left() + 60, screen.top() + 40);
-    if (!startedByAutoStart) {
+    if (!startedByAutoStart || safeMode) {
         hub->show();
     }
-    bar.setEnabledVisible(settings.floatingBarEnabled());
+    bar.setEnabledVisible(!safeMode && settings.floatingBarEnabled());
+    if (safeMode) {
+        QTimer::singleShot(0, hub.data(), [&hub, runtimeSession]() {
+            const QString detail = runtimeSession.automaticSafeMode
+                ? tr8(
+                    "检测到最近 10 分钟内连续异常退出，已临时关闭全局快捷键、选中文字监控和悬浮条。"
+                    "本次正常退出后，下次启动会自动恢复。崩溃转储位于 logs/crashes。"
+                )
+                : tr8(
+                    "当前由 --safe-mode 启动，已临时关闭全局快捷键、选中文字监控和悬浮条。"
+                    "崩溃转储位于 logs/crashes。"
+                );
+            showAttentionWarning(hub.data(), tr8("VoceKit 安全模式"), detail);
+        });
+    }
+
+    const int diagnosticExitDelayMs = runtimeDiagnosticExitDelayMs(
+        QCoreApplication::arguments()
+    );
+    if (diagnosticExitDelayMs >= 0) {
+        logRuntimeEvent(
+            tr8("程序"),
+            tr8("诊断退出已安排"),
+            QStringLiteral("delayMs=") + QString::number(diagnosticExitDelayMs)
+        );
+        QTimer::singleShot(
+            diagnosticExitDelayMs,
+            &app,
+            &QCoreApplication::quit
+        );
+    }
 
     const int exitCode = app.exec();
     selectionContextFeature.stop();
     logRuntimeEvent(tr8("程序"), tr8("退出"), QStringLiteral("exitCode=") + QString::number(exitCode));
+    finishRuntimeSession(exitCode);
     setAttentionFaqCallback(AttentionFaqCallback());
     hotkeys.setHoldCallback(std::function<void(const QString &, HoldShortcutTransition)>());
-    qApp->removeNativeEventFilter(&hotkeys);
+    if (!safeMode) {
+        qApp->removeNativeEventFilter(&hotkeys);
+    }
     hotkeys.setCallback(std::function<void(const QString &)>());
     functionFlowExecution.cancel();
     flowExecutionController = nullptr;

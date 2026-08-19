@@ -139,8 +139,8 @@ QWidget *createHistoryRowWidget(
     preview->setFont(appFont(10));
     preview->setStyleSheet(QStringLiteral("color: #667085;"));
     preview->setWordWrap(true);
-    preview->setMinimumHeight(qMax(78, rowHeight - 70));
-    preview->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    preview->setMinimumHeight(preview->fontMetrics().lineSpacing());
+    preview->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     preview->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     preview->setAttribute(Qt::WA_TransparentForMouseEvents);
 
@@ -163,7 +163,7 @@ QWidget *createHistoryRowWidget(
     header->addWidget(createHistoryMenuButton(entry, callbacks, row), 0, Qt::AlignTop);
 
     layout->addLayout(header);
-    layout->addWidget(preview, 1);
+    layout->addWidget(preview);
 
     row->setStyleSheet(QStringLiteral(
         "QWidget#historyRow { background: #f9fafb; border: 1px solid #eef0f4; border-radius: 6px; }"

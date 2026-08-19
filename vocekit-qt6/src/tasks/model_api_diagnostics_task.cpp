@@ -26,7 +26,6 @@ struct ResolvedDiagnostics
 {
     QString provider;
     QUrl modelsUrl;
-    QUrl balanceUrl;
     QByteArray authHeaderName;
     QByteArray authHeaderValue;
     bool anthropic = false;
@@ -63,7 +62,6 @@ ResolvedDiagnostics resolveDiagnostics(const QString &modelId)
     resolved.provider = modelProvider(modelId);
     if (resolved.provider == QStringLiteral("deepseek")) {
         resolved.modelsUrl = QUrl(QStringLiteral("https://api.deepseek.com/models"));
-        resolved.balanceUrl = QUrl(QStringLiteral("https://api.deepseek.com/user/balance"));
         resolved.authHeaderName = QByteArrayLiteral("Authorization");
         resolved.authHeaderValue = QByteArrayLiteral("Bearer ")
             + secrets.deepseekApiKey.trimmed().toUtf8();
@@ -141,20 +139,17 @@ QString serverMessage(const QByteArray &body)
 }
 
 ModelApiDiagnosticsResult getEndpoint(
-    const ModelApiDiagnosticsRequest &request,
-    bool balance)
+    const ModelApiDiagnosticsRequest &request)
 {
     ModelApiDiagnosticsResult result;
     const ResolvedDiagnostics resolved = resolveDiagnostics(request.modelId);
-    QUrl endpoint = balance ? resolved.balanceUrl : resolved.modelsUrl;
+    QUrl endpoint = resolved.modelsUrl;
     if (!request.endpointOverride.trimmed().isEmpty()) {
         endpoint = urlWithDefaultHttps(request.endpointOverride);
     }
     if (!endpoint.isValid() || endpoint.host().isEmpty()) {
         result.category = QStringLiteral("Unsupported");
-        result.message = balance
-            ? tr8("当前服务商没有预设余额接口；可以手动填写 Balance API 地址。")
-            : tr8("模型列表接口地址无效。请检查地址或手动填写模型名称。");
+        result.message = tr8("模型列表接口地址无效。请检查地址或手动填写模型名称。");
         return result;
     }
 
@@ -210,11 +205,6 @@ ModelApiDiagnosticsResult getEndpoint(
         return result;
     }
     result.data = document.object();
-    if (balance) {
-        result.message = tr8("余额接口返回成功。仅展示服务端实际返回的字段。");
-        return result;
-    }
-
     auto appendModels = [&](const QJsonArray &array) {
         for (const QJsonValue &value : array) {
             const QString id = value.isObject()
@@ -358,11 +348,5 @@ ModelApiDiagnosticsResult testModelConnection(
 ModelApiDiagnosticsResult fetchModelApiModels(
     const ModelApiDiagnosticsRequest &request)
 {
-    return getEndpoint(request, false);
-}
-
-ModelApiDiagnosticsResult queryModelApiBalance(
-    const ModelApiDiagnosticsRequest &request)
-{
-    return getEndpoint(request, true);
+    return getEndpoint(request);
 }

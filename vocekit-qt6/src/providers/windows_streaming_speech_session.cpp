@@ -123,7 +123,13 @@ bool WindowsStreamingSpeechSession::start(QString *error)
     }
 
     m_state = StreamingSpeechState::Connecting;
-    if (!QFileInfo(m_programPath).isFile()) {
+    const QFileInfo programInfo(m_programPath);
+    if (!programInfo.isAbsolute()
+        || !programInfo.isFile()
+        || programInfo.suffix().compare(
+            QStringLiteral("exe"),
+            Qt::CaseInsensitive
+        ) != 0) {
         QTimer::singleShot(0, this, [this]() {
             fail(
                 QStringLiteral("PROGRAM_MISSING"),

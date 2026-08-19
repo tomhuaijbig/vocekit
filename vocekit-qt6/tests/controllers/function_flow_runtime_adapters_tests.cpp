@@ -131,7 +131,7 @@ class FunctionFlowRuntimeAdaptersTests : public QObject
 
 private slots:
     void resolvesAndFreezesDependencies();
-    void migratesLegacyModelOnlyInResolvedRuntimeDependencies();
+    void preservesAvailableLegacyModelWithoutSilentReplacement();
     void keepsInvalidModelReferencesInvalid_data();
     void keepsInvalidModelReferencesInvalid();
     void rejectsUnconfiguredSpeechProviderBeforeRecording();
@@ -230,7 +230,7 @@ resolvesAndFreezesDependencies()
 }
 
 void FunctionFlowRuntimeAdaptersTests::
-migratesLegacyModelOnlyInResolvedRuntimeDependencies()
+preservesAvailableLegacyModelWithoutSilentReplacement()
 {
     FunctionFlowExecutionPlan plan = planForSelectionModel();
     plan.nodes[QStringLiteral("model")]
@@ -243,7 +243,7 @@ migratesLegacyModelOnlyInResolvedRuntimeDependencies()
     };
     access.availableModelIds = []() {
         return QStringList()
-            << QStringLiteral("claude:claude-sonnet-5");
+            << QStringLiteral("claude:claude-sonnet-4-6");
     };
     access.isUsableExternalTargetWindow =
         [](FunctionFlowTargetWindowHandle target) {
@@ -265,7 +265,7 @@ migratesLegacyModelOnlyInResolvedRuntimeDependencies()
     QCOMPARE(
         resolved->byNodeId.value(QStringLiteral("model"))
             .modelId,
-        QStringLiteral("claude:claude-sonnet-5")
+        QStringLiteral("claude:claude-sonnet-4-6")
     );
     QCOMPARE(
         plan.nodes.value(QStringLiteral("model"))

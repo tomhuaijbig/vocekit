@@ -40,7 +40,7 @@ private slots:
     void clampsConfiguredOpacity();
     void reportsTheResolvedActionOnce();
     void closingBusyPopupRequestsCancellation();
-    void retryDialogSelectsTheMigratedCurrentModel();
+    void retryDialogPreservesCurrentModelOutsideBootstrapCatalog();
     void rendersMarkdownAndKeepsEditableSource();
     void acceptsRawResponseAndTelemetryDetails();
     void rendersDenseRichResponseAtLargeFont();
@@ -171,7 +171,7 @@ void ResultChoicePopupHeaderTests::closingBusyPopupRequestsCancellation()
 }
 
 void ResultChoicePopupHeaderTests::
-retryDialogSelectsTheMigratedCurrentModel()
+retryDialogPreservesCurrentModelOutsideBootstrapCatalog()
 {
     ResultPopupWindowPreferences preferences;
     ResultChoicePopup popup(
@@ -214,9 +214,9 @@ retryDialogSelectsTheMigratedCurrentModel()
 
     popup.chooseModelAndRetry();
     QVERIFY(dialogFound);
-    QCOMPARE(selectedModel, QStringLiteral("openai:gpt-5.6-terra"));
+    QCOMPARE(selectedModel, QStringLiteral("openai:gpt-5.4"));
     QVERIFY(selectedModel != QStringLiteral("deepseek-v4-flash"));
-    QCOMPARE(oldModelIndex, -1);
+    QVERIFY(oldModelIndex >= 0);
 }
 
 void ResultChoicePopupHeaderTests::rendersMarkdownAndKeepsEditableSource()

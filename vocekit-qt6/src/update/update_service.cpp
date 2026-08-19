@@ -15,7 +15,7 @@
 #include <QStandardPaths>
 
 #ifndef VOCEKIT_UPDATE_FEED_URL
-#define VOCEKIT_UPDATE_FEED_URL "https://api.github.com/repos/tomhuaijbig/vocekit/releases/latest"
+#define VOCEKIT_UPDATE_FEED_URL ""
 #endif
 
 namespace {
@@ -89,6 +89,11 @@ QUrl UpdateService::defaultFeedUrl()
     return QUrl(QString::fromUtf8(VOCEKIT_UPDATE_FEED_URL));
 }
 
+bool UpdateService::updatesConfigured()
+{
+    return isSecureUpdateUrl(defaultFeedUrl());
+}
+
 QString UpdateService::currentVersion()
 {
     const QString version = QCoreApplication::applicationVersion().trimmed();
@@ -103,6 +108,13 @@ bool UpdateService::isBusy() const
 void UpdateService::checkForUpdates(bool useSystemProxy)
 {
     if (isBusy()) {
+        return;
+    }
+    if (!updatesConfigured()) {
+        fail(
+            QStringLiteral("此构建未配置公开更新源，在线更新不可用。"),
+            QStringLiteral("发布构建必须通过 -UpdateFeedUrl 注入可公开访问的 HTTPS 地址。")
+        );
         return;
     }
     m_manifest = UpdateManifest();

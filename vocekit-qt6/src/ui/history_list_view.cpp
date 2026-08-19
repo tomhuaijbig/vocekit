@@ -29,6 +29,8 @@ static QListWidget *createBaseHistoryList()
 {
     auto *list = new QListWidget;
     list->setFrameShape(QFrame::NoFrame);
+    list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    list->setUniformItemSizes(false);
     list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     list->setTextElideMode(Qt::ElideNone);
     list->setStyleSheet(QStringLiteral(

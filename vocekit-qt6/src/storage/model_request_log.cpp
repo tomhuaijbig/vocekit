@@ -65,6 +65,79 @@ QJsonObject usageJson(const ModelTokenUsage &usage)
     return object;
 }
 
+QJsonObject requestMetadataJson(const QJsonObject &request)
+{
+    QJsonObject metadata;
+    QJsonArray fieldNames;
+    for (const QString &key : request.keys()) {
+        fieldNames.append(key);
+    }
+    metadata.insert(QStringLiteral("field_names"), fieldNames);
+
+    const QStringList safeScalarKeys = QStringList()
+        << QStringLiteral("model")
+        << QStringLiteral("temperature")
+        << QStringLiteral("top_p")
+        << QStringLiteral("max_tokens")
+        << QStringLiteral("max_output_tokens")
+        << QStringLiteral("frequency_penalty")
+        << QStringLiteral("presence_penalty")
+        << QStringLiteral("reasoning_effort")
+        << QStringLiteral("stream")
+        << QStringLiteral("seed")
+        << QStringLiteral("n")
+        << QStringLiteral("logprobs")
+        << QStringLiteral("top_logprobs")
+        << QStringLiteral("parallel_tool_calls")
+        << QStringLiteral("service_tier");
+    QJsonObject parameters;
+    for (const QString &key : safeScalarKeys) {
+        const QJsonValue value = request.value(key);
+        if (value.isBool() || value.isDouble() || value.isString()) {
+            parameters.insert(key, value);
+        }
+    }
+    if (!parameters.isEmpty()) {
+        metadata.insert(QStringLiteral("parameters"), parameters);
+    }
+
+    const QJsonValue messages = request.value(QStringLiteral("messages"));
+    if (messages.isArray()) {
+        metadata.insert(
+            QStringLiteral("message_count"),
+            messages.toArray().size()
+        );
+    }
+    const QJsonValue input = request.value(QStringLiteral("input"));
+    if (!input.isUndefined()) {
+        metadata.insert(QStringLiteral("input_present"), true);
+        if (input.isArray()) {
+            metadata.insert(
+                QStringLiteral("input_item_count"),
+                input.toArray().size()
+            );
+        }
+    }
+    const QJsonValue tools = request.value(QStringLiteral("tools"));
+    if (tools.isArray()) {
+        metadata.insert(QStringLiteral("tool_count"), tools.toArray().size());
+    }
+    const QJsonObject responseFormat = request
+        .value(QStringLiteral("response_format"))
+        .toObject();
+    const QString responseFormatType = responseFormat
+        .value(QStringLiteral("type"))
+        .toString()
+        .trimmed();
+    if (!responseFormatType.isEmpty()) {
+        metadata.insert(
+            QStringLiteral("response_format_type"),
+            responseFormatType
+        );
+    }
+    return metadata;
+}
+
 } // namespace
 
 QString modelRequestLogPath()
@@ -124,12 +197,10 @@ QString redactedModelLogText(const QString &text)
     return result;
 }
 
-bool appendModelRequestLog(const ModelResult &result)
+QJsonObject modelRequestLogEntry(
+    const ModelResult &result,
+    bool includeRequestResponseContent)
 {
-    const QString path = modelRequestLogPath();
-    if (!ensureParentDirectoryForFile(path)) {
-        return false;
-    }
     QJsonObject entry;
     const ModelRequestTelemetry &telemetry = result.telemetry;
     entry.insert(
@@ -141,9 +212,15 @@ bool appendModelRequestLog(const ModelResult &result)
     entry.insert(QStringLiteral("provider"), telemetry.providerId);
     entry.insert(QStringLiteral("model"), telemetry.modelId);
     entry.insert(
-        QStringLiteral("actual_request"),
-        redactedModelRequestJson(telemetry.actualRequest)
+        QStringLiteral("request_metadata"),
+        requestMetadataJson(telemetry.actualRequest)
     );
+    if (includeRequestResponseContent) {
+        entry.insert(
+            QStringLiteral("actual_request"),
+            redactedModelRequestJson(telemetry.actualRequest)
+        );
+    }
     entry.insert(QStringLiteral("http_status"), telemetry.httpStatusCode);
     entry.insert(QStringLiteral("duration_ms"), double(result.durationMs));
     if (telemetry.firstResponseMs >= 0) {
@@ -170,34 +247,73 @@ bool appendModelRequestLog(const ModelResult &result)
     if (!result.error.isEmpty()) {
         QJsonObject error;
         error.insert(QStringLiteral("code"), result.error.code);
-        error.insert(
-            QStringLiteral("message"),
-            redactedModelLogText(result.error.message)
-        );
-        error.insert(
-            QStringLiteral("detail"),
-            redactedModelLogText(result.error.detail)
-        );
+        if (includeRequestResponseContent) {
+            error.insert(
+                QStringLiteral("message"),
+                redactedModelLogText(result.error.message)
+            );
+            error.insert(
+                QStringLiteral("detail"),
+                redactedModelLogText(result.error.detail)
+            );
+        } else {
+            error.insert(
+                QStringLiteral("message_available"),
+                !result.error.message.trimmed().isEmpty()
+            );
+            error.insert(
+                QStringLiteral("detail_available"),
+                !result.error.detail.trimmed().isEmpty()
+            );
+        }
         entry.insert(QStringLiteral("error"), error);
     }
     if (!result.rawResponse.isEmpty()) {
-        QJsonParseError parseError;
-        const QJsonDocument raw = QJsonDocument::fromJson(result.rawResponse, &parseError);
-        if (parseError.error == QJsonParseError::NoError) {
-            const QJsonValue safeResponse = raw.isObject()
-                ? QJsonValue(redactedModelRequestJson(raw.object()))
-                : redactValue(QString(), QJsonValue(raw.array()));
-            entry.insert(
-                QStringLiteral("raw_response"),
-                safeResponse
+        entry.insert(
+            QStringLiteral("raw_response_bytes"),
+            double(result.rawResponse.size())
+        );
+        if (includeRequestResponseContent) {
+            QJsonParseError parseError;
+            const QJsonDocument raw = QJsonDocument::fromJson(
+                result.rawResponse,
+                &parseError
             );
-        } else {
-            entry.insert(
-                QStringLiteral("raw_response_text"),
-                redactedModelLogText(QString::fromUtf8(result.rawResponse))
-            );
+            if (parseError.error == QJsonParseError::NoError) {
+                const QJsonValue safeResponse = raw.isObject()
+                    ? QJsonValue(redactedModelRequestJson(raw.object()))
+                    : redactValue(QString(), QJsonValue(raw.array()));
+                entry.insert(
+                    QStringLiteral("raw_response"),
+                    safeResponse
+                );
+            } else {
+                entry.insert(
+                    QStringLiteral("raw_response_text"),
+                    redactedModelLogText(QString::fromUtf8(result.rawResponse))
+                );
+            }
         }
     }
+    entry.insert(
+        QStringLiteral("content_logging_enabled"),
+        includeRequestResponseContent
+    );
+    return entry;
+}
+
+bool appendModelRequestLog(
+    const ModelResult &result,
+    bool includeRequestResponseContent)
+{
+    const QString path = modelRequestLogPath();
+    if (!ensureParentDirectoryForFile(path)) {
+        return false;
+    }
+    const QJsonObject entry = modelRequestLogEntry(
+        result,
+        includeRequestResponseContent
+    );
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {

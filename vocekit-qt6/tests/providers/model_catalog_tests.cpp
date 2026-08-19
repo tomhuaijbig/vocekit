@@ -15,6 +15,7 @@ private slots:
     void explicitModelNormalizationMigratesRetiredButPreservesUnknown();
     void displayTextHandlesEmptyBuiltInAndUnknownIds();
     void currentModelAliasesUseCurrentTitlesWithoutProviderPrefixes();
+    void fetchedModelsExtendCatalogWithoutChangingTheirNames();
 };
 
 void ModelCatalogTests::builtInOptionsExposeOnlyCurrentOpenAiAndAnthropicModels()
@@ -57,26 +58,14 @@ void ModelCatalogTests::builtInOptionsExposeOnlyCurrentOpenAiAndAnthropicModels(
 
 void ModelCatalogTests::normalizeModelIdMigratesLegacyAndUnknownProviderModels()
 {
-    QCOMPARE(normalizeModelId(QStringLiteral("gpt-5.5")), QStringLiteral("openai:gpt-5.6-sol"));
-    QCOMPARE(normalizeModelId(QStringLiteral("openai:gpt-5.5")), QStringLiteral("openai:gpt-5.6-sol"));
-    QCOMPARE(normalizeModelId(QStringLiteral("gpt-5.4")), QStringLiteral("openai:gpt-5.6-terra"));
-    QCOMPARE(normalizeModelId(QStringLiteral("openai:gpt-5.4")), QStringLiteral("openai:gpt-5.6-terra"));
-    QCOMPARE(normalizeModelId(QStringLiteral("gpt-5.4-mini")), QStringLiteral("openai:gpt-5.6-luna"));
-    QCOMPARE(normalizeModelId(QStringLiteral("openai:gpt-5.4-mini")), QStringLiteral("openai:gpt-5.6-luna"));
-    QCOMPARE(normalizeModelId(QStringLiteral("gpt-4o")), QStringLiteral("openai:gpt-5.6-terra"));
-    QCOMPARE(normalizeModelId(QStringLiteral("openai:gpt-4.1")), QStringLiteral("openai:gpt-5.6-terra"));
-    QCOMPARE(normalizeModelId(QStringLiteral("gpt-future")), QStringLiteral("openai:gpt-5.6-terra"));
-    QCOMPARE(normalizeModelId(QStringLiteral("openai:future")), QStringLiteral("openai:gpt-5.6-terra"));
-    QCOMPARE(normalizeModelId(QStringLiteral("opus-4-8")), QStringLiteral("claude:claude-opus-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("claude:opus-4-8")), QStringLiteral("claude:claude-opus-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("opus-4-7")), QStringLiteral("claude:claude-opus-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("claude:claude-opus-4-7")), QStringLiteral("claude:claude-opus-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("sonnet-4-6")), QStringLiteral("claude:claude-sonnet-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("claude:claude-sonnet-4-6")), QStringLiteral("claude:claude-sonnet-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("claude-3-7-sonnet")), QStringLiteral("claude:claude-sonnet-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("claude:claude-3-5-haiku")), QStringLiteral("claude:claude-sonnet-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("claude-future")), QStringLiteral("claude:claude-sonnet-5"));
-    QCOMPARE(normalizeModelId(QStringLiteral("claude:future")), QStringLiteral("claude:claude-sonnet-5"));
+    QCOMPARE(normalizeModelId(QStringLiteral("gpt-5.5")), QStringLiteral("openai:gpt-5.5"));
+    QCOMPARE(normalizeModelId(QStringLiteral("openai:gpt-5.5")), QStringLiteral("openai:gpt-5.5"));
+    QCOMPARE(normalizeModelId(QStringLiteral("gpt-4o")), QStringLiteral("openai:gpt-4o"));
+    QCOMPARE(normalizeModelId(QStringLiteral("openai:gpt-4.1")), QStringLiteral("openai:gpt-4.1"));
+    QCOMPARE(normalizeModelId(QStringLiteral("gpt-future")), QStringLiteral("openai:gpt-future"));
+    QCOMPARE(normalizeModelId(QStringLiteral("openai:future")), QStringLiteral("openai:future"));
+    QCOMPARE(normalizeModelId(QStringLiteral("claude-3-7-sonnet")), QStringLiteral("claude:claude-3-7-sonnet"));
+    QCOMPARE(normalizeModelId(QStringLiteral("claude:future")), QStringLiteral("claude:future"));
     QCOMPARE(normalizeModelId(QStringLiteral("openai:gpt-5.6-sol")), QStringLiteral("openai:gpt-5.6-sol"));
     QCOMPARE(normalizeModelId(QStringLiteral("claude:claude-fable-5")), QStringLiteral("claude:claude-fable-5"));
     QCOMPARE(normalizeModelId(QStringLiteral("custom:kept")), QStringLiteral("custom:kept"));
@@ -112,7 +101,7 @@ void ModelCatalogTests::normalizeModelIdAcceptsCurrentModelsWithAndWithoutProvid
     );
     QCOMPARE(
         normalizeModelId(QStringLiteral("GPT-5.6-SOL"), QStringLiteral("kept-fallback")),
-        QStringLiteral("kept-fallback")
+        QStringLiteral("GPT-5.6-SOL")
     );
 }
 
@@ -120,7 +109,7 @@ void ModelCatalogTests::explicitModelNormalizationMigratesRetiredButPreservesUnk
 {
     QCOMPARE(
         normalizeExplicitModelId(QStringLiteral("gpt-5.4")),
-        QStringLiteral("openai:gpt-5.6-terra")
+        QStringLiteral("openai:gpt-5.4")
     );
     QCOMPARE(
         normalizeExplicitModelId(QStringLiteral("gpt-5.6-sol")),
@@ -147,15 +136,15 @@ void ModelCatalogTests::displayTextHandlesEmptyBuiltInAndUnknownIds()
         modelDisplayText(QStringLiteral("deepseek-v4-flash")),
         QStringLiteral("deepseek-v4-flash")
     );
-    QCOMPARE(modelTitle(QStringLiteral("gpt-5.5")), QStringLiteral("GPT-5.6 Sol"));
+    QCOMPARE(modelTitle(QStringLiteral("gpt-5.5")), QStringLiteral("openai:gpt-5.5"));
     QCOMPARE(
         modelDisplayText(QStringLiteral("openai:gpt-5.4-mini")),
-        QString::fromUtf8("GPT-5.6 Luna\uff08openai:gpt-5.4-mini\uff09")
+        QStringLiteral("openai:gpt-5.4-mini")
     );
-    QCOMPARE(modelTitle(QStringLiteral("claude:claude-opus-4-8")), QStringLiteral("Claude Opus 5"));
+    QCOMPARE(modelTitle(QStringLiteral("claude:claude-opus-4-8")), QStringLiteral("claude:claude-opus-4-8"));
     QCOMPARE(
         modelDisplayText(QStringLiteral("claude-3-7-sonnet")),
-        QString::fromUtf8("Claude Sonnet 5\uff08claude-3-7-sonnet\uff09")
+        QStringLiteral("claude:claude-3-7-sonnet")
     );
     QCOMPARE(
         modelDisplayText(QStringLiteral("unknown-model")),
@@ -187,6 +176,31 @@ void ModelCatalogTests::currentModelAliasesUseCurrentTitlesWithoutProviderPrefix
             title + QString::fromUtf8("\uff08") + bareId + QString::fromUtf8("\uff09")
         );
     }
+}
+
+void ModelCatalogTests::fetchedModelsExtendCatalogWithoutChangingTheirNames()
+{
+    ModelAdvancedProfile openAi;
+    openAi.key = QStringLiteral("openai:bootstrap-model");
+    openAi.fetchedModels
+        << QStringLiteral("gpt-new-from-api")
+        << QStringLiteral("gpt-5.6-sol");
+
+    ModelAdvancedProfile claude;
+    claude.key = QStringLiteral("claude:bootstrap-model");
+    claude.fetchedModels << QStringLiteral("claude-new-from-api");
+
+    const QVector<ModelOption> options = modelOptionsForSecretsAndProfiles(
+        SecretConfig(),
+        QVector<ModelAdvancedProfile>() << openAi << claude
+    );
+    QStringList ids;
+    for (const ModelOption &option : options) {
+        ids.append(option.id);
+    }
+    QVERIFY(ids.contains(QStringLiteral("openai:gpt-new-from-api")));
+    QVERIFY(ids.contains(QStringLiteral("claude:claude-new-from-api")));
+    QCOMPARE(ids.count(QStringLiteral("openai:gpt-5.6-sol")), 1);
 }
 
 QTEST_MAIN(ModelCatalogTests)

@@ -130,14 +130,54 @@ void FaqPanel::applyFaqSearch()
         if (m_faqEmptyLabel) {
             m_faqEmptyLabel->setVisible(matchedCount == 0);
         }
-        if (m_faqLoadMoreButton) {
-            const int remainingCount = matchedCount - renderedCount;
-            m_faqLoadMoreButton->setVisible(remainingCount > 0);
-            m_faqLoadMoreButton->setText(
-                tr8("显示更多（还有 %1 条）").arg(remainingCount)
-            );
+    }
+
+void FaqPanel::loadMoreIfNearBottom()
+{
+    if (!m_faqScroll || !m_faqItemsLayout || m_loadingMore) {
+        return;
+    }
+    QScrollBar *bar = m_faqScroll->verticalScrollBar();
+    if (!bar || (bar->maximum() > 0
+        && bar->value() < bar->maximum() - 120)) {
+        return;
+    }
+
+    int matchingCards = 0;
+    const QString keyword = m_faqSearchEdit
+        ? m_faqSearchEdit->text().trimmed()
+        : QString();
+    const QString category = m_faqCategoryBox
+        ? m_faqCategoryBox->currentData().toString()
+        : QStringLiteral("all");
+    for (int i = 0; i < m_faqItemsLayout->count(); ++i) {
+        QLayoutItem *item = m_faqItemsLayout->itemAt(i);
+        QWidget *widget = item ? item->widget() : nullptr;
+        if (!widget) {
+            continue;
+        }
+        const QString searchText = widget
+            ->property("faqSearchText")
+            .toString();
+        const bool categoryMatched = category.isEmpty()
+            || category == QStringLiteral("all")
+            || widget->property("faqCategory").toString() == category;
+        if (!searchText.isEmpty()
+            && categoryMatched
+            && (keyword.isEmpty()
+                || searchText.contains(keyword, Qt::CaseInsensitive))) {
+            ++matchingCards;
         }
     }
+    if (m_faqRenderLimit >= matchingCards) {
+        return;
+    }
+
+    m_loadingMore = true;
+    m_faqRenderLimit = qMin(m_faqRenderLimit + 8, matchingCards);
+    applyFaqSearch();
+    m_loadingMore = false;
+}
 
 void FaqPanel::showFaqId(const QString &faqId)
 {
@@ -227,11 +267,11 @@ FaqPanel::FaqPanel(
         filterRow->addWidget(m_faqCategoryBox);
         layout->addLayout(filterRow);
 
-        auto *scroll = new QScrollArea;
-        scroll->setWidgetResizable(true);
-        scroll->setFrameShape(QFrame::NoFrame);
-        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        scroll->setStyleSheet(QStringLiteral(
+        m_faqScroll = new QScrollArea;
+        m_faqScroll->setWidgetResizable(true);
+        m_faqScroll->setFrameShape(QFrame::NoFrame);
+        m_faqScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_faqScroll->setStyleSheet(QStringLiteral(
             "QScrollArea { background: transparent; border: none; }"
             "QScrollArea > QWidget > QWidget { background: transparent; }"
         ));
@@ -497,17 +537,6 @@ FaqPanel::FaqPanel(
 
         addRecentWorkflowFaqItems(items);
 
-        m_faqLoadMoreButton = new QPushButton;
-        m_faqLoadMoreButton->setMinimumHeight(42);
-        m_faqLoadMoreButton->setStyleSheet(
-            compactButtonStyle(QStringLiteral("#ffffff"), QStringLiteral("#111827"))
-        );
-        connect(m_faqLoadMoreButton, &QPushButton::clicked, this, [this]() {
-            m_faqRenderLimit += 8;
-            applyFaqSearch();
-        });
-        items->addWidget(m_faqLoadMoreButton);
-
         m_faqEmptyLabel = new QLabel(tr8("没有找到匹配的常见问题。"));
         m_faqEmptyLabel->setWordWrap(true);
         m_faqEmptyLabel->setAlignment(Qt::AlignCenter);
@@ -523,9 +552,21 @@ FaqPanel::FaqPanel(
         items->addWidget(m_faqEmptyLabel);
 
         items->addStretch();
+        m_faqScroll->setWidget(holder);
+        connect(
+            m_faqScroll->verticalScrollBar(),
+            &QScrollBar::valueChanged,
+            this,
+            [this](int) { loadMoreIfNearBottom(); }
+        );
+        connect(
+            m_faqScroll->verticalScrollBar(),
+            &QScrollBar::rangeChanged,
+            this,
+            [this](int, int) { loadMoreIfNearBottom(); }
+        );
+        layout->addWidget(m_faqScroll, 1);
         applyFaqSearch();
-        scroll->setWidget(holder);
-        layout->addWidget(scroll, 1);
 }
 
 void FaqPanel::addLatestFeatureFaqItems(QVBoxLayout *items)
@@ -777,7 +818,12 @@ void FaqPanel::ensureFaqCardMaterialized(QWidget *card)
         top->setContentsMargins(0, 0, 0, 0);
         top->setSpacing(12);
 
-        auto *numberLabel = new QLabel(faqId.isEmpty() ? QStringLiteral("-") : faqId);
+        const bool publicNumber = QRegularExpression(
+            QStringLiteral("^[0-9]+$")
+        ).match(faqId).hasMatch();
+        auto *numberLabel = new QLabel(
+            publicNumber ? faqId : QStringLiteral("?")
+        );
         numberLabel->setObjectName(QStringLiteral("faqNumber"));
         numberLabel->setAlignment(Qt::AlignCenter);
         numberLabel->setMinimumSize(42, 28);

@@ -55,6 +55,8 @@ if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
 foreach ($required in @(
     (Join-Path $repositoryRoot ".github\workflows\qt6-ci.yml"),
     (Join-Path $repositoryRoot ".github\workflows\release.yml"),
+    (Join-Path $projectRoot "scripts\fetch-rapidocr.ps1"),
+    (Join-Path $projectRoot "third_party\rapidocr\rapidocr-lock.json"),
     (Join-Path $projectRoot "docs\UPDATES.md"),
     (Join-Path $projectRoot "docs\ACCEPTANCE_MATRIX.md")
 )) {
@@ -84,6 +86,52 @@ if (Test-Path -LiteralPath $releaseWorkflowPath -PathType Leaf) {
         $releaseWorkflow -notmatch 'unsigned-candidate') {
         Add-Failure "GitHub release-candidate workflow must create an explicitly unsigned internal-test package."
     }
+    if ($releaseWorkflow -notmatch 'fetch-rapidocr\.ps1' -or
+        $releaseWorkflow -notmatch 'build-runtime-helpers\.ps1') {
+        Add-Failure "GitHub release-candidate workflow must prepare the pinned RapidOCR SDK and build runtime helpers."
+    }
+    if ($releaseWorkflow -match '\$\{\{\s*github\.ref_name\s*\}\}' -or
+        $releaseWorkflow -notmatch '\$env:GITHUB_REF_NAME' -or
+        $releaseWorkflow -notmatch 'CANDIDATE_NAME') {
+        Add-Failure "Release workflow must treat Git ref names as environment data and sanitize candidate package names."
+    }
+}
+
+$rapidOcrLockPath = Join-Path $projectRoot `
+    "third_party\rapidocr\rapidocr-lock.json"
+if (Test-Path -LiteralPath $rapidOcrLockPath -PathType Leaf) {
+    try {
+        $rapidOcrLock = Get-Content `
+            -LiteralPath $rapidOcrLockPath `
+            -Raw `
+            -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+        if ($rapidOcrLock.version -ne "1.2.2" -or
+            $rapidOcrLock.archive_name -ne "Project_RapidOcrOnnx-1.2.2.7z" -or
+            $rapidOcrLock.archive_url -ne "https://github.com/RapidAI/RapidOcrOnnx/releases/download/1.2.2/Project_RapidOcrOnnx-1.2.2.7z" -or
+            [long]$rapidOcrLock.archive_bytes -ne 83183975L -or
+            $rapidOcrLock.archive_sha256 -ne "5049D4C9CAF0143A9F35E618F80F7E5946B8DF1E57A90B3CA8E9CC105FC8A6AE" -or
+            [int]$rapidOcrLock.sdk_file_count -ne 1445 -or
+            $rapidOcrLock.sdk_fingerprint_sha256 -ne "DDDD009B109B84AB693ED0D4592394E84241D7518FAB62FB04FE6250DCCCA1F1") {
+            Add-Failure "RapidOCR dependency lock does not match the approved 1.2.2 build inputs."
+        }
+    } catch {
+        Add-Failure "RapidOCR dependency lock is invalid: $($_.Exception.Message)"
+    }
+}
+
+$windowsOcrProjectPath = Join-Path $projectRoot `
+    "helpers\windows_ocr\windows_ocr.vcxproj"
+$ocrBuildScriptPath = Join-Path $projectRoot `
+    "scripts\build-ocr-helpers.ps1"
+if ((Test-Path -LiteralPath $windowsOcrProjectPath -PathType Leaf) -and
+    (Get-Content -LiteralPath $windowsOcrProjectPath -Raw -Encoding UTF8) -notmatch
+        '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>') {
+    Add-Failure "Windows OCR helper must statically link the Visual C++ runtime for portable releases."
+}
+if ((Test-Path -LiteralPath $ocrBuildScriptPath -PathType Leaf) -and
+    (Get-Content -LiteralPath $ocrBuildScriptPath -Raw -Encoding UTF8) -notmatch
+        'Assert-NoDynamicVisualCppRuntime') {
+    Add-Failure "OCR helper build must reject dynamic Visual C++ runtime dependencies."
 }
 
 foreach ($workflowPath in @(

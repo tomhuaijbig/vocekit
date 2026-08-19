@@ -9,9 +9,11 @@ on:
 jobs:
   unsigned-release-candidate:
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
+    env:
+      CANDIDATE_NAME: vocekit-${{ github.run_id }}-unsigned-candidate
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -33,17 +35,27 @@ jobs:
           $make = (Get-Command mingw32-make.exe -ErrorAction Stop).Source
           "QT_BIN=$([IO.Path]::GetDirectoryName($qmake))" | Out-File -FilePath $env:GITHUB_ENV -Append
           "MINGW_BIN=$([IO.Path]::GetDirectoryName($make))" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "UPDATE_FEED=https://api.github.com/repos/${{ github.repository }}/releases/latest" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "UPDATE_FEED=https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Verify release-candidate source gates
         shell: pwsh
         run: |
-          $expectedTag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "" }
+          $expectedTag = if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $env:GITHUB_REF_NAME
+          } else {
+            ""
+          }
           & .\vocekit-qt6\scripts\verify-release-readiness.ps1 `
             -UpdateFeedUrl $env:UPDATE_FEED `
             -ExpectedTag $expectedTag `
             -SkipAcceptance `
             -SkipAuthenticode
+
+      - name: Prepare pinned RapidOCR SDK and runtime helpers
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\scripts\fetch-rapidocr.ps1
+          & .\vocekit-qt6\scripts\build-runtime-helpers.ps1
 
       - name: Run all Release tests
         shell: pwsh
@@ -59,12 +71,12 @@ jobs:
             -MingwBin $env:MINGW_BIN `
             -UpdateFeedUrl $env:UPDATE_FEED
           & .\vocekit-qt6\scripts\deploy.ps1 -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN
-          & .\vocekit-qt6\scripts\package-test.ps1 -PackageName "vocekit-${{ github.ref_name }}-unsigned-candidate"
+          & .\vocekit-qt6\scripts\package-test.ps1 -PackageName $env:CANDIDATE_NAME
 
       - name: Upload unsigned candidate for controlled testing only
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: vocekit-${{ github.ref_name }}-unsigned-candidate
-          path: vocekit-qt6/dist/vocekit-${{ github.ref_name }}-unsigned-candidate.zip
+          name: ${{ env.CANDIDATE_NAME }}
+          path: vocekit-qt6/dist/${{ env.CANDIDATE_NAME }}.zip
           if-no-files-found: error
           retention-days: 7

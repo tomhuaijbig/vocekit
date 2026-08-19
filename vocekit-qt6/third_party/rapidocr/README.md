@@ -11,9 +11,35 @@ Required archive:
 
 `Project_RapidOcrOnnx-1.2.2.7z`
 
+Pinned archive checks:
+
+```text
+83183975 bytes
+SHA-256 5049D4C9CAF0143A9F35E618F80F7E5946B8DF1E57A90B3CA8E9CC105FC8A6AE
+```
+
+The machine-readable lock is `rapidocr-lock.json`. In addition to the archive
+checks, it pins a deterministic SHA-256 fingerprint covering all 1,445
+extracted paths, file sizes, and file contents. Existing local SDK directories
+are never trusted only because a few expected files exist.
+
 Extract it to:
 
-`vocekit/Project_RapidOcrOnnx-1.2.2`
+`vocekit-qt6/Project_RapidOcrOnnx-1.2.2`
+
+The preferred preparation command downloads the exact pinned release asset,
+checks its byte length and SHA-256, extracts it in a temporary directory, and
+validates the required SDK libraries and model files before installation:
+
+```powershell
+.\scripts\fetch-rapidocr.ps1
+```
+
+For an already downloaded archive, pass its path explicitly:
+
+```powershell
+.\scripts\fetch-rapidocr.ps1 -ArchivePath "C:\Downloads\Project_RapidOcrOnnx-1.2.2.7z"
+```
 
 Then run:
 

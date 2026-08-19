@@ -1,0 +1,9 @@
+{
+  "version": "1.2.2",
+  "archive_name": "Project_RapidOcrOnnx-1.2.2.7z",
+  "archive_url": "https://github.com/RapidAI/RapidOcrOnnx/releases/download/1.2.2/Project_RapidOcrOnnx-1.2.2.7z",
+  "archive_bytes": 83183975,
+  "archive_sha256": "5049D4C9CAF0143A9F35E618F80F7E5946B8DF1E57A90B3CA8E9CC105FC8A6AE",
+  "sdk_file_count": 1445,
+  "sdk_fingerprint_sha256": "DDDD009B109B84AB693ED0D4592394E84241D7518FAB62FB04FE6250DCCCA1F1"
+}

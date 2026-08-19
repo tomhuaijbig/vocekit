@@ -1,15 +1,135 @@
 param(
     [ValidateSet("Release")]
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [string]$MSBuildPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
 
-if (-not (Test-Path -LiteralPath $msbuild)) {
-    throw "Visual Studio 2022 MSBuild was not found."
+function Resolve-VisualStudioMsBuild {
+    param(
+        [string]$ExplicitPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        $resolved = [IO.Path]::GetFullPath($ExplicitPath)
+        if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+            throw "The requested Visual Studio MSBuild executable was not found: $resolved"
+        }
+        return $resolved
+    }
+
+    $candidates = @()
+    $programFilesX86 = [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::ProgramFilesX86
+    )
+    $vswhere = Join-Path $programFilesX86 `
+        "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+        $installationPaths = @(& $vswhere `
+            -version "[17.0,18.0)" `
+            -latest `
+            -products "*" `
+            -requires Microsoft.Component.MSBuild `
+                Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Visual Studio Installer vswhere failed with exit code $LASTEXITCODE."
+        }
+        $candidates += @(
+            $installationPaths |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+    }
+
+    $programFilesRoots = @(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles),
+        $programFilesX86
+    ) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+    } | Select-Object -Unique
+    foreach ($root in $programFilesRoots) {
+        foreach ($edition in @(
+            "Enterprise", "Professional", "Community", "BuildTools"
+        )) {
+            $candidates += Join-Path $root `
+                ("Microsoft Visual Studio\2022\" + $edition)
+        }
+    }
+
+    foreach ($installationPath in @($candidates | Select-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace($installationPath)) {
+            continue
+        }
+        $candidate = Join-Path $installationPath `
+            "MSBuild\Current\Bin\MSBuild.exe"
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return [IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    throw "Visual Studio 2022 MSBuild with the x64 C++ toolchain was not found."
 }
+
+function Resolve-VisualStudioDumpBin {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResolvedMsBuildPath
+    )
+
+    $installationPath = $ResolvedMsBuildPath
+    for ($index = 0; $index -lt 4; ++$index) {
+        $installationPath = Split-Path -Parent $installationPath
+    }
+    $msvcToolsRoot = Join-Path $installationPath "VC\Tools\MSVC"
+    if (Test-Path -LiteralPath $msvcToolsRoot -PathType Container) {
+        foreach ($toolset in Get-ChildItem -LiteralPath $msvcToolsRoot -Directory |
+            Sort-Object -Property Name -Descending) {
+            $candidate = Join-Path $toolset.FullName `
+                "bin\Hostx64\x64\dumpbin.exe"
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                return $candidate
+            }
+        }
+    }
+    throw "Visual Studio x64 dumpbin.exe was not found under: $msvcToolsRoot"
+}
+
+function Assert-NoDynamicVisualCppRuntime {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$HelperPath,
+        [Parameter(Mandatory = $true)]
+        [string]$DumpBinPath
+    )
+
+    $output = @(& $DumpBinPath /dependents $HelperPath 2>&1 | ForEach-Object {
+        $_.ToString()
+    })
+    if ($LASTEXITCODE -ne 0) {
+        throw "dumpbin dependency inspection failed for $HelperPath with exit code $LASTEXITCODE."
+    }
+    $dynamicRuntime = @(
+        [regex]::Matches(
+            ($output -join [Environment]::NewLine),
+            '(?im)^\s*((?:MSVCP\d+|VCRUNTIME\d*(?:_\d+)?)\.dll)\s*$'
+        ) | ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() } |
+            Select-Object -Unique
+    )
+    if ($dynamicRuntime.Count -gt 0) {
+        throw (
+            "Portable OCR helper depends on the dynamic Visual C++ runtime: " +
+            "$HelperPath -> $($dynamicRuntime -join ', ')"
+        )
+    }
+    Write-Host "Portable OCR helper runtime check passed: $HelperPath"
+}
+
+$msbuild = Resolve-VisualStudioMsBuild -ExplicitPath $MSBuildPath
+$dumpbin = Resolve-VisualStudioDumpBin -ResolvedMsBuildPath $msbuild
+Write-Host "Visual Studio MSBuild: $msbuild"
+Write-Host "Visual Studio dumpbin: $dumpbin"
 
 $windowsProject = Join-Path $projectRoot "helpers\windows_ocr\windows_ocr.vcxproj"
 & $msbuild $windowsProject /m /p:Configuration=$Configuration /p:Platform=x64
@@ -41,6 +161,13 @@ if ($LASTEXITCODE -ne 0) {
 if (-not (Test-Path -LiteralPath $rapidHelper)) {
     throw "RapidOCR helper was not generated: $rapidHelper"
 }
+
+Assert-NoDynamicVisualCppRuntime `
+    -HelperPath $windowsHelper `
+    -DumpBinPath $dumpbin
+Assert-NoDynamicVisualCppRuntime `
+    -HelperPath $rapidHelper `
+    -DumpBinPath $dumpbin
 
 $requiredModels = @{
     "ch_PP-OCRv3_det_infer.onnx" = "3439588C030FAEA393A54515F51E983D8E155B19A2E8ABA7891934C1CF0DE526"

@@ -230,7 +230,12 @@ QString recordRuntimeCrash(
     const QString &kind,
     quint64 exceptionCode,
     quintptr exceptionAddress,
-    const QString &dumpPath)
+    const QString &dumpPath,
+    const QString &dumpErrorStage,
+    quint64 dumpErrorCode,
+    const QString &dumpMode,
+    bool dumpFallbackUsed,
+    quint64 dumpPrimaryErrorCode)
 {
     const QDateTime now = QDateTime::currentDateTimeUtc();
     const QString safeSessionId = g_session.sessionId.isEmpty()
@@ -245,7 +250,7 @@ QString recordRuntimeCrash(
     );
 
     QJsonObject object;
-    object.insert(QStringLiteral("schema_version"), 1);
+    object.insert(QStringLiteral("schema_version"), 2);
     object.insert(QStringLiteral("session_id"), safeSessionId);
     object.insert(QStringLiteral("timestamp_utc"), now.toString(Qt::ISODateWithMs));
     object.insert(QStringLiteral("kind"), kind.left(80));
@@ -258,6 +263,36 @@ QString recordRuntimeCrash(
         QStringLiteral("0x") + QString::number(exceptionAddress, 16).toUpper()
     );
     object.insert(QStringLiteral("dump_file"), QFileInfo(dumpPath).fileName());
+    object.insert(QStringLiteral("dump_written"), !dumpPath.isEmpty());
+    object.insert(QStringLiteral("dump_mode"), dumpMode.left(40));
+    object.insert(QStringLiteral("dump_fallback_used"), dumpFallbackUsed);
+    object.insert(
+        QStringLiteral("dump_primary_error_code"),
+        static_cast<qint64>(dumpPrimaryErrorCode)
+    );
+    object.insert(
+        QStringLiteral("dump_primary_error_code_hex"),
+        QStringLiteral("0x") + QStringLiteral("%1").arg(
+            dumpPrimaryErrorCode,
+            8,
+            16,
+            QLatin1Char('0')
+        ).toUpper()
+    );
+    object.insert(QStringLiteral("dump_error_stage"), dumpErrorStage.left(80));
+    object.insert(
+        QStringLiteral("dump_error_code"),
+        static_cast<qint64>(dumpErrorCode)
+    );
+    object.insert(
+        QStringLiteral("dump_error_code_hex"),
+        QStringLiteral("0x") + QStringLiteral("%1").arg(
+            dumpErrorCode,
+            8,
+            16,
+            QLatin1Char('0')
+        ).toUpper()
+    );
     object.insert(QStringLiteral("last_action_file"), QStringLiteral("../last_action.txt"));
     writeJsonAtomically(metadataPath, object);
     writeJsonAtomically(

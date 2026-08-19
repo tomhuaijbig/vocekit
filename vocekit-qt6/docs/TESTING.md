@@ -117,6 +117,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 脚本会严格枚举 `tests` 下扩展名为 `.pro` 的工程，构建并运行 QtTest 和独立冒烟程序，最后汇总通过、失败和跳过数量。测试生成的临时 `Makefile.codex*` 会自动清理。
 
+只运行一个自包含测试工程时，可以按 `.pro` 文件基名精确选择：
+
+```powershell
+.\scripts\run-all-tests.ps1 `
+  -Configuration release `
+  -ProjectName runtime_crash_handler_tests
+```
+
+单工程模式只选择测试工程，不会自动构建 OCR SDK、辅助程序等外部前置条件；仅应对自包含工程使用，或先手动准备该工程依赖。
+
 功能流程专项工程覆盖：
 
 - 图、端口、JSON、校验、编译、发布事务、计划缓存和串行调度。

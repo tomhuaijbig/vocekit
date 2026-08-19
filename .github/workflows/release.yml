@@ -51,6 +51,30 @@ jobs:
             -SkipAcceptance `
             -SkipAuthenticode
 
+      - name: Preflight Release crash-handler regression
+        id: crash_smoke
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          VOCEKIT_CRASH_TEST_ARTIFACT_ROOT: ${{ runner.temp }}\vocekit-crash-smoke
+        run: |
+          & .\vocekit-qt6\scripts\run-all-tests.ps1 -Configuration release -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN -ProjectName runtime_crash_handler_tests
+
+      - name: Upload crash-handler diagnostics on failure
+        if: ${{ failure() && steps.crash_smoke.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crash-handler-diagnostics-${{ github.run_id }}
+          # Minidumps can contain process memory such as short-lived runner
+          # credentials. Keep them on the ephemeral runner and upload only the
+          # intentionally redacted metadata and text diagnostics.
+          path: |
+            ${{ runner.temp }}/vocekit-crash-smoke/**/*.json
+            ${{ runner.temp }}/vocekit-crash-smoke/**/*.txt
+            ${{ runner.temp }}/vocekit-crash-smoke/**/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Restore pinned RapidOCR SDK cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

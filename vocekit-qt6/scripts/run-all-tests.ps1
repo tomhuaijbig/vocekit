@@ -3,7 +3,8 @@ param(
     [string]$MingwBin = "D:\QT66666\Tools\mingw1310_64\bin",
     [string]$OpenSslBin = "",
     [ValidateSet("debug", "release")]
-    [string]$Configuration = "debug"
+    [string]$Configuration = "debug",
+    [string]$ProjectName = ""
 )
 
 Set-StrictMode -Version Latest
@@ -62,9 +63,28 @@ try {
     }
 
     # Windows -Filter *.pro can also match generated Makefiles.
-    $projects = Get-ChildItem -LiteralPath $testsRoot -Recurse -File |
-        Where-Object { $_.Extension -eq ".pro" } |
-        Sort-Object FullName
+    $discoveredProjects = @(
+        Get-ChildItem -LiteralPath $testsRoot -Recurse -File |
+            Where-Object { $_.Extension -eq ".pro" } |
+            Sort-Object FullName
+    )
+    $projects = $discoveredProjects
+    if ($PSBoundParameters.ContainsKey("ProjectName")) {
+        $requestedProject = $ProjectName.Trim()
+        if ([string]::IsNullOrWhiteSpace($requestedProject)) {
+            throw "ProjectName must be a non-empty .pro basename."
+        }
+        $projects = @(
+            $discoveredProjects |
+                Where-Object { $_.BaseName -eq $requestedProject }
+        )
+        if ($projects.Count -eq 0) {
+            throw "Test project was not found: $requestedProject"
+        }
+        if ($projects.Count -gt 1) {
+            throw "Test project name is ambiguous: $requestedProject"
+        }
+    }
 
     $qtPrograms = 0
     $standalonePrograms = 0
@@ -288,6 +308,7 @@ function Invoke-CapturedCommand {
 }
 
 [PSCustomObject]@{
+    DiscoveredProjects = $discoveredProjects.Count
     Projects = $projects.Count
     QtPrograms = $qtPrograms
     StandalonePrograms = $standalonePrograms

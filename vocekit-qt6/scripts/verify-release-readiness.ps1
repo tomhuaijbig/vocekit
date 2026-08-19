@@ -117,6 +117,35 @@ if (Test-Path -LiteralPath $releaseWorkflowPath -PathType Leaf) {
         $releaseWorkflow -notmatch 'build-runtime-helpers\.ps1') {
         Add-Failure "GitHub release-candidate workflow must prepare the pinned RapidOCR SDK and build runtime helpers."
     }
+    $releaseTestCommands = @([regex]::Matches(
+        $releaseWorkflow,
+        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\run-all-tests\.ps1[^\r\n]*$'
+    ))
+    $crashSmokeCommand = @(
+        $releaseTestCommands |
+            Where-Object {
+                $_.Value -match '-Configuration\s+release' -and
+                $_.Value -match '-ProjectName\s+runtime_crash_handler_tests(?:\s|$)'
+            }
+    ) | Select-Object -First 1
+    $fullReleaseCommand = @(
+        $releaseTestCommands |
+            Where-Object {
+                $_.Value -match '-Configuration\s+release' -and
+                $_.Value -notmatch '-ProjectName(?:\s|$)'
+            }
+    ) | Select-Object -First 1
+    $runtimeHelpersCommand = [regex]::Match(
+        $releaseWorkflow,
+        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\build-runtime-helpers\.ps1(?:\s|$)'
+    )
+    if (-not $crashSmokeCommand -or
+        -not $fullReleaseCommand -or
+        -not $runtimeHelpersCommand.Success -or
+        $crashSmokeCommand.Index -ge $runtimeHelpersCommand.Index -or
+        $runtimeHelpersCommand.Index -ge $fullReleaseCommand.Index) {
+        Add-Failure "Release workflow must run the focused crash-handler preflight before runtime helpers and the full Release suite."
+    }
     if ($releaseWorkflow -match '\$\{\{\s*github\.ref_name\s*\}\}' -or
         $releaseWorkflow -notmatch '\$env:GITHUB_REF_NAME' -or
         $releaseWorkflow -notmatch 'CANDIDATE_NAME') {

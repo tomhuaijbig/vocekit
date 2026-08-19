@@ -42,7 +42,12 @@ QString recordRuntimeCrash(
     const QString &kind,
     quint64 exceptionCode,
     quintptr exceptionAddress,
-    const QString &dumpPath
+    const QString &dumpPath,
+    const QString &dumpErrorStage = QString(),
+    quint64 dumpErrorCode = 0,
+    const QString &dumpMode = QString(),
+    bool dumpFallbackUsed = false,
+    quint64 dumpPrimaryErrorCode = 0
 );
 
 #endif // VOCEKIT_RUNTIME_SESSION_H

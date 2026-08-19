@@ -64,21 +64,28 @@ Git 标签必须与版本一致并带 `v` 前缀，例如 `v0.1.1`。
 
 ## 生成发布包
 
-先运行完整测试，再构建、部署和打包：
+先准备固定依赖并运行完整测试，再构建、部署、签名和打包：
 
 ```powershell
-& .\scripts\run-all-tests.ps1 -Configuration release
-& .\scripts\build.ps1 -Configuration release
-& .\scripts\deploy.ps1
+$qtBin = "<QtBin>"
+$mingwBin = "<MingwBin>"
+$updateFeed = "https://api.github.com/repos/你的公开账户/你的公开发布仓库/releases/latest"
+& .\tests\scripts\update-helper-tests.ps1
+& .\scripts\tests\windows-speech-helper-build-tests.ps1
+& .\scripts\fetch-rapidocr.ps1
+& .\scripts\build-runtime-helpers.ps1
+& .\scripts\run-all-tests.ps1 -Configuration release -QtBin $qtBin -MingwBin $mingwBin
+& .\scripts\build.ps1 -Configuration release `
+  -QtBin $qtBin -MingwBin $mingwBin -UpdateFeedUrl $updateFeed
+& .\scripts\deploy.ps1 -QtBin $qtBin -MingwBin $mingwBin
 & .\scripts\sign-release.ps1 -CertificateThumbprint "你的证书指纹"
 & .\scripts\create-release-package.ps1 `
-  -UpdateFeedUrl "https://api.github.com/repos/你的公开账户/你的公开发布仓库/releases/latest" `
+  -UpdateFeedUrl $updateFeed `
   -ReleaseBaseUrl "https://github.com/你的公开账户/你的公开发布仓库/releases/download" `
   -ReleasePageBaseUrl "https://github.com/你的公开账户/你的公开发布仓库/releases/tag" `
   -ExpectedSignerSubject "证书中显示的发布者 Subject" `
   -ExpectedSignerThumbprint "硬件证书指纹（云签名可省略）" `
   -ExpectedTag "v0.2.0"
-& .\tests\scripts\update-helper-tests.ps1
 ```
 
 内部测试阶段如果还没有证书，可以使用 `package-test.ps1`；这种包会带有 `UNSIGNED_TEST_BUILD` 标记、不生成更新清单，只能视为受控测试包。正式发布必须使用 `create-release-package.ps1`，它会拒绝未签名二进制、未完成的真实应用验收矩阵、版本与标签不一致、未提交/未推送的代码以及不可公开访问的更新源。

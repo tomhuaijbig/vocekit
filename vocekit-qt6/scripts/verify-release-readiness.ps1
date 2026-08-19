@@ -226,6 +226,14 @@ foreach ($workflowPath in @(
             Add-Failure "GitHub Action must be pinned to a full commit SHA: $actionReference"
         }
     }
+    foreach ($requiredScript in @(
+        'tests\\scripts\\update-helper-tests\.ps1',
+        'scripts\\tests\\windows-speech-helper-build-tests\.ps1'
+    )) {
+        if ($workflowText -notmatch "(?m)^\s*&\s+\.\\vocekit-qt6\\$requiredScript\s*\r?$") {
+            Add-Failure "GitHub workflow must run the release infrastructure regression script: $requiredScript"
+        }
+    }
 }
 
 $signScriptPath = Join-Path $projectRoot "scripts\sign-release.ps1"

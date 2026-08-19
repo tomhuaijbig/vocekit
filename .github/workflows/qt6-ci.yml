@@ -17,6 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Run PowerShell release infrastructure tests
+        shell: pwsh
+        run: |
+          & .\vocekit-qt6\tests\scripts\update-helper-tests.ps1
+          & .\vocekit-qt6\scripts\tests\windows-speech-helper-build-tests.ps1
+          $updateFeed = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest"
+          & .\vocekit-qt6\scripts\verify-release-readiness.ps1 `
+            -UpdateFeedUrl $updateFeed `
+            -SkipGitState `
+            -SkipAcceptance `
+            -SkipAuthenticode `
+            -SkipPublicFeed
+
       - name: Install Qt 6.10.3 compatibility SDK and MinGW 13.1
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
         with:

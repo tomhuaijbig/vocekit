@@ -97,12 +97,11 @@ Windows 本地语音识别由独立的 x64 子进程提供；Qt 主程序仍可�
 ```powershell
 $env:QT_BIN = '<QtBin>'
 $env:MINGW_BIN = '<MingwBin>'
-$env:OPENSSL_BIN = '<OpenSslBin>'
+.\scripts\fetch-rapidocr.ps1
 .\scripts\build-runtime-helpers.ps1
-& (Join-Path $env:QT_BIN 'qmake.exe') vocekit.pro -spec win32-g++ 'CONFIG+=release'
-& (Join-Path $env:MINGW_BIN 'mingw32-make.exe') -j2
-.\scripts\deploy.ps1 -Configuration release `
-  -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN -OpenSslBin $env:OPENSSL_BIN
+.\scripts\build.ps1 -Configuration release `
+  -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN
+.\scripts\deploy.ps1 -QtBin $env:QT_BIN -MingwBin $env:MINGW_BIN
 .\scripts\package-test.ps1 -PackageName vocekit-windows-speech-test
 ```
 

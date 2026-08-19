@@ -117,33 +117,55 @@ if (Test-Path -LiteralPath $releaseWorkflowPath -PathType Leaf) {
         $releaseWorkflow -notmatch 'build-runtime-helpers\.ps1') {
         Add-Failure "GitHub release-candidate workflow must prepare the pinned RapidOCR SDK and build runtime helpers."
     }
-    $releaseTestCommands = @([regex]::Matches(
-        $releaseWorkflow,
-        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\run-all-tests\.ps1[^\r\n]*$'
-    ))
-    $crashSmokeCommand = @(
-        $releaseTestCommands |
-            Where-Object {
-                $_.Value -match '-Configuration\s+release' -and
-                $_.Value -match '-ProjectName\s+runtime_crash_handler_tests(?:\s|$)'
-            }
-    ) | Select-Object -First 1
-    $fullReleaseCommand = @(
-        $releaseTestCommands |
-            Where-Object {
-                $_.Value -match '-Configuration\s+release' -and
-                $_.Value -notmatch '-ProjectName(?:\s|$)'
-            }
-    ) | Select-Object -First 1
-    $runtimeHelpersCommand = [regex]::Match(
-        $releaseWorkflow,
-        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\build-runtime-helpers\.ps1(?:\s|$)'
+    $crashStepIndex = $releaseWorkflow.IndexOf(
+        "- name: Preflight Release crash-handler regression",
+        [StringComparison]::Ordinal
     )
-    if (-not $crashSmokeCommand -or
-        -not $fullReleaseCommand -or
-        -not $runtimeHelpersCommand.Success -or
-        $crashSmokeCommand.Index -ge $runtimeHelpersCommand.Index -or
-        $runtimeHelpersCommand.Index -ge $fullReleaseCommand.Index) {
+    $runtimeHelpersStepIndex = $releaseWorkflow.IndexOf(
+        "- name: Prepare pinned RapidOCR SDK and runtime helpers",
+        [StringComparison]::Ordinal
+    )
+    $fullReleaseStepIndex = $releaseWorkflow.IndexOf(
+        "- name: Run all Release tests",
+        [StringComparison]::Ordinal
+    )
+    $buildCandidateStepIndex = $releaseWorkflow.IndexOf(
+        "- name: Build and deploy unsigned candidate",
+        [StringComparison]::Ordinal
+    )
+    $releaseStepOrderIsValid =
+        $crashStepIndex -ge 0 -and
+        $runtimeHelpersStepIndex -gt $crashStepIndex -and
+        $fullReleaseStepIndex -gt $runtimeHelpersStepIndex -and
+        $buildCandidateStepIndex -gt $fullReleaseStepIndex
+    $crashStepBlock = if ($releaseStepOrderIsValid) {
+        $releaseWorkflow.Substring(
+            $crashStepIndex,
+            $runtimeHelpersStepIndex - $crashStepIndex
+        )
+    } else {
+        ""
+    }
+    $fullReleaseStepBlock = if ($releaseStepOrderIsValid) {
+        $releaseWorkflow.Substring(
+            $fullReleaseStepIndex,
+            $buildCandidateStepIndex - $fullReleaseStepIndex
+        )
+    } else {
+        ""
+    }
+    $crashRunCommand = [regex]::Match(
+        $crashStepBlock,
+        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\run-all-tests\.ps1[^\r\n]*-Configuration\s+release[^\r\n]*-ProjectName\s+runtime_crash_handler_tests(?:\s|$)'
+    )
+    $fullReleaseRunCommand = [regex]::Match(
+        $fullReleaseStepBlock,
+        '(?m)^\s*&\s+\.\\vocekit-qt6\\scripts\\run-all-tests\.ps1[^\r\n]*-Configuration\s+release[^\r\n]*\r?$'
+    )
+    if (-not $releaseStepOrderIsValid -or
+        -not $crashRunCommand.Success -or
+        -not $fullReleaseRunCommand.Success -or
+        $fullReleaseRunCommand.Value -match '-ProjectName(?:\s|$)') {
         Add-Failure "Release workflow must run the focused crash-handler preflight before runtime helpers and the full Release suite."
     }
     if ($releaseWorkflow -match '\$\{\{\s*github\.ref_name\s*\}\}' -or

@@ -39,7 +39,7 @@ void SettingsPanelHeaderTests::mapsFloatingPreferencesAndKeepsExactTabOrder()
 
     const QList<QByteArray> titles = {
         "常用设置", "词库", "语音录音", "写入",
-        "网络", "历史记录", "快捷键", "接口"
+        "网络", "历史记录", "快捷键", "接口", "更新"
     };
     int position = -1;
     for (const QByteArray &title : titles) {

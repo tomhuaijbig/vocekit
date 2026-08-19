@@ -6,6 +6,7 @@
 #include "basic_settings_section.h"
 #include "history_settings_section.h"
 #include "shortcut_settings_section.h"
+#include "update_settings_section.h"
 #include "ui_style.h"
 
 #include "../capture/screenshot_types.h"
@@ -198,6 +199,7 @@ QString selectionVocabularyScopeTitle(
         m_tabs->addTab(historySettingsTab(), settingsPanelTr8("历史记录"));
         m_tabs->addTab(shortcutsTab(), settingsPanelTr8("快捷键"));
         m_tabs->addTab(apiTab(), settingsPanelTr8("接口"));
+        m_tabs->addTab(updateTab(), settingsPanelTr8("更新"));
         setCurrentTab(initialTab);
         root->addWidget(m_tabs, 1);
     }
@@ -616,6 +618,17 @@ QString selectionVocabularyScopeTitle(
         };
         m_apiSettingsSection = new ApiSettingsSection(callbacks, this);
         return m_apiSettingsSection;
+    }
+
+    QWidget *SettingsPanel::updateTab()
+    {
+        m_updateSettingsSection = new UpdateSettingsSection(
+            [this]() {
+                return settingsSnapshot().useSystemProxy;
+            },
+            this
+        );
+        return m_updateSettingsSection;
     }
 
     void SettingsPanel::refreshRecordDirectoryLabel()

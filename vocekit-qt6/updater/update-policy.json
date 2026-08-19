@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "package_root_executable": "vocekit.exe",
+  "protected_directories": [
+    "config",
+    "prompts",
+    "records",
+    "logs",
+    "userdata",
+    "user-data",
+    ".update-backups"
+  ],
+  "backup_location": "%LOCALAPPDATA%/VoceKit/updates/backups",
+  "description": "Runtime files may be replaced. User settings, API keys, prompts, records and logs must be preserved."
+}

@@ -164,7 +164,10 @@ $requiredFiles = @(
     "ocr\rapidocr\models\ch_PP-OCRv3_det_infer.onnx",
     "ocr\rapidocr\models\ch_PP-OCRv3_rec_infer.onnx",
     "ocr\rapidocr\models\ch_ppocr_mobile_v2.0_cls_infer.onnx",
-    "ocr\rapidocr\models\ppocr_keys_v1.txt"
+    "ocr\rapidocr\models\ppocr_keys_v1.txt",
+    ".vocekit-portable",
+    "updater\vocekit-update.ps1",
+    "updater\update-policy.json"
 )
 $missingFiles = New-Object Collections.Generic.List[string]
 foreach ($relativePath in $requiredFiles) {

@@ -7,6 +7,17 @@ lessThan(QT_MAJOR_VERSION, 6): error("VoceKit requires Qt 6")
 TARGET = vocekit
 TEMPLATE = app
 
+VOCEKIT_VERSION_LINES = $$cat($$PWD/APP_VERSION, lines)
+VERSION = $$first(VOCEKIT_VERSION_LINES)
+isEmpty(VERSION): error("APP_VERSION file is empty")
+DEFINES += VOCEKIT_VERSION=\\\"$$VERSION\\\"
+isEmpty(VOCEKIT_UPDATE_FEED_URL): VOCEKIT_UPDATE_FEED_URL = https://api.github.com/repos/tomhuaijbig/vocekit/releases/latest
+DEFINES += VOCEKIT_UPDATE_FEED_URL=\\\"$$VOCEKIT_UPDATE_FEED_URL\\\"
+QMAKE_TARGET_COMPANY = VoceKit
+QMAKE_TARGET_PRODUCT = VoceKit
+QMAKE_TARGET_DESCRIPTION = VoceKit Qt 6 Voice Assistant
+QMAKE_TARGET_COPYRIGHT = Copyright (C) 2026 VoceKit contributors
+
 SOURCES += \
     src/api/api_client_utils.cpp \
     src/app/application_events.cpp \
@@ -282,6 +293,7 @@ SOURCES += \
     src/ui/shortcut_display.cpp \
     src/ui/tab_bar_wheel_filter.cpp \
     src/ui/toggle_switch.cpp \
+    src/ui/update_settings_section.cpp \
     src/ui/ui_style.cpp \
     src/ui/floating_bar_style_selector.cpp \
     src/ui/floating_bar.cpp \
@@ -295,6 +307,9 @@ SOURCES += \
     src/ui/vocabulary_test_card.cpp \
     src/ui/vocabulary_transfer_controller.cpp \
     src/ui/write_input_test_card.cpp \
+    src/update/semantic_version.cpp \
+    src/update/update_manifest.cpp \
+    src/update/update_service.cpp \
     src/voiceassistant.cpp
 
 HEADERS += \
@@ -585,6 +600,7 @@ HEADERS += \
     src/ui/settings_panel.h \
     src/ui/tab_bar_wheel_filter.h \
     src/ui/toggle_switch.h \
+    src/ui/update_settings_section.h \
     src/ui/ui_style.h \
     src/ui/floating_bar_style_selector.h \
     src/ui/floating_bar_surface.h \
@@ -597,6 +613,9 @@ HEADERS += \
     src/ui/vocabulary_test_card.h \
     src/ui/vocabulary_transfer_controller.h \
     src/ui/write_input_test_card.h \
+    src/update/semantic_version.h \
+    src/update/update_manifest.h \
+    src/update/update_service.h \
     src/voiceassistant.h
 
 win32:LIBS += -luser32 -lwtsapi32 -lole32 -loleaut32 -luuid

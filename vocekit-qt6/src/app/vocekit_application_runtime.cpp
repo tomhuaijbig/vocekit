@@ -49,6 +49,10 @@
 #include <QPointer>
 #include <functional>
 
+#ifndef VOCEKIT_VERSION
+#define VOCEKIT_VERSION "0.0.0"
+#endif
+
 static QString tr8(const char *text)
 {
     return QString::fromUtf8(text);
@@ -297,6 +301,7 @@ int runVocekitApplication(int argc, char *argv[])
 
     QApplication::setQuitOnLastWindowClosed(false);
     QApplication::setApplicationName(QStringLiteral("vocekit"));
+    QApplication::setApplicationVersion(QString::fromLatin1(VOCEKIT_VERSION));
     QApplication::setOrganizationName(QStringLiteral("vocekit"));
     app.setFont(appFont());
     ChineseTextContextMenu chineseTextContextMenu(&app);

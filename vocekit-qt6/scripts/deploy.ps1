@@ -18,6 +18,7 @@ $deployTool = Join-Path $QtBin "windeployqt.exe"
 $sourceHelperRoot = Join-Path $projectRoot "helpers\bin"
 $translationSource = Join-Path (Split-Path -Parent $QtBin) "translations\qt_zh_CN.qm"
 $runtimeVerifier = Join-Path $PSScriptRoot "verify-runtime.ps1"
+$updaterSource = Join-Path $projectRoot "updater"
 
 $requiredSources = @(
     $sourceExecutable,
@@ -29,6 +30,9 @@ $requiredSources = @(
     (Join-Path $sourceHelperRoot "models"),
     $translationSource,
     $runtimeVerifier
+    (Join-Path $updaterSource "vocekit-update.ps1")
+    (Join-Path $updaterSource "portable.marker")
+    (Join-Path $updaterSource "update-policy.json")
 )
 foreach ($source in $requiredSources) {
     if (-not (Test-Path -LiteralPath $source)) {
@@ -68,6 +72,12 @@ Copy-Item -LiteralPath (Join-Path $sourceHelperRoot "vocekit-rapidocr.exe") -Des
 Copy-Item -LiteralPath (Join-Path $sourceHelperRoot "LICENSE-RapidOcrOnnx.txt") -Destination $rapidOcrDir -Force
 Copy-Item -Path (Join-Path $sourceHelperRoot "models\*") -Destination $rapidOcrModelsDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceHelperRoot "vocekit-windows-speech.exe") -Destination $windowsSpeechDir -Force
+
+$updaterDestination = Join-Path $Destination "updater"
+New-Item -ItemType Directory -Path $updaterDestination -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $updaterSource "vocekit-update.ps1") -Destination $updaterDestination -Force
+Copy-Item -LiteralPath (Join-Path $updaterSource "update-policy.json") -Destination $updaterDestination -Force
+Copy-Item -LiteralPath (Join-Path $updaterSource "portable.marker") -Destination (Join-Path $Destination ".vocekit-portable") -Force
 
 & $runtimeVerifier -Configuration release -RuntimeDir $Destination
 

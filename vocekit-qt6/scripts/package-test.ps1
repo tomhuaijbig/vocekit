@@ -5,7 +5,8 @@ param(
     [string]$ValidationPath = "",
     [string]$ValidationHelperPath = "",
     [ValidateSet("", "after-directory-move", "after-first-backup-cleanup")]
-    [string]$PublishFailureInjection = ""
+    [string]$PublishFailureInjection = "",
+    [switch]$RequireSignedBinaries
 )
 
 Set-StrictMode -Version Latest
@@ -43,7 +44,11 @@ function Get-NormalizedRelativePath {
 function Assert-PackagePrivacy {
     param([Parameter(Mandatory = $true)][string]$RootPath)
 
-    $allowedJson = @("config/secrets.json", "config/settings.json")
+    $allowedJson = @(
+        "config/secrets.json",
+        "config/settings.json",
+        "updater/update-policy.json"
+    )
     $allowedText = @(
         "prompts/asr.txt", "prompts/lexicon.txt", "prompts/qa.txt",
         "prompts/translate.txt", "ocr/rapidocr/models/ppocr_keys_v1.txt"
@@ -129,7 +134,13 @@ function Assert-PackageArchive {
     try {
         $files = @($archive.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) })
         $normalized = @($files | ForEach-Object { $_.FullName.Replace("\", "/").TrimStart("/") })
-        foreach ($required in @("vocekit.exe", "speech/windows/vocekit-windows-speech.exe")) {
+        foreach ($required in @(
+            "vocekit.exe",
+            "speech/windows/vocekit-windows-speech.exe",
+            ".vocekit-portable",
+            "updater/vocekit-update.ps1",
+            "updater/update-policy.json"
+        )) {
             if (@($normalized | Where-Object { $_ -ieq $required }).Count -ne 1 -or
                 @($normalized | Where-Object { $_ -ceq $required }).Count -ne 1) {
                 throw "Archive must contain exactly one '$required'."
@@ -192,17 +203,32 @@ if (-not (Test-Path -LiteralPath $runtimeVerifier -PathType Leaf)) {
     throw "Runtime verifier not found: $runtimeVerifier"
 }
 & $runtimeVerifier -Configuration release -RuntimeDir $releaseDir
+if ($RequireSignedBinaries) {
+    $unsigned = New-Object Collections.Generic.List[string]
+    foreach ($binary in Get-ChildItem -LiteralPath $releaseDir -File -Recurse | Where-Object {
+        $_.Extension.ToLowerInvariant() -in @(".exe", ".dll")
+    }) {
+        $signature = Get-AuthenticodeSignature -LiteralPath $binary.FullName
+        if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+            $unsigned.Add("$($binary.FullName): $($signature.Status)")
+        }
+    }
+    if ($unsigned.Count -gt 0) {
+        throw "Release contains unsigned or invalid binaries:`n$($unsigned -join "`n")"
+    }
+}
 
 # Whitelist only runtime files. Build output and user-created data never become input.
 $runtimeRootFiles = @(
     "vocekit.exe", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "Qt6Network.dll",
     "Qt6Multimedia.dll", "Qt6Svg.dll", "Qt6WebSockets.dll", "D3Dcompiler_47.dll",
     "opengl32sw.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll",
-    "avcodec-61.dll", "avformat-61.dll", "avutil-59.dll", "swresample-5.dll", "swscale-8.dll"
+    "avcodec-61.dll", "avformat-61.dll", "avutil-59.dll", "swresample-5.dll", "swscale-8.dll",
+    ".vocekit-portable"
 )
 $runtimeDirectories = @(
     "generic", "iconengines", "imageformats", "multimedia", "networkinformation",
-    "platforms", "styles", "tls", "translations", "ocr", "speech"
+    "platforms", "styles", "tls", "translations", "ocr", "speech", "updater"
 )
 $createdStage = $false
 $backedUpPackage = $false
@@ -307,6 +333,9 @@ try {
     Write-Host "  Archive: $zipPath"
     Write-Host "  Package bytes: $packageSize"
     Write-Host "  Archive bytes: $((Get-Item -LiteralPath $zipPath).Length)"
+    & (Join-Path $PSScriptRoot "create-update-manifest.ps1") `
+        -ArchivePath $zipPath `
+        -OutputPath (Join-Path $distDir "update-manifest.json")
 }
 finally {
     if ($createdStage -and [IO.Directory]::Exists($stagingDir)) { [IO.Directory]::Delete($stagingDir, $true) }

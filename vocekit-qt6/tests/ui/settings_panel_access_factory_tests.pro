@@ -56,8 +56,12 @@ SOURCES += \
     ../../src/ui/settings_panel_access_factory.cpp \
     ../../src/ui/shortcut_display.cpp \
     ../../src/ui/shortcut_settings_section.cpp \
+    ../../src/ui/update_settings_section.cpp \
     ../../src/ui/ui_style.cpp \
-    ../../src/ui/windows_speech_settings_card.cpp
+    ../../src/ui/windows_speech_settings_card.cpp \
+    ../../src/update/semantic_version.cpp \
+    ../../src/update/update_manifest.cpp \
+    ../../src/update/update_service.cpp
 
 HEADERS += \
     ../../src/config/model_advanced_settings.h \
@@ -74,4 +78,8 @@ HEADERS += \
     ../../src/ui/selection_context_action_editor.h \
     ../../src/ui/selection_context_settings_card.h \
     ../../src/ui/settings_panel.h \
-    ../../src/ui/settings_panel_access_factory.h
+    ../../src/ui/settings_panel_access_factory.h \
+    ../../src/ui/update_settings_section.h \
+    ../../src/update/semantic_version.h \
+    ../../src/update/update_manifest.h \
+    ../../src/update/update_service.h

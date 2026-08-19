@@ -13,6 +13,7 @@ class ApiSettingsSection;
 class HistorySettingsSection;
 class QTabWidget;
 class ShortcutSettingsSection;
+class UpdateSettingsSection;
 
 // 设置页只通过类型化快照读写配置，避免界面层依赖旧配置对象。
 struct SettingsPanelAccess
@@ -49,6 +50,7 @@ private:
     BasicSettingsSection *newBasicSettingsSection(BasicSettingsSection::Kind kind);
     QWidget *historySettingsTab();
     QWidget *apiTab();
+    QWidget *updateTab();
 
     void refreshRecordDirectoryLabel();
     void refreshBasicSettings();
@@ -75,6 +77,7 @@ private:
     BasicSettingsSection *m_networkSettingsSection = nullptr;
     ApiSettingsSection *m_apiSettingsSection = nullptr;
     HistorySettingsSection *m_historySettingsSection = nullptr;
+    UpdateSettingsSection *m_updateSettingsSection = nullptr;
 };
 
 #endif // VOCEKIT_SETTINGS_PANEL_H

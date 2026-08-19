@@ -5,6 +5,7 @@ param(
     [string]$Configuration = "debug",
     [ValidateRange(1, 64)]
     [int]$Jobs = 2,
+    [string]$UpdateFeedUrl = "",
     [switch]$Run
 )
 
@@ -35,7 +36,23 @@ try {
 
     Push-Location $buildRoot
     try {
-        & $qmake $projectFile -spec win32-g++ "CONFIG+=$Configuration"
+        $qmakeArguments = @(
+            $projectFile,
+            "-spec",
+            "win32-g++",
+            "CONFIG+=$Configuration"
+        )
+        if (-not [string]::IsNullOrWhiteSpace($UpdateFeedUrl)) {
+            $feedUri = [Uri]$UpdateFeedUrl
+            if (-not $feedUri.IsAbsoluteUri -or
+                $feedUri.Scheme -ne "https" -or
+                [string]::IsNullOrWhiteSpace($feedUri.Host) -or
+                -not [string]::IsNullOrWhiteSpace($feedUri.UserInfo)) {
+                throw "UpdateFeedUrl must be an absolute HTTPS URL without embedded credentials."
+            }
+            $qmakeArguments += "VOCEKIT_UPDATE_FEED_URL=$UpdateFeedUrl"
+        }
+        & $qmake @qmakeArguments
         if ($LASTEXITCODE -ne 0) {
             throw "Qt 6 qmake failed with exit code $LASTEXITCODE"
         }

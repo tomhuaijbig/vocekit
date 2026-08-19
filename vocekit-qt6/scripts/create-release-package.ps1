@@ -5,6 +5,9 @@ param(
     [string]$ReleaseBaseUrl,
     [Parameter(Mandatory = $true)]
     [string]$ReleasePageBaseUrl,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedSignerSubject,
+    [string]$ExpectedSignerThumbprint = "",
     [string]$ExpectedTag = "",
     [string]$PackageName = "vocekit-qt6-portable"
 )
@@ -17,7 +20,9 @@ $packageScript = Join-Path $PSScriptRoot "package-test.ps1"
 
 & $releaseGate `
     -UpdateFeedUrl $UpdateFeedUrl `
-    -ExpectedTag $ExpectedTag
+    -ExpectedTag $ExpectedTag `
+    -ExpectedSignerSubject $ExpectedSignerSubject `
+    -ExpectedSignerThumbprint $ExpectedSignerThumbprint
 
 & $packageScript `
     -PackageName $PackageName `

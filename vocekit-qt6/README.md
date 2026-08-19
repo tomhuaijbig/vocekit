@@ -131,7 +131,7 @@ dist/vocekit-test.zip
 
 正式发布构建的“设置 → 更新”可以检查公开更新源、显示发布说明、下载完整更新包、校验 SHA-256，并在主程序退出后由独立更新程序完成替换和重启。开发和内部测试构建默认关闭联网更新，只有显式注入公开 HTTPS 更新源才会启用。更新会保护本机的配置、API Key、自定义提示词、记录和日志，替换失败时自动回滚运行文件。
 
-公开发布必须通过 `scripts/create-release-package.ps1`：版本/标签、Git 状态、真实应用验收、公开更新源和 Authenticode 签名任一不满足都会拒绝打包。未签名的 `package-test.ps1` 产物带 `UNSIGNED_TEST_BUILD` 标记，只能用于受控测试。
+公开发布必须通过 `scripts/create-release-package.ps1`：版本/标签、Git 状态、真实应用验收、公开更新源、预期发布者、RFC 3161 时间戳和 Authenticode 签名任一不满足都会拒绝打包。GitHub 工作流只生成带 `UNSIGNED_TEST_BUILD` 标记的短期候选包，不持有签名私钥，也不能创建正式 Release。
 
 ## 崩溃诊断与安全模式
 

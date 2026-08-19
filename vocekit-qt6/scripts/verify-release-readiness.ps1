@@ -2,6 +2,8 @@ param(
     [string]$RuntimeDir = "",
     [string]$UpdateFeedUrl = "",
     [string]$ExpectedTag = "",
+    [string]$ExpectedSignerSubject = "",
+    [string]$ExpectedSignerThumbprint = "",
     [switch]$SkipGitState,
     [switch]$SkipAuthenticode,
     [switch]$SkipAcceptance,
@@ -58,6 +60,57 @@ foreach ($required in @(
 )) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         Add-Failure "Required release-control file is missing: $required"
+    }
+}
+
+$releaseWorkflowPath = Join-Path $repositoryRoot ".github\workflows\release.yml"
+if (Test-Path -LiteralPath $releaseWorkflowPath -PathType Leaf) {
+    $releaseWorkflow = Get-Content -LiteralPath $releaseWorkflowPath -Raw -Encoding UTF8
+    foreach ($forbiddenPattern in @(
+        'VOCEKIT_SIGNING_CERTIFICATE_BASE64',
+        'VOCEKIT_SIGNING_CERTIFICATE_PASSWORD',
+        'Import-PfxCertificate',
+        'FromBase64String\([^)]*CERTIFICATE'
+    )) {
+        if ($releaseWorkflow -match $forbiddenPattern) {
+            Add-Failure "Release workflow must not export or import a code-signing private key ($forbiddenPattern)."
+        }
+    }
+    if ($releaseWorkflow -match 'contents:\s*write' -or
+        $releaseWorkflow -match 'gh\s+release\s+create') {
+        Add-Failure "Unsigned GitHub release-candidate workflow must not have permission or commands to publish a Release."
+    }
+    if ($releaseWorkflow -notmatch 'package-test\.ps1' -or
+        $releaseWorkflow -notmatch 'unsigned-candidate') {
+        Add-Failure "GitHub release-candidate workflow must create an explicitly unsigned internal-test package."
+    }
+}
+
+foreach ($workflowPath in @(
+    (Join-Path $repositoryRoot ".github\workflows\qt6-ci.yml"),
+    $releaseWorkflowPath
+)) {
+    if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
+        continue
+    }
+    $workflowText = Get-Content -LiteralPath $workflowPath -Raw -Encoding UTF8
+    foreach ($match in [regex]::Matches($workflowText, '(?m)^\s*uses:\s*([^\s#]+)')) {
+        $actionReference = $match.Groups[1].Value
+        if ($actionReference -notmatch '@[0-9a-fA-F]{40}$') {
+            Add-Failure "GitHub Action must be pinned to a full commit SHA: $actionReference"
+        }
+    }
+}
+
+$signScriptPath = Join-Path $projectRoot "scripts\sign-release.ps1"
+if (-not (Test-Path -LiteralPath $signScriptPath -PathType Leaf)) {
+    Add-Failure "Signing script is missing: $signScriptPath"
+} else {
+    $signScript = Get-Content -LiteralPath $signScriptPath -Raw -Encoding UTF8
+    if ($signScript -notmatch 'SignatureStatus\]::Valid' -or
+        $signScript -notmatch 'SignatureStatus\]::NotSigned' -or
+        $signScript -notmatch 'Refusing to overwrite an invalid existing signature') {
+        Add-Failure "Signing script must preserve valid vendor signatures and reject invalid existing signatures."
     }
 }
 
@@ -131,6 +184,15 @@ if ($feedUri -and -not $SkipPublicFeed) {
 }
 
 if (-not $SkipAuthenticode) {
+    $normalizedExpectedThumbprint = ($ExpectedSignerThumbprint -replace '\s', '').ToUpperInvariant()
+    if ([string]::IsNullOrWhiteSpace($ExpectedSignerSubject) -and
+        [string]::IsNullOrWhiteSpace($normalizedExpectedThumbprint)) {
+        Add-Failure "ExpectedSignerSubject or ExpectedSignerThumbprint is required for publisher verification."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($normalizedExpectedThumbprint) -and
+        $normalizedExpectedThumbprint -notmatch '^[0-9A-F]{40,64}$') {
+        Add-Failure "ExpectedSignerThumbprint is invalid."
+    }
     if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
         $RuntimeDir = Join-Path $projectRoot ".qt6-deploy"
     }
@@ -138,13 +200,53 @@ if (-not $SkipAuthenticode) {
     if (-not (Test-Path -LiteralPath $runtimeFull -PathType Container)) {
         Add-Failure "Runtime directory is missing: $runtimeFull"
     } else {
+        $publisherPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        @(
+            "vocekit.exe",
+            "ocr/rapidocr/vocekit-rapidocr.exe",
+            "ocr/windows/vocekit-windows-ocr.exe",
+            "speech/windows/vocekit-windows-speech.exe",
+            "libgcc_s_seh-1.dll",
+            "libstdc++-6.dll",
+            "libwinpthread-1.dll"
+        ) | ForEach-Object { [void]$publisherPaths.Add($_) }
+        $foundPublisherPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $unsigned = New-Object Collections.Generic.List[string]
         foreach ($binary in Get-ChildItem -LiteralPath $runtimeFull -File -Recurse | Where-Object {
             $_.Extension.ToLowerInvariant() -in @(".exe", ".dll")
         }) {
+            $relativePath = [IO.Path]::GetRelativePath($runtimeFull, $binary.FullName).Replace("\", "/")
             $signature = Get-AuthenticodeSignature -LiteralPath $binary.FullName
             if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-                $unsigned.Add("$($binary.Name): $($signature.Status)")
+                $unsigned.Add("$relativePath`: $($signature.Status)")
+                continue
+            }
+            if ($publisherPaths.Contains($relativePath)) {
+                [void]$foundPublisherPaths.Add($relativePath)
+                if (-not $signature.SignerCertificate) {
+                    Add-Failure "Publisher signer certificate is missing: $relativePath"
+                    continue
+                }
+                if (-not [string]::IsNullOrWhiteSpace($ExpectedSignerSubject) -and
+                    -not [string]::Equals(
+                        $signature.SignerCertificate.Subject,
+                        $ExpectedSignerSubject,
+                        [StringComparison]::OrdinalIgnoreCase
+                    )) {
+                    Add-Failure "Publisher subject mismatch: $relativePath"
+                }
+                if (-not [string]::IsNullOrWhiteSpace($normalizedExpectedThumbprint) -and
+                    $signature.SignerCertificate.Thumbprint -ne $normalizedExpectedThumbprint) {
+                    Add-Failure "Publisher certificate thumbprint mismatch: $relativePath"
+                }
+                if (-not $signature.TimeStamperCertificate) {
+                    Add-Failure "RFC 3161 timestamp is missing: $relativePath"
+                }
+            }
+        }
+        foreach ($requiredPath in $publisherPaths) {
+            if (-not $foundPublisherPaths.Contains($requiredPath)) {
+                Add-Failure "Required publisher-owned binary was not verified: $requiredPath"
             }
         }
         if ($unsigned.Count -gt 0) {

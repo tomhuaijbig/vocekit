@@ -21,15 +21,17 @@
 
 ## 当前安全边界
 
-SHA-256 能发现下载损坏或资源被替换，但如果发布账户和校验值同时被攻击，它不能替代发布者身份认证。因此正式对外发布前仍应购买或申请受信任的 Windows 代码签名证书，并稳定使用同一证书签名。仓库提供了 `scripts/sign-release.ps1`，但不会生成、提交或托管私钥。
+SHA-256 能发现下载损坏或资源被替换，但如果发布账户和校验值同时被攻击，它不能替代发布者身份认证。因此正式对外发布前仍应购买或申请受信任的 Windows 代码签名证书，并稳定使用同一发布者身份签名。仓库提供了 `scripts/sign-release.ps1`，但不会生成、导出、提交或托管私钥。
+
+公开信任代码签名证书的私钥必须保存在符合要求的硬件加密模块、硬件令牌或合规云签名服务中。不要把 PFX、P12、私钥或其 Base64 内容保存为 GitHub Secret。当前 GitHub 工作流只构建带 `UNSIGNED_TEST_BUILD` 标记的短期候选包，没有签名权限和创建 Release 的权限。正式签名应在隔离签名机上使用硬件令牌/HSM，或在确定服务和地域可用后接入 Azure Artifact Signing、DigiCert KeyLocker 等合规云签名服务；私钥始终不得离开 HSM。公开仓库不要长期连接保存硬件私钥的普通自托管 runner。
 
 当前 `vocekit.exe` 尚未签名。没有证书时可用于本机和受控测试，不应把它描述为已经完成生产级签名。
 
-截至 2026-08-19 的发布验证，当前 GitHub 源仓库对未登录请求返回 404，因此客户端已经取消该地址的硬编码默认值。对外发布前必须把 Release 放在公众可访问的仓库，或提供自己的公开 HTTPS 清单地址。构建时用下面的参数注入更新源，无需修改 C++：
+截至 2026-08-19 的发布验证，`tomhuaijbig/vocekit` 已是公众可访问的 GitHub 仓库，但尚未创建首个 Release，因此 `releases/latest` 仍会返回 404。客户端不硬编码任何未经发布验证的默认地址；正式构建时用下面的参数显式注入更新源，无需修改 C++：
 
 ```powershell
 & .\scripts\build.ps1 -Configuration release `
-  -UpdateFeedUrl "https://api.github.com/repos/你的公开账户/你的公开发布仓库/releases/latest"
+  -UpdateFeedUrl "https://api.github.com/repos/tomhuaijbig/vocekit/releases/latest"
 ```
 
 该地址会编译进应用；不要使用需要把私有访问令牌分发给用户的更新源。
@@ -73,6 +75,8 @@ Git 标签必须与版本一致并带 `v` 前缀，例如 `v0.1.1`。
   -UpdateFeedUrl "https://api.github.com/repos/你的公开账户/你的公开发布仓库/releases/latest" `
   -ReleaseBaseUrl "https://github.com/你的公开账户/你的公开发布仓库/releases/download" `
   -ReleasePageBaseUrl "https://github.com/你的公开账户/你的公开发布仓库/releases/tag" `
+  -ExpectedSignerSubject "证书中显示的发布者 Subject" `
+  -ExpectedSignerThumbprint "硬件证书指纹（云签名可省略）" `
   -ExpectedTag "v0.2.0"
 & .\tests\scripts\update-helper-tests.ps1
 ```
@@ -90,30 +94,32 @@ dist/update-manifest.json
 
 `update-manifest.json` 包含版本、下载地址、SHA-256、通道和发布页。当前客户端通过 GitHub Release API 检查，因此发布时最关键的是 ZIP 和同名 `.sha256` 两个资源；清单也应保留，供以后切换到自建更新源。
 
-仓库的 `.github/workflows/release.yml` 对 `v*` 标签执行同一套门禁，并要求在 GitHub Secrets 中配置签名证书和密码。缺少证书时工作流会直接失败，不会产出看似正式的未签名包；全部门禁通过后，工作流才会创建 GitHub Release 并上传 ZIP、SHA-256 和更新清单。
+仓库的 `.github/workflows/release.yml` 只负责在 GitHub 托管 runner 上运行 Release 测试、构建并上传短期的未签名候选包。候选包明确带有 `UNSIGNED_TEST_BUILD`，工作流权限为只读，也不包含 `gh release create`。正式签名和 GitHub Release 发布必须执行下述人工批准流程；未来选定合规云签名服务后，才可把签名阶段安全地接回自动化工作流。
 
 ## 代码签名
 
-证书已安装到 Windows 当前用户或本机证书库后执行：
+在隔离签名机上，硬件令牌/HSM 提供的证书已出现在 Windows 当前用户证书库后执行：
 
 ```powershell
 & .\scripts\sign-release.ps1 `
   -CertificateThumbprint "你的证书指纹"
 ```
 
-签名必须发生在打包之前。脚本会递归签名部署目录内的 EXE/DLL，并使用 `signtool verify` 复核；正式打包时的 `-RequireSignedBinaries` 会再次拒绝未签名文件。私钥和证书密码不得放入 Git、脚本参数默认值或普通日志。
+签名必须发生在打包之前。脚本只允许签名 VoceKit 主程序、三个自有辅助程序和三个随包分发的 MinGW 运行库；出现清单外的未签名文件会立即停止。Qt 等第三方文件已有的有效厂商签名保持不变，然后使用 `Get-AuthenticodeSignature` 和 `signtool verify /pa /all /tw` 全量复核。VoceKit 发布者文件还必须匹配预期证书并带 RFC 3161 时间戳；遇到损坏或无效的已有签名会直接拒绝覆盖。正式打包时的 `-RequireSignedBinaries` 会再次拒绝未签名文件。私钥、PFX/P12 和证书密码不得放入 Git、GitHub Secret、脚本参数默认值或普通日志。
 
 ## 创建 GitHub Release
 
-1. 修改 `APP_VERSION`，例如从 `0.2.0` 改为 `0.2.1`。
-2. 完成测试、Release 构建、部署、签名和打包。
-3. 提交代码并创建对应标签，例如 `v0.1.1`。
-4. 在 GitHub 创建正式 Release；不要勾选 draft 或 prerelease（稳定通道）。
-5. 上传且保持下面两个文件名完全一致：
+1. 修改 `APP_VERSION`，例如从 `0.2.0` 改为 `0.2.1`，完成自动化测试和真实应用验收矩阵。
+2. 提交并把发布提交推送到 `origin/main`，确认本地与远端完全一致。
+3. 只在本地创建与版本一致的标签，例如 `git tag -a v0.2.0 -m "VoceKit 0.2.0"`；此时先不要推送标签。
+4. 在隔离签名机上完成 Release 构建、部署、硬件/HSM 签名和 `create-release-package.ps1` 正式打包。
+5. 完整复核 Authenticode 发布者、时间戳、SHA-256、更新与回滚后，才把标签推送到 GitHub。
+6. 在 GitHub 创建正式 Release；不要勾选 draft 或 prerelease（稳定通道）。
+7. 上传且保持下面两个文件名完全一致：
    - `vocekit-qt6-portable.zip`
    - `vocekit-qt6-portable.zip.sha256`
-6. 填写发布说明。客户端会原样作为纯文本显示，不执行其中的 HTML。
-7. 发布后用旧版本点击“设置 → 更新 → 检查更新”，完成一次 `N-1 → N` 实机升级。
+8. 同时上传 `update-manifest.json`，并填写发布说明；客户端会把说明作为纯文本显示，不执行其中的 HTML。
+9. 发布后用旧版本点击“设置 → 更新 → 检查更新”，完成一次 `N-1 → N` 实机升级和失败回滚。
 
 ## 发布门槛
 

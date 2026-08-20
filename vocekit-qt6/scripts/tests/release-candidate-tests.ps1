@@ -8,12 +8,14 @@ $manifestScript = Join-Path $scriptsRoot "scripts\create-update-manifest.ps1"
 $provenanceScript = Join-Path $scriptsRoot "scripts\verify-embedded-build-provenance.ps1"
 $buildProvenanceScript = Join-Path $scriptsRoot "scripts\build-provenance.ps1"
 $deploymentSafetyScript = Join-Path $scriptsRoot "scripts\deployment-safety.ps1"
+$publicFeedSafetyScript = Join-Path $scriptsRoot "scripts\public-feed-safety.ps1"
 
 . $createScript -DecisionTestMode
 . $provenanceScript -DecisionTestMode
 . $packageScript -DecisionTestMode
 . $buildProvenanceScript
 . $deploymentSafetyScript
+. $publicFeedSafetyScript
 
 function Remove-TestGitDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -40,6 +42,59 @@ try {
 }
 if (-not $decisionModeBypassWasRejected) {
     throw "package-test DecisionTestMode could be combined with formal production gates."
+}
+
+$githubFeed = [Uri]"https://api.github.com/repos/example/vocekit/releases/latest"
+$fallbackRequests = New-Object Collections.Generic.List[string]
+$fallbackResult = Test-PublicReleaseFeedReachability `
+    -FeedUri $githubFeed `
+    -UserAgent "VoceKit-Test/1" `
+    -RequestAction {
+        param([Uri]$Uri, [hashtable]$Headers)
+        $fallbackRequests.Add($Uri.AbsoluteUri)
+        if ($Uri.Host -ceq "github.com") {
+            if ([string]$Headers.Accept -notmatch "text/html") {
+                throw "Public repository fallback did not request HTML."
+            }
+            return [PSCustomObject]@{ StatusCode = 200 }
+        }
+        throw "simulated anonymous GitHub API failure"
+    }
+if (-not [bool]$fallbackResult.is_reachable -or
+    [string]$fallbackResult.evidence -cne "github-public-page" -or
+    $fallbackRequests.Count -ne 3 -or
+    $fallbackRequests[2] -cne "https://github.com/example/vocekit") {
+    throw "A public GitHub repository page did not recover an unavailable anonymous API check."
+}
+
+$privateRequests = New-Object Collections.Generic.List[string]
+$privateResult = Test-PublicReleaseFeedReachability `
+    -FeedUri $githubFeed `
+    -UserAgent "VoceKit-Test/1" `
+    -RequestAction {
+        param([Uri]$Uri, [hashtable]$Headers)
+        $privateRequests.Add($Uri.AbsoluteUri)
+        throw "simulated private or missing repository"
+    }
+if ([bool]$privateResult.is_reachable -or
+    $privateRequests.Count -ne 3 -or
+    [string]$privateResult.failure -notmatch "public page") {
+    throw "The public-feed gate did not fail closed when all anonymous GitHub endpoints failed."
+}
+
+$directRequests = New-Object Collections.Generic.List[string]
+$directResult = Test-PublicReleaseFeedReachability `
+    -FeedUri $githubFeed `
+    -UserAgent "VoceKit-Test/1" `
+    -RequestAction {
+        param([Uri]$Uri, [hashtable]$Headers)
+        $directRequests.Add($Uri.AbsoluteUri)
+        return [PSCustomObject]@{ StatusCode = 200 }
+    }
+if (-not [bool]$directResult.is_reachable -or
+    [string]$directResult.evidence -cne "update-feed" -or
+    $directRequests.Count -ne 1) {
+    throw "A directly reachable public update feed did not short-circuit fallback probes."
 }
 
 $buildScriptText = Get-Content -LiteralPath (Join-Path $scriptsRoot "scripts\build.ps1") -Raw -Encoding UTF8

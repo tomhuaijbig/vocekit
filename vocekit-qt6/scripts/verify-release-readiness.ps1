@@ -18,6 +18,7 @@ $projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot ".."))
 $failures = New-Object Collections.Generic.List[string]
 . (Join-Path $PSScriptRoot "git-trust-safety.ps1")
+. (Join-Path $PSScriptRoot "public-feed-safety.ps1")
 
 function Add-Failure {
     param([string]$Message)
@@ -75,6 +76,7 @@ foreach ($required in @(
     (Join-Path $projectRoot "scripts\build-provenance.ps1"),
     (Join-Path $projectRoot "scripts\git-trust-safety.ps1"),
     (Join-Path $projectRoot "scripts\deployment-safety.ps1"),
+    (Join-Path $projectRoot "scripts\public-feed-safety.ps1"),
     (Join-Path $projectRoot "scripts\release-path-safety.ps1"),
     (Join-Path $projectRoot "scripts\runtime-helper-provenance.ps1"),
     (Join-Path $projectRoot "scripts\verify-embedded-build-provenance.ps1"),
@@ -334,25 +336,13 @@ if (-not $SkipAcceptance) {
 
 $feedUri = Assert-HttpsUrl -Name "UpdateFeedUrl" -Value $UpdateFeedUrl
 if ($feedUri -and -not $SkipPublicFeed) {
-    $headers = @{ "User-Agent" = "VoceKit-Release-Gate/$version"; "Accept" = "application/json" }
-    try {
-        Invoke-WebRequest -Uri $feedUri -Headers $headers -Method Get -TimeoutSec 20 -UseBasicParsing | Out-Null
-    } catch {
-        $githubMatch = [regex]::Match(
-            $feedUri.AbsoluteUri,
-            '^https://api\.github\.com/repos/([^/]+/[^/]+)/releases/latest/?$'
-        )
-        if ($githubMatch.Success) {
-            try {
-                $repositoryApi = "https://api.github.com/repos/$($githubMatch.Groups[1].Value)"
-                Invoke-WebRequest -Uri $repositoryApi -Headers $headers -Method Get -TimeoutSec 20 -UseBasicParsing | Out-Null
-                Write-Warning "The public GitHub repository is reachable but has no latest release yet."
-            } catch {
-                Add-Failure "The configured GitHub update repository is not publicly reachable."
-            }
-        } else {
-            Add-Failure "The configured update feed is not publicly reachable: $($_.Exception.Message)"
-        }
+    $reachability = Test-PublicReleaseFeedReachability `
+        -FeedUri $feedUri `
+        -UserAgent "VoceKit-Release-Gate/$version"
+    if (-not [bool]$reachability.is_reachable) {
+        Add-Failure ([string]$reachability.failure)
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$reachability.warning)) {
+        Write-Warning ([string]$reachability.warning)
     }
 }
 

@@ -9,7 +9,8 @@ param(
     [string]$ReleasePageBaseUrl,
     [ValidateSet("stable", "preview")]
     [string]$Channel = "stable",
-    [string]$ReleaseNotes = ""
+    [string]$ReleaseNotes = "",
+    [switch]$FailIfOutputExists
 )
 
 Set-StrictMode -Version Latest
@@ -57,7 +58,6 @@ $checksumUrl = "$downloadUrl.sha256"
 $releasePageUrl = $ReleasePageBaseUrl.TrimEnd("/") + "/$tag"
 $sha256 = (Get-FileHash -LiteralPath $archiveFull -Algorithm SHA256).Hash.ToLowerInvariant()
 $checksumPath = "$archiveFull.sha256"
-Set-Content -LiteralPath $checksumPath -Value "$sha256  $archiveName" -Encoding Ascii
 
 $manifest = [ordered]@{
     schema_version = 1
@@ -73,9 +73,54 @@ $manifest = [ordered]@{
     sha256 = $sha256
     prerelease = ($Channel -eq "preview")
 }
-$temporary = "$outputFull.tmp"
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary -Encoding UTF8
-[IO.File]::Move($temporary, $outputFull, $true)
+$publishId = [Guid]::NewGuid().ToString("N")
+$checksumTemporary = "$checksumPath.tmp-$publishId"
+$manifestTemporary = "$outputFull.tmp-$publishId"
+if ($FailIfOutputExists) {
+    foreach ($formalOutput in @($checksumPath, $outputFull)) {
+        if (Test-Path -LiteralPath $formalOutput) {
+            throw "Formal update output already exists; refusing to overwrite it: $formalOutput"
+        }
+    }
+}
+try {
+    Set-Content `
+        -LiteralPath $checksumTemporary `
+        -Value "$sha256  $archiveName" `
+        -Encoding Ascii
+    $manifest | ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath $manifestTemporary -Encoding UTF8
+
+    foreach ($publication in @(
+        @{ Source = $checksumTemporary; Destination = $checksumPath; Backup = "$checksumPath.backup-$publishId" },
+        @{ Source = $manifestTemporary; Destination = $outputFull; Backup = "$outputFull.backup-$publishId" }
+    )) {
+        if ($FailIfOutputExists -or
+            -not [IO.File]::Exists($publication.Destination)) {
+            # The two-argument overload is available in Windows PowerShell 5.1
+            # and never overwrites a destination that appeared concurrently.
+            [IO.File]::Move($publication.Source, $publication.Destination)
+        } else {
+            [IO.File]::Replace(
+                $publication.Source,
+                $publication.Destination,
+                $publication.Backup
+            )
+            [IO.File]::Delete($publication.Backup)
+        }
+    }
+} finally {
+    foreach ($temporaryPath in @(
+        $checksumTemporary,
+        $manifestTemporary,
+        "$checksumPath.backup-$publishId",
+        "$outputFull.backup-$publishId"
+    )) {
+        if ([IO.File]::Exists($temporaryPath)) {
+            [IO.File]::Delete($temporaryPath)
+        }
+    }
+}
 
 Write-Host "Update manifest created: $outputFull"
 Write-Host "SHA-256 sidecar created: $checksumPath"

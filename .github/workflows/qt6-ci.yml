@@ -22,6 +22,10 @@ jobs:
         run: |
           & .\vocekit-qt6\tests\scripts\update-helper-tests.ps1
           & .\vocekit-qt6\scripts\tests\windows-speech-helper-build-tests.ps1
+          & .\vocekit-qt6\scripts\tests\runtime-helper-provenance-tests.ps1
+          & .\vocekit-qt6\scripts\tests\release-candidate-tests.ps1
+          & .\vocekit-qt6\scripts\tests\finalize-release-candidate-tests.ps1
+          & .\vocekit-qt6\scripts\tests\publish-finalized-release-tests.ps1
           $updateFeed = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest"
           & .\vocekit-qt6\scripts\verify-release-readiness.ps1 `
             -UpdateFeedUrl $updateFeed `
@@ -29,6 +33,22 @@ jobs:
             -SkipAcceptance `
             -SkipAuthenticode `
             -SkipPublicFeed
+
+      - name: Run Windows PowerShell 5.1 release compatibility tests
+        shell: pwsh
+        run: |
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\vocekit-qt6\tests\scripts\update-helper-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 updater helper tests failed." }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\vocekit-qt6\scripts\tests\windows-speech-helper-build-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 speech helper tests failed." }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\vocekit-qt6\scripts\tests\runtime-helper-provenance-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 runtime helper provenance tests failed." }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\vocekit-qt6\scripts\tests\release-candidate-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 release candidate tests failed." }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\vocekit-qt6\scripts\tests\finalize-release-candidate-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 release finalization tests failed." }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\vocekit-qt6\scripts\tests\publish-finalized-release-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 verified-draft publisher tests failed." }
 
       - name: Install Qt 6.10.3 compatibility SDK and MinGW 13.1
         uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1

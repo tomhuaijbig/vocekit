@@ -14,6 +14,8 @@
 #include "OcrLite.h"
 #include "opencv2/imgcodecs.hpp"
 
+#include "../runtime_helper_build_provenance.h"
+
 using namespace winrt;
 using namespace Windows::Data::Json;
 
@@ -127,6 +129,10 @@ private:
 
 int wmain(int argc, wchar_t **argv)
 {
+    if (argc == 2 && std::wstring(argv[1]) == L"--build-provenance-json") {
+        return writeRuntimeHelperBuildProvenance("vocekit-rapidocr");
+    }
+
     const auto startedAt = std::chrono::steady_clock::now();
     hstring requestId;
 

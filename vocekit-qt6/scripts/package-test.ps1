@@ -1,24 +1,51 @@
+[CmdletBinding(DefaultParameterSetName = "Package")]
 param(
+    [Parameter(ParameterSetName = "Package")]
+    [Parameter(ParameterSetName = "Validation")]
     [string]$PackageName = "vocekit-test",
+    [Parameter(Mandatory = $true, ParameterSetName = "Validation")]
     [ValidateSet("", "privacy", "archive")]
     [string]$ValidationOnly = "",
+    [Parameter(ParameterSetName = "Validation")]
     [string]$ValidationPath = "",
+    [Parameter(ParameterSetName = "Validation")]
     [string]$ValidationHelperPath = "",
-    [ValidateSet("", "after-directory-move", "after-first-backup-cleanup")]
+    [Parameter(ParameterSetName = "Package")]
+    [ValidateSet("", "after-directory-move", "after-first-backup-cleanup", "formal-zip-race-after-directory")]
     [string]$PublishFailureInjection = "",
+    [Parameter(ParameterSetName = "Package")]
     [switch]$RequireSignedBinaries,
+    [Parameter(ParameterSetName = "Package")]
     [string]$ReleaseBaseUrl = "",
-    [string]$ReleasePageBaseUrl = ""
+    [Parameter(ParameterSetName = "Package")]
+    [string]$ReleasePageBaseUrl = "",
+    [Parameter(ParameterSetName = "Package")]
+    [string]$OutputDirectory = "",
+    [Parameter(ParameterSetName = "Package")]
+    [switch]$FailIfOutputExists,
+    [Parameter(Mandatory = $true, ParameterSetName = "DecisionTest")]
+    [switch]$DecisionTestMode
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+. (Join-Path $PSScriptRoot "release-path-safety.ps1")
 
 $projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $releaseDir = Join-Path $projectRoot ".qt6-deploy"
-$distDir = Join-Path $projectRoot "dist"
+$defaultDistDir = [IO.Path]::GetFullPath((Join-Path $projectRoot "dist"))
+$distDir = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $defaultDistDir
+} else {
+    [IO.Path]::GetFullPath($OutputDirectory)
+}
+$defaultDistPrefix = $defaultDistDir.TrimEnd("\") + "\"
+if (-not [string]::Equals($distDir, $defaultDistDir, [StringComparison]::OrdinalIgnoreCase) -and
+    -not $distDir.StartsWith($defaultDistPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputDirectory must be the project dist directory or one of its descendants: $distDir"
+}
 $packageDir = Join-Path $distDir $PackageName
 $zipPath = Join-Path $distDir "$PackageName.zip"
 $runtimeVerifier = Join-Path $PSScriptRoot "verify-runtime.ps1"
@@ -172,6 +199,52 @@ function Assert-PackageArchive {
     }
 }
 
+function Publish-FormalPackagePair {
+    param(
+        [Parameter(Mandatory = $true)][string]$StagingDirectory,
+        [Parameter(Mandatory = $true)][string]$TemporaryArchive,
+        [Parameter(Mandatory = $true)][string]$PackageDirectory,
+        [Parameter(Mandatory = $true)][string]$ArchivePath,
+        [ValidateSet("", "formal-zip-race-after-directory")]
+        [string]$FailureInjection = ""
+    )
+
+    foreach ($formalOutput in @($PackageDirectory, $ArchivePath)) {
+        [void](Assert-NoReparsePointsInExistingPathChain `
+            -Path $formalOutput `
+            -Label "Formal package output")
+        if (Test-Path -LiteralPath $formalOutput) {
+            throw "Formal package output appeared during publication; refusing to overwrite it: $formalOutput"
+        }
+    }
+    $publishedDirectory = $false
+    try {
+        [IO.Directory]::Move($StagingDirectory, $PackageDirectory)
+        $publishedDirectory = $true
+        [void](Assert-NoReparsePointsInExistingPathChain `
+            -Path $PackageDirectory `
+            -Label "Published package directory")
+        if ($FailureInjection -eq "formal-zip-race-after-directory") {
+            [IO.File]::WriteAllText($ArchivePath, "race-sentinel")
+        }
+        # The two-argument overload never overwrites an archive that appears
+        # after the initial check.
+        [IO.File]::Move($TemporaryArchive, $ArchivePath)
+        [void](Assert-NoReparsePointsInExistingPathChain `
+            -Path $ArchivePath `
+            -Label "Published package archive")
+    } catch {
+        if ($publishedDirectory -and [IO.Directory]::Exists($PackageDirectory)) {
+            [IO.Directory]::Delete($PackageDirectory, $true)
+        }
+        throw
+    }
+}
+
+if ($DecisionTestMode) {
+    return
+}
+
 if (-not [string]::IsNullOrWhiteSpace($ValidationOnly)) {
     if ([string]::IsNullOrWhiteSpace($ValidationPath)) {
         throw "ValidationPath is required with ValidationOnly."
@@ -187,7 +260,26 @@ if (-not [string]::IsNullOrWhiteSpace($ValidationOnly)) {
             -ExpectedHelperPath ([IO.Path]::GetFullPath($ValidationHelperPath))
     }
     Write-Host "$ValidationOnly validation passed."
-    exit 0
+    return
+}
+
+if ($FailIfOutputExists) {
+    [void](Assert-NoReparsePointsInExistingPathChain `
+        -Path $distDir `
+        -Label "Formal distribution directory")
+    foreach ($formalOutput in @(
+        $packageDir,
+        $zipPath,
+        "$zipPath.sha256",
+        (Join-Path $distDir "update-manifest.json")
+    )) {
+        [void](Assert-NoReparsePointsInExistingPathChain `
+            -Path $formalOutput `
+            -Label "Formal package output")
+        if (Test-Path -LiteralPath $formalOutput) {
+            throw "Formal package output already exists; refusing to overwrite it: $formalOutput"
+        }
+    }
 }
 
 Assert-ChildPath -BasePath $distDir -TargetPath $packageDir
@@ -276,23 +368,36 @@ try {
     Assert-PackageArchive -ArchivePath $temporaryZip -ExpectedHelperPath (Join-Path $stagingDir "speech\windows\vocekit-windows-speech.exe")
 
     try {
-        if ([IO.Directory]::Exists($packageDir)) {
-            [IO.Directory]::Move($packageDir, $backupPackageDir)
-            $backedUpPackage = $true
+        if ($FailIfOutputExists) {
+            Publish-FormalPackagePair `
+                -StagingDirectory $stagingDir `
+                -TemporaryArchive $temporaryZip `
+                -PackageDirectory $packageDir `
+                -ArchivePath $zipPath `
+                -FailureInjection $PublishFailureInjection
+            $createdStage = $false
+            $publishedPackage = $true
+            $publishedZip = $true
+            $publishCommitted = $true
+        } else {
+            if ([IO.Directory]::Exists($packageDir)) {
+                [IO.Directory]::Move($packageDir, $backupPackageDir)
+                $backedUpPackage = $true
+            }
+            if ([IO.File]::Exists($zipPath)) {
+                [IO.File]::Move($zipPath, $backupZipPath)
+                $backedUpZip = $true
+            }
+            [IO.Directory]::Move($stagingDir, $packageDir)
+            $createdStage = $false
+            $publishedPackage = $true
+            if ($PublishFailureInjection -eq "after-directory-move") {
+                throw "Injected package archive publication failure."
+            }
+            [IO.File]::Move($temporaryZip, $zipPath)
+            $publishedZip = $true
+            $publishCommitted = $true
         }
-        if ([IO.File]::Exists($zipPath)) {
-            [IO.File]::Move($zipPath, $backupZipPath)
-            $backedUpZip = $true
-        }
-        [IO.Directory]::Move($stagingDir, $packageDir)
-        $createdStage = $false
-        $publishedPackage = $true
-        if ($PublishFailureInjection -eq "after-directory-move") {
-            throw "Injected package archive publication failure."
-        }
-        [IO.File]::Move($temporaryZip, $zipPath)
-        $publishedZip = $true
-        $publishCommitted = $true
     }
     catch {
         if ($publishedZip -and [IO.File]::Exists($zipPath)) {
@@ -350,7 +455,8 @@ try {
             -ArchivePath $zipPath `
             -OutputPath (Join-Path $distDir "update-manifest.json") `
             -ReleaseBaseUrl $ReleaseBaseUrl `
-            -ReleasePageBaseUrl $ReleasePageBaseUrl
+            -ReleasePageBaseUrl $ReleasePageBaseUrl `
+            -FailIfOutputExists:$FailIfOutputExists
     } else {
         $staleManifestPath = Join-Path $distDir "update-manifest.json"
         if (Test-Path -LiteralPath $staleManifestPath -PathType Leaf) {

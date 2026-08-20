@@ -27,6 +27,8 @@
   <ItemGroup>
     <Compile Include="ProducerConsumerAudioStream.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="$(VoceKitHelperBuildProvenanceSource)"
+             Condition=" '$(VoceKitHelperBuildProvenanceSource)' != '' " />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

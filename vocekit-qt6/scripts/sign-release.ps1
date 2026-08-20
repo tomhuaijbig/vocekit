@@ -7,6 +7,23 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "release-path-safety.ps1")
+. (Join-Path $PSScriptRoot "runtime-helper-provenance.ps1")
+
+function Get-SigningRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $baseFull = [IO.Path]::GetFullPath($BasePath).TrimEnd("\", "/")
+    $pathFull = [IO.Path]::GetFullPath($Path)
+    $prefix = $baseFull + [IO.Path]::DirectorySeparatorChar
+    if (-not $pathFull.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Signing target escaped the runtime directory: $pathFull"
+    }
+    return $pathFull.Substring($prefix.Length).Replace("\", "/")
+}
 
 $projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
@@ -15,6 +32,26 @@ if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
 $runtimeFull = [IO.Path]::GetFullPath($RuntimeDir)
 if (-not (Test-Path -LiteralPath $runtimeFull -PathType Container)) {
     throw "Runtime directory not found: $runtimeFull"
+}
+[void](Assert-NoReparsePointsInExistingPathChain -Path $runtimeFull -Label "Release signing runtime")
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot ".."))
+$runtimeHelperRepositoryState = Get-RuntimeHelperRepositoryState `
+    -RepositoryRoot $repositoryRoot `
+    -ProjectRoot $projectRoot
+if (-not [bool]$runtimeHelperRepositoryState.source_tree_clean) {
+    throw "Formal release signing requires a clean, trusted Git source tree."
+}
+$helperProvenanceVerifier = Join-Path $PSScriptRoot "verify-runtime-helper-build-provenance.ps1"
+$requiredHelperProvenance = @(
+    @{ Name = "vocekit-windows-ocr"; Path = "ocr\windows\vocekit-windows-ocr.exe" },
+    @{ Name = "vocekit-rapidocr"; Path = "ocr\rapidocr\vocekit-rapidocr.exe" },
+    @{ Name = "vocekit-windows-speech"; Path = "speech\windows\vocekit-windows-speech.exe" }
+)
+foreach ($helper in $requiredHelperProvenance) {
+    [void](& $helperProvenanceVerifier `
+        -ExecutablePath (Join-Path $runtimeFull ([string]$helper.Path)) `
+        -ExpectedHelperName ([string]$helper.Name) `
+        -ExpectedSourceCommit ([string]$runtimeHelperRepositoryState.source_commit))
 }
 $thumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
 if ($thumbprint -notmatch '^[0-9A-F]{40,64}$') {
@@ -61,7 +98,7 @@ $targetRelativePaths = @{}
 $unsignedTargets = @()
 $alreadyValidCount = 0
 foreach ($target in $targets) {
-    $relativePath = [IO.Path]::GetRelativePath($runtimeFull, $target.FullName).Replace("\", "/")
+    $relativePath = Get-SigningRelativePath -BasePath $runtimeFull -Path $target.FullName
     $targetRelativePaths[$target.FullName] = $relativePath
     $existingSignature = Get-AuthenticodeSignature -LiteralPath $target.FullName
     if ($existingSignature.Status -eq [System.Management.Automation.SignatureStatus]::Valid) {
@@ -110,4 +147,14 @@ foreach ($target in $targets) {
         throw "Signature verification failed: $($target.FullName)"
     }
 }
+foreach ($helper in $requiredHelperProvenance) {
+    [void](& $helperProvenanceVerifier `
+        -ExecutablePath (Join-Path $runtimeFull ([string]$helper.Path)) `
+        -ExpectedHelperName ([string]$helper.Name) `
+        -ExpectedSourceCommit ([string]$runtimeHelperRepositoryState.source_commit))
+}
+[void](Assert-RuntimeHelperRepositoryStateUnchanged `
+    -Before $runtimeHelperRepositoryState `
+    -RepositoryRoot $repositoryRoot `
+    -ProjectRoot $projectRoot)
 Write-Host "Signed $($unsignedTargets.Count) previously unsigned binaries; preserved $alreadyValidCount valid existing signatures; verified $($targets.Count) binaries."

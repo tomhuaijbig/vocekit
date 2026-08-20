@@ -1,7 +1,9 @@
 param(
     [ValidateSet("Release")]
     [string]$Configuration = "Release",
-    [switch]$DecisionTestMode
+    [switch]$DecisionTestMode,
+    [string]$ExpectedSourceCommit = "",
+    [Nullable[bool]]$ExpectedSourceTreeClean = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -104,7 +106,18 @@ if ($DecisionTestMode) {
     return
 }
 
+Set-StrictMode -Version Latest
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot ".."))
+. (Join-Path $PSScriptRoot "runtime-helper-provenance.ps1")
+$buildState = Get-RuntimeHelperRepositoryState `
+    -RepositoryRoot $repositoryRoot `
+    -ProjectRoot $projectRoot
+Assert-RuntimeHelperExpectedState `
+    -Actual $buildState `
+    -ExpectedSourceCommit $ExpectedSourceCommit `
+    -ExpectedSourceTreeClean $ExpectedSourceTreeClean
+
 $speechProject = Join-Path $projectRoot "helpers\windows_speech\windows_speech.csproj"
 
 if (-not (Test-Path -LiteralPath $speechProject -PathType Leaf)) {
@@ -121,102 +134,171 @@ foreach ($sourceFile in $sourceFiles) {
     }
 }
 
-$toolchain = Resolve-VisualStudioToolchain
-$msbuild = $toolchain.MSBuild
-Remove-WindowsSpeechHelperOutput -ProjectRoot $projectRoot
+$temporaryDirectory = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    ("vocekit-windows-speech-provenance-" + [Guid]::NewGuid().ToString("N"))
+$generatedSource = Join-Path $temporaryDirectory "BuildProvenance.g.cs"
 
-$msbuildLines = @(& $msbuild $speechProject /m /nologo /v:minimal /p:Configuration=$Configuration /p:Platform=x64 2>&1 | ForEach-Object {
-    $line = $_.ToString()
-    Write-Host $line
-    $line
-})
-$msbuildExitCode = $LASTEXITCODE
+Remove-RuntimeHelperBuildOutputs `
+    -ProjectRoot $projectRoot `
+    -HelperNames @("vocekit-windows-speech")
+Reset-RuntimeHelperIntermediateOutputs `
+    -ProjectRoot $projectRoot `
+    -HelperNames @("vocekit-windows-speech")
+$buildCompleted = $false
+$temporaryDirectoryCreated = $false
+try {
+    New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
+    $temporaryDirectoryCreated = $true
+    [void](New-WindowsSpeechBuildProvenanceSource `
+        -Path $generatedSource `
+        -BuildState $buildState)
+    $sourceFiles += $generatedSource
 
-$usedFallback = $false
-$buildDecision = Get-WindowsSpeechBuildDecision -ExitCode $msbuildExitCode -OutputText ($msbuildLines -join [Environment]::NewLine)
-if ($buildDecision -eq "MSBuild") {
-    Write-Host "Windows speech helper build path: MSBuild (.NET Framework 4.8, x64, $Configuration)"
-} else {
-    if ($buildDecision -ne "RoslynFallback") {
-        throw "Windows speech helper MSBuild failed with exit code $msbuildExitCode; Roslyn fallback is forbidden because this was not MSB3644/reference-assemblies-missing."
-    }
-
-    $usedFallback = $true
-    $csc = $toolchain.Csc
-    $framework = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
-    $referencePaths = @(
-        (Join-Path $framework "mscorlib.dll"),
-        (Join-Path $framework "System.dll"),
-        (Join-Path $framework "System.Core.dll"),
-        (Join-Path $framework "System.Web.Extensions.dll")
+    $toolchain = Resolve-VisualStudioToolchain
+    $msbuild = $toolchain.MSBuild
+    $msbuildArguments = @(
+        $speechProject,
+        "/m",
+        "/t:Rebuild",
+        "/nologo",
+        "/v:minimal",
+        "/p:Configuration=$Configuration",
+        "/p:Platform=x64",
+        "/p:VoceKitHelperBuildProvenanceSource=$generatedSource"
     )
-    $speechGac = Join-Path $env:WINDIR "Microsoft.NET\assembly\GAC_MSIL\System.Speech"
-    if (-not (Test-Path -LiteralPath $speechGac -PathType Container)) {
-        throw "Roslyn fallback System.Speech GAC directory was not found: $speechGac"
-    }
-    $speechReference = Get-ChildItem -LiteralPath $speechGac -Recurse -Filter "System.Speech.dll" -File -ErrorAction SilentlyContinue |
-        Sort-Object -Property FullName |
-        Select-Object -First 1 -ExpandProperty FullName
-    if ([string]::IsNullOrWhiteSpace($speechReference) -or -not (Test-Path -LiteralPath $speechReference -PathType Leaf)) {
-        throw "Roslyn fallback System.Speech reference was not found under: $speechGac"
-    }
-    $referencePaths += $speechReference
+    $msbuildLines = @(& $msbuild @msbuildArguments 2>&1 | ForEach-Object {
+        $line = $_.ToString()
+        Write-Host $line
+        $line
+    })
+    $msbuildExitCode = $LASTEXITCODE
 
-    $requiredPaths = @($csc) + $referencePaths
-    foreach ($requiredPath in $requiredPaths) {
-        if ([string]::IsNullOrWhiteSpace($requiredPath) -or -not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
-            throw "Roslyn fallback dependency was not found: $requiredPath"
+    $usedFallback = $false
+    $buildDecision = Get-WindowsSpeechBuildDecision `
+        -ExitCode $msbuildExitCode `
+        -OutputText ($msbuildLines -join [Environment]::NewLine)
+    if ($buildDecision -eq "MSBuild") {
+        Write-Host "Windows speech helper build path: MSBuild (.NET Framework 4.8, x64, $Configuration)"
+    } else {
+        if ($buildDecision -ne "RoslynFallback") {
+            throw "Windows speech helper MSBuild failed with exit code $msbuildExitCode; Roslyn fallback is forbidden because this was not MSB3644/reference-assemblies-missing."
+        }
+
+        $usedFallback = $true
+        $csc = $toolchain.Csc
+        $framework = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
+        $referencePaths = @(
+            (Join-Path $framework "mscorlib.dll"),
+            (Join-Path $framework "System.dll"),
+            (Join-Path $framework "System.Core.dll"),
+            (Join-Path $framework "System.Web.Extensions.dll")
+        )
+        $speechGac = Join-Path $env:WINDIR "Microsoft.NET\assembly\GAC_MSIL\System.Speech"
+        if (-not (Test-Path -LiteralPath $speechGac -PathType Container)) {
+            throw "Roslyn fallback System.Speech GAC directory was not found: $speechGac"
+        }
+        $speechReference = Get-ChildItem -LiteralPath $speechGac -Recurse -Filter "System.Speech.dll" -File -ErrorAction SilentlyContinue |
+            Sort-Object -Property FullName |
+            Select-Object -First 1 -ExpandProperty FullName
+        if ([string]::IsNullOrWhiteSpace($speechReference) -or
+            -not (Test-Path -LiteralPath $speechReference -PathType Leaf)) {
+            throw "Roslyn fallback System.Speech reference was not found under: $speechGac"
+        }
+        $referencePaths += $speechReference
+
+        $requiredPaths = @($csc) + $referencePaths
+        foreach ($requiredPath in $requiredPaths) {
+            if ([string]::IsNullOrWhiteSpace($requiredPath) -or
+                -not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+                throw "Roslyn fallback dependency was not found: $requiredPath"
+            }
+        }
+
+        $outputDirectory = Join-Path $projectRoot "helpers\bin"
+        New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+        $helper = Join-Path $outputDirectory "vocekit-windows-speech.exe"
+        $cscArguments = @(
+            "/nologo",
+            "/noconfig",
+            "/nostdlib+",
+            "/target:exe",
+            "/platform:x64",
+            "/langversion:7.3",
+            "/optimize+",
+            "/deterministic+",
+            "/out:$helper"
+        )
+        foreach ($referencePath in $referencePaths) {
+            $cscArguments += "/reference:$referencePath"
+        }
+        $cscArguments += $sourceFiles
+
+        Write-Host "Windows speech helper build path: VS2022 Roslyn fallback (MSB3644/reference assemblies missing)"
+        & $csc @cscArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Windows speech helper Roslyn fallback failed with exit code $LASTEXITCODE."
         }
     }
 
-    $outputDirectory = Join-Path $projectRoot "helpers\bin"
-    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $helper = Join-Path $outputDirectory "vocekit-windows-speech.exe"
-    $cscArguments = @(
-        "/nologo",
-        "/noconfig",
-        "/nostdlib+",
-        "/target:exe",
-        "/platform:x64",
-        "/langversion:7.3",
-        "/optimize+",
-        "/deterministic+",
-        "/out:$helper"
-    )
-    foreach ($referencePath in $referencePaths) {
-        $cscArguments += "/reference:$referencePath"
+    $helper = Join-Path $projectRoot "helpers\bin\vocekit-windows-speech.exe"
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        throw "Windows speech helper was not generated: $helper"
     }
-    $cscArguments += $sourceFiles
 
-    Write-Host "Windows speech helper build path: VS2022 Roslyn fallback (MSB3644/reference assemblies missing)"
-    & $csc @cscArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Windows speech helper Roslyn fallback failed with exit code $LASTEXITCODE."
+    $selfTestLines = @(& $helper --self-test --run-id build-check)
+    $selfTestExitCode = $LASTEXITCODE
+    if ($selfTestExitCode -ne 0) {
+        throw "Windows speech helper self-test failed with exit code $selfTestExitCode."
+    }
+    if ($selfTestLines.Count -ne 1) {
+        throw "Windows speech helper self-test produced $($selfTestLines.Count) stdout lines; exactly one protocol event was expected."
+    }
+    try {
+        $selfTest = $selfTestLines[0] | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "Windows speech helper self-test did not produce valid JSON: $($selfTestLines[0])"
+    }
+    if ($selfTest.protocolVersion -ne 1 -or
+        $selfTest.runId -ne "build-check" -or
+        $selfTest.type -ne "self-test" -or
+        $selfTest.ok -ne $true) {
+        throw "Windows speech helper self-test returned an invalid or failed protocol event: $($selfTestLines[0])"
+    }
+
+    [void](Assert-RuntimeHelperRepositoryStateUnchanged `
+        -Before $buildState `
+        -RepositoryRoot $repositoryRoot `
+        -ProjectRoot $projectRoot)
+    [void](Get-RuntimeHelperExecutableProvenance `
+        -ExecutablePath $helper `
+        -ExpectedHelperName "vocekit-windows-speech" `
+        -ExpectedSourceCommit ([string]$buildState.source_commit) `
+        -ExpectedSourceTreeClean ([bool]$buildState.source_tree_clean))
+    [void](Assert-RuntimeHelperRepositoryStateUnchanged `
+        -Before $buildState `
+        -RepositoryRoot $repositoryRoot `
+        -ProjectRoot $projectRoot)
+
+    $pathLabel = if ($usedFallback) { "Roslyn fallback" } else { "MSBuild" }
+    $buildCompleted = $true
+    Write-Host "Windows speech helper: $helper"
+    Write-Host "Windows speech helper verified: --self-test and --build-provenance-json ($pathLabel)"
+} finally {
+    $cleanupFailure = $null
+    if ($temporaryDirectoryCreated) {
+        try {
+            Remove-RuntimeHelperTemporaryDirectory -Path $temporaryDirectory
+        } catch {
+            $cleanupFailure = $_
+        }
+    }
+    if (-not $buildCompleted -or $null -ne $cleanupFailure) {
+        Remove-RuntimeHelperBuildOutputs `
+            -ProjectRoot $projectRoot `
+            -HelperNames @("vocekit-windows-speech")
+    }
+    if ($null -ne $cleanupFailure) {
+        throw "Windows speech provenance temporary source cleanup failed: $($cleanupFailure.Exception.Message)"
     }
 }
-
-$helper = Join-Path $projectRoot "helpers\bin\vocekit-windows-speech.exe"
-if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
-    throw "Windows speech helper was not generated: $helper"
-}
-
-$selfTestLines = @(& $helper --self-test --run-id build-check)
-$selfTestExitCode = $LASTEXITCODE
-if ($selfTestExitCode -ne 0) {
-    throw "Windows speech helper self-test failed with exit code $selfTestExitCode."
-}
-if ($selfTestLines.Count -ne 1) {
-    throw "Windows speech helper self-test produced $($selfTestLines.Count) stdout lines; exactly one protocol event was expected."
-}
-try {
-    $selfTest = $selfTestLines[0] | ConvertFrom-Json -ErrorAction Stop
-} catch {
-    throw "Windows speech helper self-test did not produce valid JSON: $($selfTestLines[0])"
-}
-if ($selfTest.protocolVersion -ne 1 -or $selfTest.runId -ne "build-check" -or $selfTest.type -ne "self-test" -or $selfTest.ok -ne $true) {
-    throw "Windows speech helper self-test returned an invalid or failed protocol event: $($selfTestLines[0])"
-}
-
-$pathLabel = if ($usedFallback) { "Roslyn fallback" } else { "MSBuild" }
-Write-Host "Windows speech helper: $helper"
-Write-Host "Windows speech helper verified: --self-test ($pathLabel)"

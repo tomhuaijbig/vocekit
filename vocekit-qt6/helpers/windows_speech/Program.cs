@@ -340,6 +340,10 @@ namespace VoceKit.WindowsSpeech
         private static int Main(string[] args)
         {
             Console.OutputEncoding = new UTF8Encoding(false);
+            if (args.Length == 1 && args[0] == "--build-provenance-json")
+            {
+                return WriteBuildProvenance();
+            }
             string tentativeRunId = FindRunId(args);
             EventWriter writer = new EventWriter(Console.Out, tentativeRunId);
             try
@@ -374,6 +378,19 @@ namespace VoceKit.WindowsSpeech
                 Diagnostic("local failure", exception);
                 return 1;
             }
+        }
+
+        private static int WriteBuildProvenance()
+        {
+            Dictionary<string, object> provenance = new Dictionary<string, object>();
+            provenance["schema_version"] = BuildProvenance.SchemaVersion;
+            provenance["kind"] = BuildProvenance.Kind;
+            provenance["helper_name"] = BuildProvenance.HelperName;
+            provenance["source_commit"] = BuildProvenance.SourceCommit;
+            provenance["source_tree_clean"] = BuildProvenance.SourceTreeClean;
+            provenance["configuration"] = BuildProvenance.Configuration;
+            Console.Out.WriteLine(new JavaScriptSerializer().Serialize(provenance));
+            return 0;
         }
 
         internal static Options ParseArguments(string[] args)

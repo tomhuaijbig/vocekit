@@ -5,6 +5,7 @@ param(
     [string]$ExpectedSignerSubject = "",
     [string]$ExpectedSignerThumbprint = "",
     [switch]$SkipGitState,
+    [switch]$AllowExpectedTagNotCreated,
     [switch]$SkipAuthenticode,
     [switch]$SkipAcceptance,
     [switch]$SkipPublicFeed
@@ -16,6 +17,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot ".."))
 $failures = New-Object Collections.Generic.List[string]
+. (Join-Path $PSScriptRoot "git-trust-safety.ps1")
 
 function Add-Failure {
     param([string]$Message)
@@ -41,6 +43,20 @@ function Assert-HttpsUrl {
     return $uri
 }
 
+function Get-ReleaseRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $baseFull = [IO.Path]::GetFullPath($BasePath).TrimEnd("\", "/") + "\"
+    $pathFull = [IO.Path]::GetFullPath($Path)
+    if (-not $pathFull.StartsWith($baseFull, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside the release runtime: $pathFull"
+    }
+    return $pathFull.Substring($baseFull.Length).Replace("\", "/")
+}
+
 $versionPath = Join-Path $projectRoot "APP_VERSION"
 if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
     Add-Failure "APP_VERSION is missing."
@@ -56,6 +72,16 @@ foreach ($required in @(
     (Join-Path $repositoryRoot ".github\workflows\qt6-ci.yml"),
     (Join-Path $repositoryRoot ".github\workflows\release.yml"),
     (Join-Path $projectRoot "scripts\fetch-rapidocr.ps1"),
+    (Join-Path $projectRoot "scripts\build-provenance.ps1"),
+    (Join-Path $projectRoot "scripts\git-trust-safety.ps1"),
+    (Join-Path $projectRoot "scripts\deployment-safety.ps1"),
+    (Join-Path $projectRoot "scripts\release-path-safety.ps1"),
+    (Join-Path $projectRoot "scripts\runtime-helper-provenance.ps1"),
+    (Join-Path $projectRoot "scripts\verify-embedded-build-provenance.ps1"),
+    (Join-Path $projectRoot "scripts\verify-runtime-helper-build-provenance.ps1"),
+    (Join-Path $projectRoot "scripts\publish-finalized-release.ps1"),
+    (Join-Path $projectRoot "scripts\tests\runtime-helper-provenance-tests.ps1"),
+    (Join-Path $projectRoot "scripts\tests\publish-finalized-release-tests.ps1"),
     (Join-Path $projectRoot "third_party\rapidocr\rapidocr-lock.json"),
     (Join-Path $projectRoot "docs\UPDATES.md"),
     (Join-Path $projectRoot "docs\ACCEPTANCE_MATRIX.md")
@@ -228,10 +254,20 @@ foreach ($workflowPath in @(
     }
     foreach ($requiredScript in @(
         'tests\\scripts\\update-helper-tests\.ps1',
-        'scripts\\tests\\windows-speech-helper-build-tests\.ps1'
+        'scripts\\tests\\windows-speech-helper-build-tests\.ps1',
+        'scripts\\tests\\runtime-helper-provenance-tests\.ps1',
+        'scripts\\tests\\release-candidate-tests\.ps1',
+        'scripts\\tests\\finalize-release-candidate-tests\.ps1',
+        'scripts\\tests\\publish-finalized-release-tests\.ps1'
     )) {
         if ($workflowText -notmatch "(?m)^\s*&\s+\.\\vocekit-qt6\\$requiredScript\s*\r?$") {
             Add-Failure "GitHub workflow must run the release infrastructure regression script: $requiredScript"
+        }
+        $legacyCommandPattern = '(?m)^\s*&\s+powershell\.exe\s+-NoLogo\s+-NoProfile\s+-NonInteractive\s+' +
+            '-ExecutionPolicy\s+Bypass\s+-File\s+\.\\vocekit-qt6\\' + $requiredScript +
+            '\s*\r?\n\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{\s*throw\b'
+        if ($workflowText -notmatch $legacyCommandPattern) {
+            Add-Failure "GitHub workflow must fail closed while running the release regression under Windows PowerShell 5.1: $requiredScript"
         }
     }
 }
@@ -252,45 +288,48 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedTag) -and
     $ExpectedTag -cne "v$version") {
     Add-Failure "Release tag '$ExpectedTag' does not match APP_VERSION '$version'."
 }
+if ($AllowExpectedTagNotCreated -and -not $SkipAcceptance) {
+    Add-Failure "AllowExpectedTagNotCreated is only valid for the pre-acceptance signed-candidate phase."
+}
 
 if (-not $SkipGitState) {
-    Push-Location $repositoryRoot
     try {
-        $status = @(& git status --porcelain --untracked-files=all 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            Add-Failure "Unable to inspect Git status."
-        } elseif ($status.Count -gt 0) {
+        Assert-NoHiddenGitIndexEntries -RepositoryRoot $repositoryRoot
+        $status = Invoke-TrustedGit `
+            -RepositoryRoot $repositoryRoot `
+            -Arguments @("status", "--porcelain=v1", "--untracked-files=all")
+        if (@($status.output).Count -gt 0) {
             Add-Failure "Git worktree is not clean; public release artifacts must come from a committed tree."
         }
-        & git fetch --quiet origin main 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            Add-Failure "Unable to fetch origin/main."
-        } else {
-            $counts = (& git rev-list --left-right --count origin/main...HEAD).Trim() -split '\s+'
-            if ($counts.Count -ne 2 -or $counts[0] -ne "0" -or $counts[1] -ne "0") {
-                Add-Failure "Release commit must exactly match origin/main (behind=$($counts[0]), ahead=$($counts[1]))."
-            }
+
+        [void](Invoke-TrustedGit `
+            -RepositoryRoot $repositoryRoot `
+            -Arguments @("fetch", "--quiet", "origin", "main"))
+        $countResult = Invoke-TrustedGit `
+            -RepositoryRoot $repositoryRoot `
+            -Arguments @("rev-list", "--left-right", "--count", "origin/main...HEAD")
+        $counts = ((@($countResult.output) -join "").Trim()) -split '\s+'
+        if ($counts.Count -ne 2 -or $counts[0] -ne "0" -or $counts[1] -ne "0") {
+            Add-Failure "Release commit must exactly match origin/main (behind=$($counts[0]), ahead=$($counts[1]))."
         }
-        if (-not [string]::IsNullOrWhiteSpace($ExpectedTag)) {
-            $actualTag = (& git describe --tags --exact-match HEAD 2>$null).Trim()
-            if ($LASTEXITCODE -ne 0 -or $actualTag -cne $ExpectedTag) {
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedTag) -and
+            -not $AllowExpectedTagNotCreated) {
+            $tagResult = Invoke-TrustedGit `
+                -RepositoryRoot $repositoryRoot `
+                -Arguments @("describe", "--tags", "--exact-match", "HEAD") `
+                -AllowedExitCodes @(0, 128)
+            $actualTag = (@($tagResult.output) -join "").Trim()
+            if ([int]$tagResult.exit_code -ne 0 -or $actualTag -cne $ExpectedTag) {
                 Add-Failure "HEAD is not tagged exactly as '$ExpectedTag'."
             }
         }
-    } finally {
-        Pop-Location
+    } catch {
+        Add-Failure "Unable to verify trusted Git state: $($_.Exception.Message)"
     }
 }
 
 if (-not $SkipAcceptance) {
-    $matrixPath = Join-Path $projectRoot "docs\ACCEPTANCE_MATRIX.md"
-    if (Test-Path -LiteralPath $matrixPath -PathType Leaf) {
-        $matrix = Get-Content -LiteralPath $matrixPath -Raw -Encoding UTF8
-        $table = ($matrix -split '## 每个单元格的必测动作')[0]
-        if ($table -match '\|\s*(未执行|失败)\s*\|') {
-            Add-Failure "The real-application acceptance matrix still contains 未执行 or 失败 cells."
-        }
-    }
+    Add-Failure "Release-specific acceptance cannot be approved from the static Markdown specification. Pass -SkipAcceptance for source/candidate preflight, then run finalize-existing-release-candidate.ps1 with the frozen candidate and external evidence."
 }
 
 $feedUri = Assert-HttpsUrl -Name "UpdateFeedUrl" -Value $UpdateFeedUrl
@@ -349,7 +388,7 @@ if (-not $SkipAuthenticode) {
         foreach ($binary in Get-ChildItem -LiteralPath $runtimeFull -File -Recurse | Where-Object {
             $_.Extension.ToLowerInvariant() -in @(".exe", ".dll")
         }) {
-            $relativePath = [IO.Path]::GetRelativePath($runtimeFull, $binary.FullName).Replace("\", "/")
+            $relativePath = Get-ReleaseRelativePath -BasePath $runtimeFull -Path $binary.FullName
             $signature = Get-AuthenticodeSignature -LiteralPath $binary.FullName
             if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
                 $unsigned.Add("$relativePath`: $($signature.Status)")
@@ -390,7 +429,7 @@ if (-not $SkipAuthenticode) {
 }
 
 if ($failures.Count -gt 0) {
-    throw "Public release readiness failed:`n- $($failures -join "`n- ")"
+    throw "Release source/runtime preflight failed:`n- $($failures -join "`n- ")"
 }
 
-Write-Host "Public release readiness passed for VoceKit $version."
+Write-Host "Release source/runtime preflight passed for VoceKit $version."

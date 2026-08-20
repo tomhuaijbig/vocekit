@@ -14,6 +14,8 @@
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/base.h>
 
+#include "../runtime_helper_build_provenance.h"
+
 using namespace winrt;
 using namespace Windows::Data::Json;
 using namespace Windows::Globalization;
@@ -73,8 +75,12 @@ OcrEngine createEngine(const JsonObject &request)
 
 }
 
-int main()
+int main(int argc, char **argv)
 {
+    if (argc == 2 && std::string(argv[1]) == "--build-provenance-json") {
+        return writeRuntimeHelperBuildProvenance("vocekit-windows-ocr");
+    }
+
     const auto startedAt = std::chrono::steady_clock::now();
     hstring requestId;
 

@@ -1,11 +1,15 @@
 param(
     [ValidateSet("Release")]
     [string]$Configuration = "Release",
-    [string]$MSBuildPath = ""
+    [string]$MSBuildPath = "",
+    [string]$ExpectedSourceCommit = "",
+    [Nullable[bool]]$ExpectedSourceTreeClean = $null
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "runtime-helper-provenance.ps1")
 
 function Resolve-VisualStudioMsBuild {
     param(
@@ -126,73 +130,131 @@ function Assert-NoDynamicVisualCppRuntime {
     Write-Host "Portable OCR helper runtime check passed: $HelperPath"
 }
 
-$msbuild = Resolve-VisualStudioMsBuild -ExplicitPath $MSBuildPath
-$dumpbin = Resolve-VisualStudioDumpBin -ResolvedMsBuildPath $msbuild
-Write-Host "Visual Studio MSBuild: $msbuild"
-Write-Host "Visual Studio dumpbin: $dumpbin"
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot ".."))
+$buildState = Get-RuntimeHelperRepositoryState `
+    -RepositoryRoot $repositoryRoot `
+    -ProjectRoot $projectRoot
+Assert-RuntimeHelperExpectedState `
+    -Actual $buildState `
+    -ExpectedSourceCommit $ExpectedSourceCommit `
+    -ExpectedSourceTreeClean $ExpectedSourceTreeClean
+$sourceTreeCleanDefine = if ([bool]$buildState.source_tree_clean) { "1" } else { "0" }
+$msbuildProvenanceArguments = @(
+    "/p:VoceKitHelperSourceCommit=$($buildState.source_commit)",
+    "/p:VoceKitHelperSourceTreeClean=$sourceTreeCleanDefine",
+    "/p:VoceKitHelperConfiguration=$Configuration"
+)
+Remove-RuntimeHelperBuildOutputs `
+    -ProjectRoot $projectRoot `
+    -HelperNames @("vocekit-windows-ocr", "vocekit-rapidocr")
+Reset-RuntimeHelperIntermediateOutputs `
+    -ProjectRoot $projectRoot `
+    -HelperNames @("vocekit-windows-ocr", "vocekit-rapidocr")
+$rapidModelsTarget = Reset-RapidOcrModelOutputDirectory `
+    -ProjectRoot $projectRoot
 
-$windowsProject = Join-Path $projectRoot "helpers\windows_ocr\windows_ocr.vcxproj"
-& $msbuild $windowsProject /m /p:Configuration=$Configuration /p:Platform=x64
-if ($LASTEXITCODE -ne 0) {
-    throw "Windows OCR helper build failed with exit code $LASTEXITCODE."
-}
+$buildCompleted = $false
+try {
+    $msbuild = Resolve-VisualStudioMsBuild -ExplicitPath $MSBuildPath
+    $dumpbin = Resolve-VisualStudioDumpBin -ResolvedMsBuildPath $msbuild
+    Write-Host "Visual Studio MSBuild: $msbuild"
+    Write-Host "Visual Studio dumpbin: $dumpbin"
 
-$windowsHelper = Join-Path $projectRoot "helpers\bin\vocekit-windows-ocr.exe"
-if (-not (Test-Path -LiteralPath $windowsHelper)) {
-    throw "Windows OCR helper was not generated: $windowsHelper"
-}
-
-$rapidProjectRoot = Join-Path $projectRoot "Project_RapidOcrOnnx-1.2.2"
-$rapidProject = Join-Path $projectRoot "helpers\rapidocr\rapidocr_helper.vcxproj"
-$rapidModelsSource = Join-Path $rapidProjectRoot "models"
-$rapidLicenseSource = Join-Path $rapidProjectRoot "LICENSE"
-$rapidHelper = Join-Path $projectRoot "helpers\bin\vocekit-rapidocr.exe"
-$rapidModelsTarget = Join-Path $projectRoot "helpers\bin\models"
-$rapidLicenseTarget = Join-Path $projectRoot "helpers\bin\LICENSE-RapidOcrOnnx.txt"
-
-if (-not (Test-Path -LiteralPath $rapidProjectRoot)) {
-    throw "RapidOcrOnnx project was not found: $rapidProjectRoot"
-}
-
-& $msbuild $rapidProject /m /p:Configuration=$Configuration /p:Platform=x64
-if ($LASTEXITCODE -ne 0) {
-    throw "RapidOCR helper build failed with exit code $LASTEXITCODE."
-}
-if (-not (Test-Path -LiteralPath $rapidHelper)) {
-    throw "RapidOCR helper was not generated: $rapidHelper"
-}
-
-Assert-NoDynamicVisualCppRuntime `
-    -HelperPath $windowsHelper `
-    -DumpBinPath $dumpbin
-Assert-NoDynamicVisualCppRuntime `
-    -HelperPath $rapidHelper `
-    -DumpBinPath $dumpbin
-
-$requiredModels = @{
-    "ch_PP-OCRv3_det_infer.onnx" = "3439588C030FAEA393A54515F51E983D8E155B19A2E8ABA7891934C1CF0DE526"
-    "ch_PP-OCRv3_rec_infer.onnx" = "897A3EDEDB38FEE0DAE2C1CCEE38241F37DF202C9509E3ABCA02E9217C5EE615"
-    "ch_ppocr_mobile_v2.0_cls_infer.onnx" = "E47ACEDF663230F8863FF1AB0E64DD2D82B838FCEB5957146DAB185A89D6215C"
-    "ppocr_keys_v1.txt" = "28B2362AD4AB2DC38769AA72FEB535E3A9DDB3FD2A7585A05920E6393B1DC7F7"
-}
-New-Item -ItemType Directory -Path $rapidModelsTarget -Force | Out-Null
-foreach ($modelName in $requiredModels.Keys) {
-    $source = Join-Path $rapidModelsSource $modelName
-    if (-not (Test-Path -LiteralPath $source)) {
-        throw "RapidOCR model was not found: $source"
+    $windowsProject = Join-Path $projectRoot "helpers\windows_ocr\windows_ocr.vcxproj"
+    & $msbuild $windowsProject /m /t:Rebuild /nologo /v:minimal /p:Configuration=$Configuration /p:Platform=x64 @msbuildProvenanceArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows OCR helper build failed with exit code $LASTEXITCODE."
     }
-    $actualHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
-    if ($actualHash -ne $requiredModels[$modelName]) {
-        throw "RapidOCR model checksum mismatch: $modelName"
+
+    $windowsHelper = Join-Path $projectRoot "helpers\bin\vocekit-windows-ocr.exe"
+    if (-not (Test-Path -LiteralPath $windowsHelper)) {
+        throw "Windows OCR helper was not generated: $windowsHelper"
     }
-    Copy-Item -LiteralPath $source -Destination (Join-Path $rapidModelsTarget $modelName) -Force
-}
 
-if (-not (Test-Path -LiteralPath $rapidLicenseSource)) {
-    throw "RapidOcrOnnx license was not found: $rapidLicenseSource"
-}
-Copy-Item -LiteralPath $rapidLicenseSource -Destination $rapidLicenseTarget -Force
+    $rapidProjectRoot = Join-Path $projectRoot "Project_RapidOcrOnnx-1.2.2"
+    $rapidProject = Join-Path $projectRoot "helpers\rapidocr\rapidocr_helper.vcxproj"
+    $rapidModelsSource = Join-Path $rapidProjectRoot "models"
+    $rapidLicenseSource = Join-Path $rapidProjectRoot "LICENSE"
+    $rapidHelper = Join-Path $projectRoot "helpers\bin\vocekit-rapidocr.exe"
+    $rapidModelsTarget = Join-Path $projectRoot "helpers\bin\models"
+    $rapidLicenseTarget = Join-Path $projectRoot "helpers\bin\LICENSE-RapidOcrOnnx.txt"
 
-Write-Host "Windows OCR helper: $windowsHelper"
-Write-Host "RapidOCR helper: $rapidHelper"
-Write-Host "RapidOCR models: $rapidModelsTarget"
+    if (-not (Test-Path -LiteralPath $rapidProjectRoot)) {
+        throw "RapidOcrOnnx project was not found: $rapidProjectRoot"
+    }
+
+    & $msbuild $rapidProject /m /t:Rebuild /nologo /v:minimal /p:Configuration=$Configuration /p:Platform=x64 @msbuildProvenanceArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "RapidOCR helper build failed with exit code $LASTEXITCODE."
+    }
+    if (-not (Test-Path -LiteralPath $rapidHelper)) {
+        throw "RapidOCR helper was not generated: $rapidHelper"
+    }
+
+    Assert-NoDynamicVisualCppRuntime `
+        -HelperPath $windowsHelper `
+        -DumpBinPath $dumpbin
+    Assert-NoDynamicVisualCppRuntime `
+        -HelperPath $rapidHelper `
+        -DumpBinPath $dumpbin
+
+    $requiredModels = @{
+        "ch_PP-OCRv3_det_infer.onnx" = "3439588C030FAEA393A54515F51E983D8E155B19A2E8ABA7891934C1CF0DE526"
+        "ch_PP-OCRv3_rec_infer.onnx" = "897A3EDEDB38FEE0DAE2C1CCEE38241F37DF202C9509E3ABCA02E9217C5EE615"
+        "ch_ppocr_mobile_v2.0_cls_infer.onnx" = "E47ACEDF663230F8863FF1AB0E64DD2D82B838FCEB5957146DAB185A89D6215C"
+        "ppocr_keys_v1.txt" = "28B2362AD4AB2DC38769AA72FEB535E3A9DDB3FD2A7585A05920E6393B1DC7F7"
+    }
+    foreach ($modelName in $requiredModels.Keys) {
+        $source = Join-Path $rapidModelsSource $modelName
+        if (-not (Test-Path -LiteralPath $source)) {
+            throw "RapidOCR model was not found: $source"
+        }
+        $actualHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        if ($actualHash -ne $requiredModels[$modelName]) {
+            throw "RapidOCR model checksum mismatch: $modelName"
+        }
+        Copy-Item -LiteralPath $source -Destination (Join-Path $rapidModelsTarget $modelName) -Force
+    }
+    Assert-RapidOcrModelOutputDirectory `
+        -ModelsPath $rapidModelsTarget `
+        -ExpectedSha256 $requiredModels
+
+    if (-not (Test-Path -LiteralPath $rapidLicenseSource)) {
+        throw "RapidOcrOnnx license was not found: $rapidLicenseSource"
+    }
+    Copy-Item -LiteralPath $rapidLicenseSource -Destination $rapidLicenseTarget -Force
+
+    [void](Assert-RuntimeHelperRepositoryStateUnchanged `
+        -Before $buildState `
+        -RepositoryRoot $repositoryRoot `
+        -ProjectRoot $projectRoot)
+    [void](Get-RuntimeHelperExecutableProvenance `
+        -ExecutablePath $windowsHelper `
+        -ExpectedHelperName "vocekit-windows-ocr" `
+        -ExpectedSourceCommit ([string]$buildState.source_commit) `
+        -ExpectedSourceTreeClean ([bool]$buildState.source_tree_clean))
+    [void](Get-RuntimeHelperExecutableProvenance `
+        -ExecutablePath $rapidHelper `
+        -ExpectedHelperName "vocekit-rapidocr" `
+        -ExpectedSourceCommit ([string]$buildState.source_commit) `
+        -ExpectedSourceTreeClean ([bool]$buildState.source_tree_clean))
+    [void](Assert-RuntimeHelperRepositoryStateUnchanged `
+        -Before $buildState `
+        -RepositoryRoot $repositoryRoot `
+        -ProjectRoot $projectRoot)
+
+    $buildCompleted = $true
+    Write-Host "Windows OCR helper: $windowsHelper"
+    Write-Host "RapidOCR helper: $rapidHelper"
+    Write-Host "RapidOCR models: $rapidModelsTarget"
+} finally {
+    if (-not $buildCompleted) {
+        Remove-RuntimeHelperBuildOutputs `
+            -ProjectRoot $projectRoot `
+            -HelperNames @("vocekit-windows-ocr", "vocekit-rapidocr")
+        Remove-RuntimeHelperAllowedDirectory `
+            -ProjectRoot $projectRoot `
+            -RelativePath "helpers\bin\models" `
+            -AllowedRelativePaths @("helpers\bin\models")
+    }
+}
